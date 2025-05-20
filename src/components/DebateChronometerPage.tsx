@@ -1,16 +1,15 @@
-
 import React, { useState, useCallback, useMemo } from 'react';
 import ChronometerHeader from './ChronometerHeader';
 import CategoryCard from './CategoryCard';
-import { CategoryConfig, GlobalSettings, TimerInstance, TimerUpdatePayload } from '@/types/chronometer';
+import { CategoryConfig, GlobalSettings, TimerInstance, TimerUpdatePayload, PositionType } from '@/types/chronometer';
 import { Button } from '@/components/ui/button';
-import { Settings, ListChecks } from 'lucide-react';
+import { Settings, ListChecks, Trash2, PlusCircle } from 'lucide-react';
 import ConfigurationModal from './ConfigurationModal';
 import SummaryModal from './SummaryModal';
 
 // Initial Data
 const initialCategoriesData: CategoryConfig[] = [
-  { id: 'intro', name: 'Introducción', timeFavor: 4 * 60, timeContra: 4 * 60 },
+  { id: 'intro', name: 'Introducción', timeFavor: 4 * 60, timeContra: 4 * 60, timeExamenCruzadoFavor: 1.5 * 60, timeExamenCruzadoContra: 1.5 * 60 },
   { id: 'ref1', name: 'Refutación 1', timeFavor: 5 * 60, timeContra: 5 * 60 },
   { id: 'ref2', name: 'Refutación 2', timeFavor: 5 * 60, timeContra: 5 * 60 },
   { id: 'conclu', name: 'Conclusión', timeFavor: 3 * 60, timeContra: 3 * 60 },
@@ -34,18 +33,42 @@ const DebateChronometerPage: React.FC = () => {
 
   const handleTimerUpdate = useCallback((payload: TimerUpdatePayload) => {
     setTimerStates(prev => {
-      const [categoryId, positionId] = payload.id.split('_') as [string, 'favor' | 'contra'];
-      const category = categories.find(c => c.id === categoryId);
-      if (!category) return prev;
+      const parts = payload.id.split('_');
+      const categoryId = parts[0];
+      // Handles 'favor', 'contra', 'examen_favor', 'examen_contra'
+      const positionSuffix = parts.slice(1).join('_') as PositionType; 
       
-      const initialTime = positionId === 'favor' ? category.timeFavor : category.timeContra;
+      const category = categories.find(c => c.id === categoryId);
+      if (!category) {
+        console.warn(`Category not found for timer update: ${payload.id}`);
+        return prev;
+      }
+      
+      let initialTime: number;
+      switch (positionSuffix) {
+        case 'favor':
+          initialTime = category.timeFavor;
+          break;
+        case 'contra':
+          initialTime = category.timeContra;
+          break;
+        case 'examen_favor':
+          initialTime = category.timeExamenCruzadoFavor ?? 0;
+          break;
+        case 'examen_contra':
+          initialTime = category.timeExamenCruzadoContra ?? 0;
+          break;
+        default:
+          console.warn(`Could not determine initial time for ${payload.id}`);
+          initialTime = 0;
+      }
 
       return {
         ...prev,
         [payload.id]: { 
           ...payload, 
           categoryId, 
-          positionId, 
+          positionId: positionSuffix, 
           initialTime 
         }
       };
@@ -55,16 +78,31 @@ const DebateChronometerPage: React.FC = () => {
   const handleSettingsSave = (newCategories: CategoryConfig[], newGlobalSettings: GlobalSettings) => {
     setCategories(newCategories);
     setGlobalSettings(newGlobalSettings);
+    // Potentially reset or update timerStates if category times changed drastically or categories were removed
+    // For simplicity now, we're not clearing timerStates, but this could be a refinement.
   };
 
   const summaryData = useMemo(() => {
-    return categories.map(cat => ({
-      categoryName: cat.name,
-      timers: [
-        timerStates[`${cat.id}_favor`],
-        timerStates[`${cat.id}_contra`],
-      ].filter(Boolean) // Filter out potentially undefined initial states
-    }));
+    return categories.map(cat => {
+      const catTimers: TimerInstance[] = [];
+      
+      // Favor and Contra are always present conceptually
+      if (timerStates[`${cat.id}_favor`]) catTimers.push(timerStates[`${cat.id}_favor`]);
+      if (timerStates[`${cat.id}_contra`]) catTimers.push(timerStates[`${cat.id}_contra`]);
+      
+      // Examen Cruzado timers (only if they exist in timerStates, implying they were initialized)
+      if (cat.timeExamenCruzadoFavor !== undefined && timerStates[`${cat.id}_examen_favor`]) {
+        catTimers.push(timerStates[`${cat.id}_examen_favor`]);
+      }
+      if (cat.timeExamenCruzadoContra !== undefined && timerStates[`${cat.id}_examen_contra`]) {
+        catTimers.push(timerStates[`${cat.id}_examen_contra`]);
+      }
+      
+      return {
+        categoryName: cat.name,
+        timers: catTimers.filter(Boolean)
+      };
+    });
   }, [categories, timerStates]);
 
 
@@ -73,6 +111,7 @@ const DebateChronometerPage: React.FC = () => {
       <div className="container mx-auto">
         <ChronometerHeader logoUrl={globalSettings.logoUrl} h1Text={globalSettings.h1Text} />
 
+        {/* This main section will be replaced by the new navigation and central display */}
         <main className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
           {categories.map((category) => (
             <CategoryCard

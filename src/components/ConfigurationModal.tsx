@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -6,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CategoryConfig, GlobalSettings } from '@/types/chronometer';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { PlusCircle, Trash2 } from 'lucide-react';
 
 interface ConfigurationModalProps {
   isOpen: boolean;
@@ -26,20 +26,26 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
   const [settings, setSettings] = useState<GlobalSettings>(currentSettings);
 
   useEffect(() => {
-    setCategories(JSON.parse(JSON.stringify(currentCategories))); // Deep copy
-    setSettings(JSON.parse(JSON.stringify(currentSettings))); // Deep copy
+    // Deep copy to avoid mutating parent state directly
+    setCategories(JSON.parse(JSON.stringify(currentCategories))); 
+    setSettings(JSON.parse(JSON.stringify(currentSettings)));
   }, [isOpen, currentCategories, currentSettings]);
 
   const handleCategoryChange = (index: number, field: keyof CategoryConfig, value: string | number) => {
     const newCategories = [...categories];
+    const categoryToUpdate = newCategories[index];
+
     if (field === 'name') {
-      newCategories[index][field] = value as string;
-    } else {
-      // Ensure times are numbers and non-negative, convert minutes to seconds
+      categoryToUpdate[field] = value as string;
+    } else if (field === 'timeFavor' || field === 'timeContra' || field === 'timeExamenCruzadoFavor' || field === 'timeExamenCruzadoContra') {
       const numValue = Number(value);
       if (!isNaN(numValue)) {
-        newCategories[index][field as 'timeFavor' | 'timeContra'] = Math.max(0, numValue) * 60;
+        // Store as seconds (value from input is minutes)
+        categoryToUpdate[field] = Math.max(0, numValue) * 60;
       }
+    } else {
+      // For other fields like 'id', or future string fields.
+      // For now, we only edit name and times.
     }
     setCategories(newCategories);
   };
@@ -54,8 +60,33 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
     });
   };
 
+  const handleAddCategory = () => {
+    setCategories(prev => [
+      ...prev,
+      {
+        id: `new_cat_${Date.now()}`,
+        name: 'Nueva Categoría',
+        timeFavor: 3 * 60, // Default to 3 minutes
+        timeContra: 3 * 60, // Default to 3 minutes
+        // Examen Cruzado times can be undefined by default or set to 0
+        // timeExamenCruzadoFavor: 0,
+        // timeExamenCruzadoContra: 0,
+      }
+    ]);
+  };
+
+  const handleDeleteCategory = (index: number) => {
+    setCategories(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSave = () => {
-    onSave(categories, settings);
+    // Ensure Examen Cruzado fields are numbers or undefined
+    const processedCategories = categories.map(cat => ({
+      ...cat,
+      timeExamenCruzadoFavor: cat.timeExamenCruzadoFavor !== undefined ? Number(cat.timeExamenCruzadoFavor) : undefined,
+      timeExamenCruzadoContra: cat.timeExamenCruzadoContra !== undefined ? Number(cat.timeExamenCruzadoContra) : undefined,
+    }));
+    onSave(processedCategories, settings);
     onClose();
   };
 
@@ -87,9 +118,22 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
             <Input id="negativeWarning" type="number" value={settings.negativeWarningThreshold} onChange={(e) => handleSettingChange('negativeWarningThreshold', e.target.value)} className="col-span-3" />
           </div>
 
-          <h3 className="font-semibold text-lg mt-4 mb-2">Categorías</h3>
+          <div className="flex justify-between items-center mt-6 mb-2">
+            <h3 className="font-semibold text-lg">Categorías</h3>
+            <Button variant="outline" size="sm" onClick={handleAddCategory}>
+              <PlusCircle className="mr-2 h-4 w-4" /> Añadir Categoría
+            </Button>
+          </div>
           {categories.map((cat, index) => (
-            <div key={cat.id} className="border p-3 rounded-md space-y-2">
+            <div key={cat.id || index} className="border p-3 rounded-md space-y-3 relative">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="absolute top-2 right-2 text-destructive hover:text-destructive/80"
+                onClick={() => handleDeleteCategory(index)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor={`catName-${index}`} className="text-right col-span-1">Nombre</Label>
                 <Input id={`catName-${index}`} value={cat.name} onChange={(e) => handleCategoryChange(index, 'name', e.target.value)} className="col-span-3" />
@@ -102,6 +146,34 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                 <Label htmlFor={`timeContra-${index}`} className="text-right col-span-1">Tiempo Contra (min)</Label>
                 <Input id={`timeContra-${index}`} type="number" value={cat.timeContra / 60} onChange={(e) => handleCategoryChange(index, 'timeContra', e.target.value)} className="col-span-3" />
               </div>
+              
+              {/* Examen Cruzado fields - shown if category is 'Introducción' or they are already defined */}
+              {(cat.id.startsWith('intro') || cat.timeExamenCruzadoFavor !== undefined || cat.timeExamenCruzadoContra !== undefined) && (
+                <>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor={`timeExamenFavor-${index}`} className="text-right col-span-1">Examen Favor (min)</Label>
+                    <Input 
+                      id={`timeExamenFavor-${index}`} 
+                      type="number" 
+                      value={(cat.timeExamenCruzadoFavor ?? 0) / 60} 
+                      onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoFavor', e.target.value)} 
+                      className="col-span-3" 
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor={`timeExamenContra-${index}`} className="text-right col-span-1">Examen Contra (min)</Label>
+                    <Input 
+                      id={`timeExamenContra-${index}`} 
+                      type="number" 
+                      value={(cat.timeExamenCruzadoContra ?? 0) / 60} 
+                      onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoContra', e.target.value)} 
+                      className="col-span-3"
+                      placeholder="0"
+                    />
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
