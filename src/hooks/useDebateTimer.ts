@@ -3,90 +3,115 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { TimerUpdatePayload } from '@/types/chronometer';
 
 interface UseDebateTimerProps {
-  initialTime: number; // in seconds
+  initialTime: number;
   timerId: string;
   onUpdate?: (payload: TimerUpdatePayload) => void;
+  disabled?: boolean;
 }
 
-export const useDebateTimer = ({ initialTime, timerId, onUpdate }: UseDebateTimerProps) => {
+export const useDebateTimer = ({ 
+  initialTime, 
+  timerId, 
+  onUpdate,
+  disabled = false
+}: UseDebateTimerProps) => {
   const [time, setTime] = useState(initialTime);
   const [isRunning, setIsRunning] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const lastUpdateTimeRef = useRef<number>(Date.now());
 
-  const updateParent = useCallback(() => {
+  // Report timer state to parent via callback
+  const reportUpdate = useCallback(() => {
     if (onUpdate) {
-      onUpdate({ id: timerId, currentTime: time, isRunning });
+      onUpdate({
+        id: timerId,
+        currentTime: time,
+        isRunning
+      });
     }
-  }, [time, isRunning, timerId, onUpdate]);
+  }, [onUpdate, timerId, time, isRunning]);
 
+  // Set a new time value (useful when config changes)
+  const setNewTime = useCallback((newTime: number) => {
+    setTime(newTime);
+    setIsRunning(false);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    lastUpdateTimeRef.current = Date.now();
+  }, []);
+
+  // Start or pause the timer
+  const startPause = useCallback(() => {
+    if (disabled) return;
+    
+    setIsRunning(prev => !prev);
+    lastUpdateTimeRef.current = Date.now(); // Reset time reference when toggling
+  }, [disabled]);
+
+  // Reset the timer to its initial value
+  const reset = useCallback(() => {
+    if (disabled) return;
+    
+    setTime(initialTime);
+    setIsRunning(false);
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    lastUpdateTimeRef.current = Date.now();
+  }, [initialTime, disabled]);
+
+  // Main timer logic
   useEffect(() => {
-    // Initial update
-    updateParent();
-  }, [updateParent]);
+    // Don't run the timer if disabled
+    if (disabled) {
+      if (isRunning) {
+        setIsRunning(false);
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+      }
+      return;
+    }
 
-
-  useEffect(() => {
     if (isRunning) {
-      intervalRef.current = setInterval(() => {
-        setTime((prevTime) => {
-          const newTime = prevTime - 1;
-          if (onUpdate) {
-            onUpdate({ id: timerId, currentTime: newTime, isRunning: true });
-          }
+      // Create an interval that updates more frequently
+      timerRef.current = window.setInterval(() => {
+        const now = Date.now();
+        const elapsed = (now - lastUpdateTimeRef.current) / 1000; // seconds
+        lastUpdateTimeRef.current = now;
+        
+        setTime(prevTime => {
+          const newTime = prevTime - elapsed;
           return newTime;
         });
-      }, 1000);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-      // Update parent on pause
-      if (onUpdate) {
-        onUpdate({ id: timerId, currentTime: time, isRunning: false });
-      }
+      }, 50); // Update more frequently for smoother display
+    } else if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
+
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
-  }, [isRunning, timerId, onUpdate, time]); // Added time to dependencies of outer useEffect
+  }, [isRunning, disabled]);
 
-  const startPause = useCallback(() => {
-    setIsRunning((prev) => {
-      const newIsRunning = !prev;
-      if (onUpdate) {
-        // Ensure 'time' in this callback is the current state value
-        // by not relying on 'time' from closure if it's stale.
-        // However, setTime has updated 'time' before this runs.
-        onUpdate({ id: timerId, currentTime: time, isRunning: newIsRunning });
-      }
-      return newIsRunning;
-    });
-  }, [timerId, onUpdate, time]); // Added time to dependencies
-
-  const reset = useCallback(() => {
-    setIsRunning(false);
-    setTime(initialTime);
-    if (onUpdate) {
-      onUpdate({ id: timerId, currentTime: initialTime, isRunning: false });
-    }
-  }, [initialTime, timerId, onUpdate]);
-
-  const setNewTime = useCallback((newInitialTime: number) => {
-    setTime(newInitialTime);
-    setIsRunning(false); // Usually reset also stops the timer
-    if (onUpdate) {
-      onUpdate({ id: timerId, currentTime: newInitialTime, isRunning: false });
-    }
-  }, [timerId, onUpdate]);
-
+  // Report initial state and changes
+  useEffect(() => {
+    reportUpdate();
+  }, [time, isRunning, reportUpdate]);
 
   return {
     time,
     isRunning,
     startPause,
     reset,
-    setNewTime, // For configuration changes
+    setNewTime
   };
 };

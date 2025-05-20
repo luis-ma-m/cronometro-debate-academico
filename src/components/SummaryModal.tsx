@@ -32,15 +32,28 @@ const SummaryModal: React.FC<SummaryModalProps> = ({ isOpen, onClose, summaryDat
           {summaryData.map((categoryData, index) => (
             <div key={index} className="mb-4 p-3 border rounded-md">
               <h3 className="font-semibold text-lg mb-2">{categoryData.categoryName}</h3>
-              {categoryData.timers.map((timer) => (
-                <div key={timer.id} className="flex justify-between items-center text-sm mb-1">
-                  <span>{timer.positionId === 'favor' ? 'A favor' : 'En contra'}:</span>
-                  <span className={`font-medium ${timer.isRunning ? 'text-green-600' : 'text-red-600'}`}>
-                    {formatTime(timer.currentTime)} ({timer.isRunning ? 'Corriendo' : 'Pausado'})
-                  </span>
-                </div>
-              ))}
-              {categoryData.timers.length === 0 && <p className="text-xs text-muted-foreground">Temporizadores no iniciados para esta categoría.</p>}
+              {categoryData.timers.map((timer) => {
+                // Get position name based on timer position ID
+                let positionName = "";
+                if (timer.positionId === 'favor') positionName = "A favor";
+                else if (timer.positionId === 'contra') positionName = "En contra";
+                else if (timer.positionId === 'examen_favor') positionName = "Examen Cruzado (A favor)";
+                else if (timer.positionId === 'examen_contra') positionName = "Examen Cruzado (En contra)";
+                
+                return (
+                  <div key={timer.id} className="flex justify-between items-center text-sm mb-1">
+                    <span>{positionName}:</span>
+                    <span className={`font-medium ${timer.currentTime < 0 ? 'text-red-600' : ''}`}>
+                      {formatTime(timer.currentTime)}
+                    </span>
+                  </div>
+                );
+              })}
+              {categoryData.timers.length === 0 && 
+                <p className="text-xs text-muted-foreground">
+                  Temporizadores no iniciados para esta categoría.
+                </p>
+              }
             </div>
           ))}
         </div>

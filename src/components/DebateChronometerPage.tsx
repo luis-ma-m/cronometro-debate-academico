@@ -1,9 +1,11 @@
+
 import React, { useState, useCallback, useMemo } from 'react';
 import ChronometerHeader from './ChronometerHeader';
-import CategoryCard from './CategoryCard';
+import CategoryNavigation from './CategoryNavigation';
+import CategoryDetail from './CategoryDetail';
 import { CategoryConfig, GlobalSettings, TimerInstance, TimerUpdatePayload, PositionType } from '@/types/chronometer';
 import { Button } from '@/components/ui/button';
-import { Settings, ListChecks, Trash2, PlusCircle } from 'lucide-react';
+import { Settings, ListChecks } from 'lucide-react';
 import ConfigurationModal from './ConfigurationModal';
 import SummaryModal from './SummaryModal';
 
@@ -27,6 +29,7 @@ const DebateChronometerPage: React.FC = () => {
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>(initialGlobalSettings);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   // State to hold all timer snapshots
   const [timerStates, setTimerStates] = useState<Record<string, TimerInstance>>({});
@@ -78,8 +81,11 @@ const DebateChronometerPage: React.FC = () => {
   const handleSettingsSave = (newCategories: CategoryConfig[], newGlobalSettings: GlobalSettings) => {
     setCategories(newCategories);
     setGlobalSettings(newGlobalSettings);
-    // Potentially reset or update timerStates if category times changed drastically or categories were removed
-    // For simplicity now, we're not clearing timerStates, but this could be a refinement.
+    
+    // If the active category was removed, reset to null
+    if (activeCategory && !newCategories.find(cat => cat.id === activeCategory)) {
+      setActiveCategory(null);
+    }
   };
 
   const summaryData = useMemo(() => {
@@ -105,22 +111,35 @@ const DebateChronometerPage: React.FC = () => {
     });
   }, [categories, timerStates]);
 
+  const activeCategoryData = useMemo(() => {
+    return categories.find(cat => cat.id === activeCategory) || null;
+  }, [categories, activeCategory]);
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-8">
       <div className="container mx-auto">
         <ChronometerHeader logoUrl={globalSettings.logoUrl} h1Text={globalSettings.h1Text} />
 
-        {/* This main section will be replaced by the new navigation and central display */}
-        <main className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-8">
-          {categories.map((category) => (
-            <CategoryCard
-              key={category.id}
-              category={category}
+        {/* Category Navigation */}
+        <CategoryNavigation 
+          categories={categories}
+          activeCategory={activeCategory}
+          onSelectCategory={setActiveCategory}
+        />
+
+        {/* Main Display Area */}
+        <main className="mt-6">
+          {activeCategory ? (
+            <CategoryDetail 
+              category={activeCategoryData!}
               settings={globalSettings}
               onTimerUpdate={handleTimerUpdate}
             />
-          ))}
+          ) : (
+            <div className="text-center p-12 bg-muted/30 rounded-lg">
+              <p className="text-lg">Selecciona una categoría para comenzar</p>
+            </div>
+          )}
         </main>
 
         <footer className="mt-12 flex justify-center md:justify-end space-x-4 py-4">
