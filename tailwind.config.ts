@@ -1,3 +1,4 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
@@ -61,7 +62,12 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
-				}
+				},
+        // Custom chronometer colors
+        'soft-green': 'hsl(var(--soft-green-hsl))',
+        'soft-red': 'hsl(var(--soft-red-hsl))',
+        'strong-red': 'hsl(var(--strong-red-hsl))',
+        'pale-yellow': 'hsl(var(--pale-yellow-hsl))',
 			},
 			borderRadius: {
 				lg: 'var(--radius)',
