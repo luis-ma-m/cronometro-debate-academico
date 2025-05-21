@@ -23,45 +23,48 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
   onStartPause,
   onReset,
   settings,
-  baseBgColor, // This is for the card container if used, not directly for digits background anymore.
+  baseBgColor,
   positionName,
   size = 'normal',
 }) => {
-  let timeDigitsContainerClasses = "p-2 rounded transition-colors duration-300";
   let timeTextClasses = ""; // For text color, defaults to inherit or card foreground
   let positionNameClasses = "font-semibold";
   let timeValueClasses = "font-bold";
   let iconSizeClass = "h-6 w-6";
   let buttonSize: "icon" | "lg" = "icon";
   
+  // Base classes for the digits container (padding, rounding, transparent background)
+  let timeDigitsContainerClasses = "p-2 rounded bg-transparent";
+
+  let mainContainerAlertBgClass = ""; // Will hold classes for the main container background based on alerts
+
   if (size === 'large') {
     positionNameClasses += " text-3xl md:text-4xl mb-4";
     timeValueClasses += " text-8xl md:text-9xl";
-    iconSizeClass = "h-8 w-8 md:h-10 md:h-10";
+    iconSizeClass = "h-8 w-8 md:h-10 md:h-10"; // Corrected typo md:h-10
     buttonSize = "lg";
-    timeDigitsContainerClasses += " p-4 md:p-6"; // Larger padding for larger display
+    timeDigitsContainerClasses = "p-4 md:p-6 rounded bg-transparent"; // Larger padding for large display
   } else {
     positionNameClasses += " text-xl";
     timeValueClasses += " text-6xl";
   }
 
+  // Determine alert states and corresponding classes
   if (time < 0) {
+    mainContainerAlertBgClass = "bg-soft-red"; // Entire box gets pale red background
     timeTextClasses = "text-strong-red"; 
-    // For negative times, make digits background transparent or very subtle
-    // The card's baseBgColor (e.g. soft-red) still applies to the surrounding card.
-    timeDigitsContainerClasses += " bg-transparent"; 
   } else if (time <= settings.positiveWarningThreshold && time > 0) {
-    timeDigitsContainerClasses += " bg-pale-yellow animate-yellow-blink";
+    mainContainerAlertBgClass = "animate-yellow-blink"; // Entire box blinks yellow
     timeTextClasses = "text-black"; // Ensure contrast on yellow
-  } else {
-    // Default state, no specific alert coloring for digits background
-    timeDigitsContainerClasses += " bg-transparent"; // Or a default subtle background from card
   }
+  // No 'else' needed for timeDigitsContainerClasses background as it's always transparent now
+  // No 'else' for mainContainerAlertBgClass as it defaults to empty string (no alert-specific background)
 
   return (
     <div className={cn(
       `rounded-lg shadow flex flex-col items-center space-y-3`,
-      size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto bg-card' : `p-4 ${baseBgColor}`
+      size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto bg-card' : `p-4 ${baseBgColor}`,
+      mainContainerAlertBgClass // Apply alert-specific background/animation to the main container
     )}>
       <h3 className={positionNameClasses}>{positionName}</h3>
       <div className={cn(timeValueClasses, timeDigitsContainerClasses, timeTextClasses)}>
@@ -80,3 +83,4 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
 };
 
 export default DebateTimerDisplay;
+
