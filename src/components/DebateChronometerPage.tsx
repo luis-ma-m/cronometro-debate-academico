@@ -1,8 +1,9 @@
-
 import React, { useState, useCallback, useMemo } from 'react';
 import ChronometerHeader from './ChronometerHeader';
 import CategoryNavigation from './CategoryNavigation';
 import CategoryDetail from './CategoryDetail';
+import PositionNavigation from './PositionNavigation';
+import ExamenCruzadoNavigation from './ExamenCruzadoNavigation';
 import { CategoryConfig, GlobalSettings, TimerInstance, TimerUpdatePayload, PositionType } from '@/types/chronometer';
 import { Button } from '@/components/ui/button';
 import { Settings, ListChecks } from 'lucide-react';
@@ -29,7 +30,8 @@ const DebateChronometerPage: React.FC = () => {
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings>(initialGlobalSettings);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
+  const [activePositionType, setActivePositionType] = useState<PositionType | null>(null);
 
   // State to hold all timer snapshots
   const [timerStates, setTimerStates] = useState<Record<string, TimerInstance>>({});
@@ -78,13 +80,23 @@ const DebateChronometerPage: React.FC = () => {
     });
   }, [categories]);
   
+  const handleSelectCategory = (categoryId: string) => {
+    setActiveCategoryId(categoryId);
+    setActivePositionType(null);
+  };
+
   const handleSettingsSave = (newCategories: CategoryConfig[], newGlobalSettings: GlobalSettings) => {
     setCategories(newCategories);
     setGlobalSettings(newGlobalSettings);
     
-    // If the active category was removed, reset to null
-    if (activeCategory && !newCategories.find(cat => cat.id === activeCategory)) {
-      setActiveCategory(null);
+    if (activeCategoryId && !newCategories.find(cat => cat.id === activeCategoryId)) {
+      setActiveCategoryId(null);
+      setActivePositionType(null);
+    }
+    const currentActiveCat = newCategories.find(cat => cat.id === activeCategoryId);
+    if (currentActiveCat && currentActiveCat.timeExamenCruzadoFavor === undefined && 
+        (activePositionType === 'examen_favor' || activePositionType === 'examen_contra')) {
+        setActivePositionType(null);
     }
   };
 
@@ -112,32 +124,52 @@ const DebateChronometerPage: React.FC = () => {
   }, [categories, timerStates]);
 
   const activeCategoryData = useMemo(() => {
-    return categories.find(cat => cat.id === activeCategory) || null;
-  }, [categories, activeCategory]);
+    return categories.find(cat => cat.id === activeCategoryId) || null;
+  }, [categories, activeCategoryId]);
 
   return (
     <div className="min-h-screen bg-background text-foreground p-4 md:p-8">
       <div className="container mx-auto">
         <ChronometerHeader logoUrl={globalSettings.logoUrl} h1Text={globalSettings.h1Text} />
 
-        {/* Category Navigation */}
         <CategoryNavigation 
           categories={categories}
-          activeCategory={activeCategory}
-          onSelectCategory={setActiveCategory}
+          activeCategory={activeCategoryId}
+          onSelectCategory={handleSelectCategory}
         />
 
-        {/* Main Display Area */}
+        {activeCategoryData && (
+          <div className="mt-2 mb-4">
+            <PositionNavigation
+              activeCategory={activeCategoryData}
+              activePositionType={activePositionType}
+              onSelectPosition={setActivePositionType}
+            />
+            {activeCategoryData.timeExamenCruzadoFavor !== undefined && activeCategoryData.timeExamenCruzadoContra !== undefined && (
+              <ExamenCruzadoNavigation
+                activeCategory={activeCategoryData}
+                activePositionType={activePositionType}
+                onSelectPosition={setActivePositionType}
+              />
+            )}
+          </div>
+        )}
+
         <main className="mt-6">
-          {activeCategory ? (
+          {activeCategoryData && activePositionType ? (
             <CategoryDetail 
-              category={activeCategoryData!}
+              category={activeCategoryData}
               settings={globalSettings}
               onTimerUpdate={handleTimerUpdate}
+              activePositionType={activePositionType}
             />
+          ) : activeCategoryData && !activePositionType ? (
+            <div className="text-center p-12 bg-card/80 rounded-lg shadow">
+              <p className="text-lg text-card-foreground">Selecciona un turno para visualizar el cronómetro.</p>
+            </div>
           ) : (
-            <div className="text-center p-12 bg-muted/30 rounded-lg">
-              <p className="text-lg">Selecciona una categoría para comenzar</p>
+            <div className="text-center p-12 bg-card/80 rounded-lg shadow">
+              <p className="text-lg text-card-foreground">Selecciona una categoría para comenzar.</p>
             </div>
           )}
         </main>

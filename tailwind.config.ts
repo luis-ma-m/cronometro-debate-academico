@@ -66,7 +66,7 @@ export default {
         // Custom chronometer colors
         'soft-green': 'hsl(var(--soft-green-hsl))',
         'soft-red': 'hsl(var(--soft-red-hsl))',
-        'strong-red': 'hsl(var(--strong-red-hsl))',
+        'strong-red': 'hsl(var(--strong-red-hsl))', // Used for text-strong-red
         'pale-yellow': 'hsl(var(--pale-yellow-hsl))',
 			},
 			borderRadius: {
@@ -90,11 +90,16 @@ export default {
 					to: {
 						height: '0'
 					}
-				}
+				},
+        'yellow-blink': {
+          '0%, 100%': { backgroundColor: 'hsl(var(--pale-yellow-hsl))', opacity: '1' },
+          '50%': { backgroundColor: 'hsl(var(--pale-yellow-hsl))', opacity: '0.5' },
+        }
 			},
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
-				'accordion-up': 'accordion-up 0.2s ease-out'
+				'accordion-up': 'accordion-up 0.2s ease-out',
+        'yellow-blink': 'yellow-blink 1.2s infinite ease-in-out',
 			}
 		}
 	},
