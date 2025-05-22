@@ -31,21 +31,24 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
     setSettings(JSON.parse(JSON.stringify(currentSettings)));
   }, [isOpen, currentCategories, currentSettings]);
 
-  const handleCategoryChange = (index: number, field: keyof CategoryConfig, value: string | number) => {
+  const handleCategoryChange = (index: number, field: keyof CategoryConfig | 'timePerSpeaker', value: string | number) => {
     const newCategories = [...categories];
     const categoryToUpdate = newCategories[index];
 
     if (field === 'name') {
       categoryToUpdate[field] = value as string;
-    } else if (field === 'timeFavor' || field === 'timeContra' || field === 'timeExamenCruzadoFavor' || field === 'timeExamenCruzadoContra') {
+    } else if (field === 'timePerSpeaker') { // Unified time input for Favor/Contra
       const numValue = Number(value);
       if (!isNaN(numValue)) {
-        // Store as seconds (value from input is minutes)
+        const timeInSeconds = Math.max(0, numValue) * 60;
+        categoryToUpdate.timeFavor = timeInSeconds;
+        categoryToUpdate.timeContra = timeInSeconds;
+      }
+    } else if (field === 'timeExamenCruzadoFavor' || field === 'timeExamenCruzadoContra') {
+      const numValue = Number(value);
+      if (!isNaN(numValue)) {
         categoryToUpdate[field] = Math.max(0, numValue) * 60;
       }
-    } else {
-      // For other fields like 'id', or future string fields.
-      // For now, we only edit name and times.
     }
     setCategories(newCategories);
   };
@@ -67,7 +70,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
         id: `new_cat_${Date.now()}`,
         name: 'Nueva Categoría',
         timeFavor: 3 * 60, // Default to 3 minutes
-        timeContra: 3 * 60, // Default to 3 minutes
+        timeContra: 3 * 60, // Default to 3 minutes (synced with timeFavor)
         // Examen Cruzado times can be undefined by default or set to 0
         // timeExamenCruzadoFavor: 0,
         // timeExamenCruzadoContra: 0,
@@ -138,13 +141,17 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                 <Label htmlFor={`catName-${index}`} className="text-right col-span-1">Nombre</Label>
                 <Input id={`catName-${index}`} value={cat.name} onChange={(e) => handleCategoryChange(index, 'name', e.target.value)} className="col-span-3" />
               </div>
+              
+              {/* Combined time input for Favor and Contra */}
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor={`timeFavor-${index}`} className="text-right col-span-1">Tiempo Favor (min)</Label>
-                <Input id={`timeFavor-${index}`} type="number" value={cat.timeFavor / 60} onChange={(e) => handleCategoryChange(index, 'timeFavor', e.target.value)} className="col-span-3" />
-              </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor={`timeContra-${index}`} className="text-right col-span-1">Tiempo Contra (min)</Label>
-                <Input id={`timeContra-${index}`} type="number" value={cat.timeContra / 60} onChange={(e) => handleCategoryChange(index, 'timeContra', e.target.value)} className="col-span-3" />
+                <Label htmlFor={`timePerSpeaker-${index}`} className="text-right col-span-1">Tiempo por Orador (min)</Label>
+                <Input 
+                  id={`timePerSpeaker-${index}`} 
+                  type="number" 
+                  value={cat.timeFavor / 60} // Assuming timeFavor and timeContra are kept in sync
+                  onChange={(e) => handleCategoryChange(index, 'timePerSpeaker', e.target.value)} 
+                  className="col-span-3" 
+                />
               </div>
               
               {/* Examen Cruzado fields - shown if category is 'Introducción' or they are already defined */}

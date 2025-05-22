@@ -27,7 +27,7 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
   positionName,
   size = 'normal',
 }) => {
-  let timeTextClasses = ""; // For text color, defaults to inherit or card foreground
+  let timeTextClasses = ""; 
   let positionNameClasses = "font-semibold";
   let timeValueClasses = "font-bold";
   let iconSizeClass = "h-6 w-6";
@@ -48,22 +48,25 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
   }
 
   // Determine alert states and corresponding classes
-  if (time < settings.negativeWarningThreshold) { // More negative than the threshold
-    mainContainerAlertBgClass = "bg-soft-red"; 
-    timeTextClasses = "text-strong-red"; 
-  } else if (time < 0) { // Negative, but not past the negativeWarningThreshold
-    mainContainerAlertBgClass = "bg-soft-red";
-    // timeTextClasses remains default (not strong red)
-  } else if (time <= settings.positiveWarningThreshold && time > 0) { // Positive warning
+  if (time <= settings.positiveWarningThreshold && time > 0) { // Positive warning
     mainContainerAlertBgClass = "animate-yellow-blink"; 
-    timeTextClasses = "text-black"; 
+    timeTextClasses = "text-black"; // Ensure contrast on yellow background
+  } else if (time < 0) { // Any negative time
+    timeTextClasses = "text-strong-red"; // Text turns red for any negative time
+    if (time < settings.negativeWarningThreshold) { // Negative time AND past the threshold
+      mainContainerAlertBgClass = "bg-soft-red"; // Box turns pale red
+    }
+    // If time is negative but not past negativeWarningThreshold, 
+    // mainContainerAlertBgClass remains empty, so box stays default color (white/card).
+    // timeTextClasses is already set to text-strong-red.
   }
-  // If none of the above, mainContainerAlertBgClass and timeTextClasses remain empty.
+  // If none of the above (e.g. time is positive and above positiveWarningThreshold), 
+  // mainContainerAlertBgClass and timeTextClasses remain empty (default appearance).
 
   return (
     <div className={cn(
       `rounded-lg shadow flex flex-col items-center space-y-3`,
-      // Apply base background if no alert background is set
+      // Apply base background if no alert background is set, otherwise apply alert background
       mainContainerAlertBgClass 
         ? mainContainerAlertBgClass 
         : (size === 'large' ? 'bg-card' : baseBgColor),
@@ -87,3 +90,4 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
 };
 
 export default DebateTimerDisplay;
+
