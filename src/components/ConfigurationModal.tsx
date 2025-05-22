@@ -125,7 +125,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
             </Button>
           </div>
           {categories.map((cat, index) => (
-            <div key={cat.id || index} className="border p-3 rounded-md space-y-3 relative">
+            <div key={cat.id || index} className="border p-3 pr-12 rounded-md space-y-3 relative">
               <Button 
                 variant="ghost" 
                 size="icon" 

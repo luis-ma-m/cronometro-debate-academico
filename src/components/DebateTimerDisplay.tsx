@@ -33,38 +33,42 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
   let iconSizeClass = "h-6 w-6";
   let buttonSize: "icon" | "lg" = "icon";
   
-  // Base classes for the digits container (padding, rounding, transparent background)
   let timeDigitsContainerClasses = "p-2 rounded bg-transparent";
-
-  let mainContainerAlertBgClass = ""; // Will hold classes for the main container background based on alerts
+  let mainContainerAlertBgClass = ""; 
 
   if (size === 'large') {
     positionNameClasses += " text-3xl md:text-4xl mb-4";
     timeValueClasses += " text-8xl md:text-9xl";
-    iconSizeClass = "h-8 w-8 md:h-10 md:h-10"; // Corrected typo md:h-10
+    iconSizeClass = "h-8 w-8 md:h-10 md:h-10";
     buttonSize = "lg";
-    timeDigitsContainerClasses = "p-4 md:p-6 rounded bg-transparent"; // Larger padding for large display
+    timeDigitsContainerClasses = "p-4 md:p-6 rounded bg-transparent";
   } else {
     positionNameClasses += " text-xl";
     timeValueClasses += " text-6xl";
   }
 
   // Determine alert states and corresponding classes
-  if (time < 0) {
-    mainContainerAlertBgClass = "bg-soft-red"; // Entire box gets pale red background
+  if (time < settings.negativeWarningThreshold) { // More negative than the threshold
+    mainContainerAlertBgClass = "bg-soft-red"; 
     timeTextClasses = "text-strong-red"; 
-  } else if (time <= settings.positiveWarningThreshold && time > 0) {
-    mainContainerAlertBgClass = "animate-yellow-blink"; // Entire box blinks yellow
-    timeTextClasses = "text-black"; // Ensure contrast on yellow
+  } else if (time < 0) { // Negative, but not past the negativeWarningThreshold
+    mainContainerAlertBgClass = "bg-soft-red";
+    // timeTextClasses remains default (not strong red)
+  } else if (time <= settings.positiveWarningThreshold && time > 0) { // Positive warning
+    mainContainerAlertBgClass = "animate-yellow-blink"; 
+    timeTextClasses = "text-black"; 
   }
-  // No 'else' needed for timeDigitsContainerClasses background as it's always transparent now
-  // No 'else' for mainContainerAlertBgClass as it defaults to empty string (no alert-specific background)
+  // If none of the above, mainContainerAlertBgClass and timeTextClasses remain empty.
 
   return (
     <div className={cn(
       `rounded-lg shadow flex flex-col items-center space-y-3`,
-      size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto bg-card' : `p-4 ${baseBgColor}`,
-      mainContainerAlertBgClass // Apply alert-specific background/animation to the main container
+      // Apply base background if no alert background is set
+      mainContainerAlertBgClass 
+        ? mainContainerAlertBgClass 
+        : (size === 'large' ? 'bg-card' : baseBgColor),
+      // Paddings are applied regardless of alert state
+      size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto' : 'p-4'
     )}>
       <h3 className={positionNameClasses}>{positionName}</h3>
       <div className={cn(timeValueClasses, timeDigitsContainerClasses, timeTextClasses)}>
@@ -83,4 +87,3 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
 };
 
 export default DebateTimerDisplay;
-
