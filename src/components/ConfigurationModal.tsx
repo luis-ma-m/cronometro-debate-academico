@@ -257,7 +257,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
         <DialogHeader>
           <DialogTitle>Configuración del Cronómetro</DialogTitle>
           <DialogDescription>
-            Ajusta los tiempos, nombres de categorías y configuraciones globales del cronómetro.
+            Ajusta los tiempos, nombres de los turnos y configuraciones globales del cronómetro.
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[70vh] p-1">
@@ -281,9 +281,9 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
           </div>
 
           <div className="flex justify-between items-center mt-6 mb-2">
-            <h3 className="font-semibold text-lg">Categorías</h3>
+            <h3 className="font-semibold text-lg">Turnos</h3>
             <Button variant="outline" size="sm" onClick={handleAddCategory}>
-              <PlusCircle className="mr-2 h-4 w-4" /> Añadir Categoría
+              <PlusCircle className="mr-2 h-4 w-4" /> Añadir turno
             </Button>
           </div>
           <div className="space-y-3">
