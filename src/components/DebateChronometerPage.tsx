@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useMemo } from 'react';
 import ChronometerHeader from './ChronometerHeader';
 import CategoryNavigation from './CategoryNavigation';
@@ -11,31 +12,32 @@ import ConfigurationModal from './ConfigurationModal';
 import SummaryModal from './SummaryModal';
 import { v4 as uuidv4 } from 'uuid';
 
+const DEFAULT_LOGO_URL = 'https://aduma.es/wp-content/uploads/2021/09/Logo-ADUMA-Completo.png';
+
 // Initial Data with new types and fields
 const initialCategoriesData: CategoryConfig[] = [
   { 
     id: 'intro', name: 'Introducción', 
     timeFavor: 4 * 60, timeContra: 4 * 60, 
     type: 'introduccion', 
-    hasExamenCruzado: true, // Example: Introductions can have their special Examen Cruzado
-    // These are the old examen cruzado times, keep them if relevant to the debate format
+    hasExamenCruzado: true,
     timeExamenCruzadoFavor: 1.5 * 60, 
     timeExamenCruzadoContra: 1.5 * 60,
-    examenCruzadoIntroduccionUsed: false, // Initialize this
+    examenCruzadoIntroduccionUsed: false,
   },
   { 
     id: 'ref1', name: 'Refutación 1', 
     timeFavor: 5 * 60, timeContra: 5 * 60, 
     type: 'refutacion', 
-    minQuestions: 2, // Example
-    questions: Array.from({ length: 2 }, () => ({ id: uuidv4(), answered: false })) // Initialize with actual questions
+    minQuestions: 2,
+    questions: Array.from({ length: 2 }, () => ({ id: uuidv4(), answered: false }))
   },
   { 
     id: 'ref2', name: 'Refutación 2', 
     timeFavor: 5 * 60, timeContra: 5 * 60, 
     type: 'refutacion', 
-    minQuestions: 1, // Example
-    questions: Array.from({ length: 1 }, () => ({ id: uuidv4(), answered: false })) // Initialize
+    minQuestions: 1,
+    questions: Array.from({ length: 1 }, () => ({ id: uuidv4(), answered: false }))
   },
   { 
     id: 'conclu', name: 'Conclusión', 
@@ -45,10 +47,10 @@ const initialCategoriesData: CategoryConfig[] = [
 ];
 
 const initialGlobalSettings: GlobalSettings = {
-  logoUrl: '/lovable-uploads/a017ffca-3321-45a7-8261-0d6e2de79a5b.png',
+  logoUrl: DEFAULT_LOGO_URL, // Updated logo URL
   h1Text: 'Debate Académico',
-  positiveWarningThreshold: 30,
-  negativeWarningThreshold: -30,
+  positiveWarningThreshold: 10, // Updated
+  negativeWarningThreshold: -10, // Updated
 };
 
 const DebateChronometerPage: React.FC = () => {
@@ -60,7 +62,7 @@ const DebateChronometerPage: React.FC = () => {
       if (baseCat.type === 'introduccion') {
         baseCat.hasExamenCruzado = typeof baseCat.hasExamenCruzado === 'boolean' ? baseCat.hasExamenCruzado : false;
         baseCat.examenCruzadoIntroduccionUsed = typeof baseCat.examenCruzadoIntroduccionUsed === 'boolean' ? baseCat.examenCruzadoIntroduccionUsed : false;
-        if (!baseCat.hasExamenCruzado) { // If not allowed, times should not exist
+        if (!baseCat.hasExamenCruzado) {
             delete baseCat.timeExamenCruzadoFavor;
             delete baseCat.timeExamenCruzadoContra;
         }
@@ -94,7 +96,6 @@ const DebateChronometerPage: React.FC = () => {
     setTimerStates(prev => {
       const parts = payload.id.split('_');
       const categoryId = parts[0];
-      // Reconstruct positionSuffix more robustly for multi-word suffixes like 'examen_favor'
       const positionSuffix = parts.slice(1).join('_') as PositionType; 
       
       const category = categories.find(c => c.id === categoryId);
@@ -111,23 +112,14 @@ const DebateChronometerPage: React.FC = () => {
         case 'contra':
           initialTime = category.timeContra;
           break;
-        case 'examen_favor': // This is the Examen Cruzado for Introduccion (Favor side)
+        case 'examen_favor':
           initialTime = (category.type === 'introduccion' && category.hasExamenCruzado) ? category.timeExamenCruzadoFavor ?? 0 : 0;
           break;
-        case 'examen_contra': // This is the Examen Cruzado for Introduccion (Contra side)
+        case 'examen_contra':
           initialTime = (category.type === 'introduccion' && category.hasExamenCruzado) ? category.timeExamenCruzadoContra ?? 0 : 0;
           break;
-        case 'examen_introduccion': // This is the SPECIAL Examen Cruzado for 'introduccion' type
-                                    // Its time is derived from main speech time (timeFavor/timeContra)
-                                    // This timer needs to be explicitly created and managed if it's separate.
-                                    // For now, assuming it might use timeFavor or timeContra if not separately defined.
-                                    // The prompt says "same duration", so it would be category.timeFavor or category.timeContra
-                                    // This part requires further clarification on how 'examen_introduccion' timer is distinct from 'examen_favor'/'examen_contra' for introduction.
-                                    // For now, let's assume it's covered by the above or needs a dedicated timer in CategoryCard.
-                                    // If 'examen_introduccion' refers to the favor/contra speech itself when examen is active, no new timer.
-                                    // If it's a THIRD timer for 'introduccion', it needs definition.
-                                    // Let's assume it's not a separate timer instance for now beyond the togglable ones.
-          initialTime = 0; // Placeholder - this type needs full implementation if it's a distinct timer.
+        case 'examen_introduccion':
+          initialTime = 0; 
           console.warn(`'examen_introduccion' timer type initial time determination needs review.`);
           break;
         default:
@@ -149,7 +141,7 @@ const DebateChronometerPage: React.FC = () => {
   
   const handleSelectCategory = (categoryId: string) => {
     setActiveCategoryId(categoryId);
-    setActivePositionType(null); // Reset position when category changes
+    setActivePositionType(null); 
   };
 
   const handleSettingsSave = (newCategories: CategoryConfig[], newGlobalSettings: GlobalSettings) => {
@@ -187,7 +179,6 @@ const DebateChronometerPage: React.FC = () => {
     setCategories(processedNewCategories);
     setGlobalSettings(newGlobalSettings);
     
-    // Logic to reset active selections if they become invalid after save
     if (activeCategoryId && !processedNewCategories.find(cat => cat.id === activeCategoryId)) {
       setActiveCategoryId(null);
       setActivePositionType(null);
@@ -195,7 +186,6 @@ const DebateChronometerPage: React.FC = () => {
         const currentActiveCat = processedNewCategories.find(cat => cat.id === activeCategoryId);
         if (currentActiveCat) {
             let positionStillValid = true;
-            // Check if the current activePositionType is still valid for the category
             if (activePositionType === 'examen_favor' || activePositionType === 'examen_contra') {
                 if (currentActiveCat.type !== 'introduccion' || !currentActiveCat.hasExamenCruzado) {
                     positionStillValid = false;
@@ -205,13 +195,11 @@ const DebateChronometerPage: React.FC = () => {
                     positionStillValid = false;
                 }
             }
-            // Add checks for 'examen_introduccion' if it becomes a distinct selectable position
-            // e.g., if (activePositionType === 'examen_introduccion' && (currentActiveCat.type !== 'introduccion' || !currentActiveCat.hasExamenCruzado)) { ... }
             
             if (!positionStillValid) {
                 setActivePositionType(null);
             }
-        } else { // Active category somehow disappeared
+        } else { 
              setActiveCategoryId(null);
              setActivePositionType(null);
         }
@@ -233,7 +221,6 @@ const DebateChronometerPage: React.FC = () => {
       if (timerStates[`${cat.id}_favor`]) catTimers.push(timerStates[`${cat.id}_favor`]);
       if (timerStates[`${cat.id}_contra`]) catTimers.push(timerStates[`${cat.id}_contra`]);
       
-      // For 'introduccion' with Examen Cruzado enabled
       if (cat.type === 'introduccion' && cat.hasExamenCruzado) {
         if (cat.timeExamenCruzadoFavor !== undefined && timerStates[`${cat.id}_examen_favor`]) {
           catTimers.push(timerStates[`${cat.id}_examen_favor`]);
@@ -242,18 +229,15 @@ const DebateChronometerPage: React.FC = () => {
           catTimers.push(timerStates[`${cat.id}_examen_contra`]);
         }
       }
-      // Add logic for a dedicated 'examen_introduccion' timer if it's tracked and distinct
-      // if (cat.type === 'introduccion' && cat.hasExamenCruzado && timerStates[`${cat.id}_examen_introduccion`]) {
-      //   catTimers.push(timerStates[`${cat.id}_examen_introduccion`]);
-      // }
       
       return {
+        categoryId: cat.id, // Added categoryId
         categoryName: cat.name,
         categoryType: cat.type,
         questions: cat.type === 'refutacion' ? cat.questions : undefined,
         minQuestions: cat.type === 'refutacion' ? cat.minQuestions : undefined,
         hasExamenCruzado: cat.type === 'introduccion' ? cat.hasExamenCruzado : undefined,
-        examenCruzadoIntroduccionUsed: cat.type === 'introduccion' ? cat.examenCruzadoIntroduccionUsed : undefined, // For summary display
+        examenCruzadoIntroduccionUsed: cat.type === 'introduccion' ? cat.examenCruzadoIntroduccionUsed : undefined,
         timers: catTimers.filter(Boolean)
       };
     });
@@ -281,13 +265,9 @@ const DebateChronometerPage: React.FC = () => {
               activePositionType={activePositionType}
               onSelectPosition={setActivePositionType}
             />
-            {/* This ExamenCruzadoNavigation is for the specific cross-examination timers 
-                that are part of an 'introduccion' category if `hasExamenCruzado` is true
-                AND if times are defined for them.
-            */}
             {activeCategoryData.type === 'introduccion' && activeCategoryData.hasExamenCruzado &&
              (activeCategoryData.timeExamenCruzadoFavor !== undefined || activeCategoryData.timeExamenCruzadoContra !== undefined) && (
-              <ExamenCruzadoNavigation // This component might need renaming or repurposing
+              <ExamenCruzadoNavigation
                 activeCategory={activeCategoryData}
                 activePositionType={activePositionType}
                 onSelectPosition={setActivePositionType}
@@ -340,9 +320,11 @@ const DebateChronometerPage: React.FC = () => {
         isOpen={isSummaryModalOpen}
         onClose={() => setIsSummaryModalOpen(false)}
         summaryData={summaryData}
+        allCategories={categories} // Pass allCategories
       />
     </div>
   );
 };
 
 export default DebateChronometerPage;
+
