@@ -27,7 +27,10 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+
+    /* Add these so TS picks up the installed @types packages */
+    "types": ["vite/client", "node", "estree", "json-schema"]
   },
   "include": ["src"]
 }
