@@ -1,25 +1,24 @@
 
 import React from 'react';
-import { CategoryConfig, GlobalSettings, TimerUpdatePayload, PositionType } from '@/types/chronometer';
+import { CategoryConfig, GlobalSettings, TimerUpdatePayload, PositionType, Question } from '@/types/chronometer';
 import CategoryCard from './CategoryCard';
 
 interface CategoryDetailProps {
   category: CategoryConfig;
   settings: GlobalSettings;
   onTimerUpdate: (payload: TimerUpdatePayload) => void;
-  activePositionType: PositionType | null; // New prop
+  activePositionType: PositionType | null;
+  onQuestionUpdate: (categoryId: string, updatedQuestions: Question[]) => void; // New prop
 }
 
 const CategoryDetail: React.FC<CategoryDetailProps> = ({ 
   category, 
   settings, 
   onTimerUpdate, 
-  activePositionType 
+  activePositionType,
+  onQuestionUpdate 
 }) => {
-  // CategoryDetail now expects activePositionType to be set if it's rendered for main display
   if (!category || !activePositionType) {
-    // This case should ideally be handled by DebateChronometerPage's logic
-    // (i.e., not rendering CategoryDetail if activePositionType is null)
     return <div className="text-center p-8 text-muted-foreground">Selecciona un turno.</div>;
   }
 
@@ -29,7 +28,8 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({
         category={category} 
         settings={settings} 
         onTimerUpdate={onTimerUpdate}
-        displayOnlyPosition={activePositionType} // Pass the active position
+        displayOnlyPosition={activePositionType}
+        onQuestionUpdate={onQuestionUpdate} // Pass down
       />
     </div>
   );
