@@ -25,8 +25,8 @@ const CategoryNavigation: React.FC<CategoryNavigationProps> = ({
               className={cn(
                 "px-4 py-2 rounded-md text-sm font-medium transition-colors",
                 activeCategory === category.id
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary hover:bg-secondary/80"
+                  ? "bg-primary text-primary-foreground" // Active: primary solid fill
+                  : "bg-muted text-muted-foreground hover:bg-muted/80" // Inactive: light muted fill
               )}
             >
               {category.name}

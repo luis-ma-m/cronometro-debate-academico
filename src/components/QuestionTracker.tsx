@@ -2,9 +2,10 @@
 import React from 'react';
 import { Question } from '@/types/chronometer';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, Circle, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react'; // AlertCircle and Circle are now in StyledQuestionIcon
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import StyledQuestionIcon from './StyledQuestionIcon'; // Import the new component
 
 interface QuestionTrackerProps {
   questions: Question[];
@@ -12,7 +13,7 @@ interface QuestionTrackerProps {
   onAddQuestion: () => void;
   maxQuestions?: number;
   position: 'favor' | 'contra';
-  minQuestions?: number; // Add minQuestions prop
+  minQuestions?: number;
 }
 
 const MAX_QUESTIONS_DEFAULT = 15;
@@ -23,12 +24,12 @@ const QuestionTracker: React.FC<QuestionTrackerProps> = ({
   onAddQuestion,
   maxQuestions = MAX_QUESTIONS_DEFAULT,
   position,
-  minQuestions = 0, // Default to 0 if not provided
+  minQuestions = 0,
 }) => {
   const canAddQuestion = questions.length < maxQuestions;
 
   return (
-    <div className="flex flex-col items-center space-y-2 p-2 rounded-lg">
+    <div className="flex flex-col items-center space-y-2 p-2 rounded-lg"> {/* Ensured no specific background for transparency */}
       <p className="text-sm font-medium text-card-foreground">
         Preguntas: {questions.filter(q => q.answered).length} / {questions.length}
       </p>
@@ -37,40 +38,43 @@ const QuestionTracker: React.FC<QuestionTrackerProps> = ({
         position === 'contra' ? 'flex-row-reverse space-x-reverse' : ''
       )}>
         <AnimatePresence>
-          {questions.map((question, index) => (
-            <motion.div
-              key={question.id}
-              initial={{ opacity: 0, scale: 0.5 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.5 }}
-              transition={{ duration: 0.2 }}
-            >
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onQuestionToggle(question.id)}
-                aria-pressed={question.answered}
-                aria-label={index < minQuestions ? "Pregunta mínima" : `Pregunta ${index + 1} ${question.answered ? 'respondida' : 'no respondida'}`}
-                className={cn(
-                  "rounded-full h-6 w-6 p-0.5 transition-opacity duration-300",
-                  question.answered ? "opacity-25" : "opacity-100",
-                  "hover:bg-muted/50"
-                )}
+          {questions.map((question, index) => {
+            const isFilled = question.answered;
+            const isMinQuestionContext = index < minQuestions; // Is this question part of the initial minimum set?
+            const isAlertUnfilled = isMinQuestionContext && !isFilled; // Is it an unfilled minimum question (triggers alert style)?
+
+            return (
+              <motion.div
+                key={question.id}
+                initial={{ opacity: 0, scale: 0.5 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.5 }}
+                transition={{ duration: 0.2 }}
               >
-                {index < minQuestions ? (
-                  <AlertCircle className={cn(
-                    "h-4 w-4",
-                    question.answered ? "text-muted-foreground" : "fill-yellow-400 text-background"
-                  )} />
-                ) : (
-                  <Circle className={cn(
-                    "h-4 w-4",
-                    question.answered ? "fill-current text-muted-foreground" : "text-primary"
-                  )} />
-                )}
-              </Button>
-            </motion.div>
-          ))}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onQuestionToggle(question.id)}
+                  aria-pressed={isFilled}
+                  aria-label={
+                    isAlertUnfilled 
+                      ? "Pregunta mínima" 
+                      : `Pregunta ${index + 1} ${isFilled ? 'respondida' : 'no respondida'}`
+                  }
+                  className={cn(
+                    "rounded-full h-6 w-6 p-0.5 transition-opacity duration-300",
+                    isFilled ? "opacity-25" : "opacity-100",
+                    "hover:bg-muted/50"
+                  )}
+                >
+                  <StyledQuestionIcon 
+                    isFilled={isFilled} 
+                    isAlertUnfilled={isAlertUnfilled} 
+                  />
+                </Button>
+              </motion.div>
+            );
+          })}
         </AnimatePresence>
         {canAddQuestion && (
           <Button
