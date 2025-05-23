@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useMemo } from 'react';
 import ChronometerHeader from './ChronometerHeader';
 import CategoryNavigation from './CategoryNavigation';
@@ -47,10 +46,10 @@ const initialCategoriesData: CategoryConfig[] = [
 ];
 
 const initialGlobalSettings: GlobalSettings = {
-  logoUrl: DEFAULT_LOGO_URL, // Updated logo URL
+  logoUrl: DEFAULT_LOGO_URL,
   h1Text: 'Debate Académico',
-  positiveWarningThreshold: 10, // Updated
-  negativeWarningThreshold: -10, // Updated
+  positiveWarningThreshold: 10, // Updated to 10
+  negativeWarningThreshold: -10, // Updated to -10
 };
 
 const DebateChronometerPage: React.FC = () => {
@@ -327,4 +326,3 @@ const DebateChronometerPage: React.FC = () => {
 };
 
 export default DebateChronometerPage;
-

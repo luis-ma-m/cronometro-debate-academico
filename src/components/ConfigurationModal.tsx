@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusCircle, Trash2 } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
+import { v4 as uuidv4 } from 'uuid';
 
 interface ConfigurationModalProps {
   isOpen: boolean;
@@ -66,6 +67,62 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
     setSettings(JSON.parse(JSON.stringify(currentSettings)));
   }, [isOpen, currentCategories, currentSettings]);
 
+  const syncMinQuestions = (categoryId: string, min: number) => {
+    setCategories(prev => {
+      return prev.map(cat => {
+        if (cat.id === categoryId && cat.type === 'refutacion') {
+          const questions = Array.isArray(cat.questions) ? [...cat.questions] : [];
+          
+          // If we need more questions, add them
+          if (questions.length < min) {
+            const questionsToAdd = min - questions.length;
+            for (let i = 0; i < questionsToAdd; i++) {
+              questions.push({ id: uuidv4(), answered: false });
+            }
+          } 
+          // If we need fewer questions, remove unanswered ones from the end
+          else if (questions.length > min) {
+            // Count how many answered questions we have
+            const answeredCount = questions.filter(q => q.answered).length;
+            
+            // If we have more answered questions than min, keep them all
+            if (answeredCount >= min) {
+              // Keep all answered questions
+              return {
+                ...cat,
+                minQuestions: min,
+                questions: questions.filter(q => q.answered)
+              };
+            }
+            
+            // Otherwise, keep min questions, prioritizing answered ones
+            const answeredQuestions = questions.filter(q => q.answered);
+            const unansweredQuestions = questions.filter(q => !q.answered);
+            
+            const unansweredToKeep = min - answeredQuestions.length;
+            const newQuestions = [
+              ...answeredQuestions,
+              ...unansweredQuestions.slice(0, unansweredToKeep)
+            ];
+            
+            return {
+              ...cat,
+              minQuestions: min,
+              questions: newQuestions
+            };
+          }
+          
+          return {
+            ...cat,
+            minQuestions: min,
+            questions
+          };
+        }
+        return cat;
+      });
+    });
+  };
+
   const handleCategoryChange = (index: number, field: keyof CategoryConfig | 'timePerSpeaker' | 'categoryType', value: string | number | boolean | CategoryType) => {
     const newCategories = [...categories];
     const categoryToUpdate = newCategories[index];
@@ -122,7 +179,11 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
     } else if (field === 'minQuestions') {
       if (categoryToUpdate.type === 'refutacion') {
         const numValue = Number(value);
-        categoryToUpdate.minQuestions = isNaN(numValue) ? 0 : Math.max(0, numValue);
+        const min = isNaN(numValue) ? 0 : Math.max(0, numValue);
+        categoryToUpdate.minQuestions = min;
+        
+        // Call syncMinQuestions to enforce the minimum questions
+        syncMinQuestions(categoryToUpdate.id, min);
       }
     }
     setCategories(newCategories);

@@ -2,7 +2,7 @@
 import React from 'react';
 import { Question } from '@/types/chronometer';
 import { Button } from '@/components/ui/button';
-import { Circle, Plus } from 'lucide-react';
+import { AlertCircle, Circle, Plus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -11,7 +11,8 @@ interface QuestionTrackerProps {
   onQuestionToggle: (questionId: string) => void;
   onAddQuestion: () => void;
   maxQuestions?: number;
-  position: 'favor' | 'contra'; // To determine layout/styling if needed
+  position: 'favor' | 'contra';
+  minQuestions?: number; // Add minQuestions prop
 }
 
 const MAX_QUESTIONS_DEFAULT = 15;
@@ -22,11 +23,12 @@ const QuestionTracker: React.FC<QuestionTrackerProps> = ({
   onAddQuestion,
   maxQuestions = MAX_QUESTIONS_DEFAULT,
   position,
+  minQuestions = 0, // Default to 0 if not provided
 }) => {
   const canAddQuestion = questions.length < maxQuestions;
 
   return (
-    <div className={cn("flex flex-col items-center space-y-2 p-2 rounded-lg", position === 'favor' ? 'bg-soft-green/20' : 'bg-soft-red/20')}>
+    <div className="flex flex-col items-center space-y-2 p-2 rounded-lg">
       <p className="text-sm font-medium text-card-foreground">
         Preguntas: {questions.filter(q => q.answered).length} / {questions.length}
       </p>
@@ -35,7 +37,7 @@ const QuestionTracker: React.FC<QuestionTrackerProps> = ({
         position === 'contra' ? 'flex-row-reverse space-x-reverse' : ''
       )}>
         <AnimatePresence>
-          {questions.map((question) => (
+          {questions.map((question, index) => (
             <motion.div
               key={question.id}
               initial={{ opacity: 0, scale: 0.5 }}
@@ -48,14 +50,24 @@ const QuestionTracker: React.FC<QuestionTrackerProps> = ({
                 size="icon"
                 onClick={() => onQuestionToggle(question.id)}
                 aria-pressed={question.answered}
-                aria-label={`Pregunta ${question.id} ${question.answered ? 'respondida' : 'no respondida'}`}
+                aria-label={index < minQuestions ? "Pregunta mínima" : `Pregunta ${index + 1} ${question.answered ? 'respondida' : 'no respondida'}`}
                 className={cn(
                   "rounded-full h-6 w-6 p-0.5 transition-opacity duration-300",
                   question.answered ? "opacity-25" : "opacity-100",
                   "hover:bg-muted/50"
                 )}
               >
-                <Circle className={cn("h-4 w-4", question.answered ? "fill-current text-muted-foreground" : "text-primary")} />
+                {index < minQuestions ? (
+                  <AlertCircle className={cn(
+                    "h-4 w-4",
+                    question.answered ? "text-muted-foreground" : "fill-yellow-400 text-background"
+                  )} />
+                ) : (
+                  <Circle className={cn(
+                    "h-4 w-4",
+                    question.answered ? "fill-current text-muted-foreground" : "text-primary"
+                  )} />
+                )}
               </Button>
             </motion.div>
           ))}
