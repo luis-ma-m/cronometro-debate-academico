@@ -28,20 +28,37 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
   const [settings, setSettings] = useState<GlobalSettings>(currentSettings);
 
   useEffect(() => {
-    // Deep clone and add default type if missing (legacy handling)
     const processed = currentCategories.map((cat, index) => {
-      const newCat = JSON.parse(JSON.stringify(cat));
+      const newCat: CategoryConfig = JSON.parse(JSON.stringify(cat));
+      // Ensure type exists, default to 'conclusion' for legacy or new
       if (!newCat.type) {
-        newCat.type = 'conclusion'; // Default legacy categories
+        newCat.type = 'conclusion';
       }
-      if (newCat.type === 'refutacion' && newCat.minQuestions === undefined) {
-        newCat.minQuestions = 0;
-      }
-      if (newCat.type === 'refutacion' && !newCat.questions) {
-        newCat.questions = []; // Initialize if missing
-      }
-      if (newCat.type === 'introduccion' && newCat.hasExamenCruzado === undefined) {
-        newCat.hasExamenCruzado = false;
+
+      // Initialize/clean fields based on type
+      if (newCat.type === 'introduccion') {
+        newCat.hasExamenCruzado = typeof newCat.hasExamenCruzado === 'boolean' ? newCat.hasExamenCruzado : false;
+        // If hasExamenCruzado is false, examen times should not exist
+        if (!newCat.hasExamenCruzado) {
+          delete newCat.timeExamenCruzadoFavor;
+          delete newCat.timeExamenCruzadoContra;
+        }
+        delete newCat.minQuestions;
+        delete newCat.questions;
+      } else if (newCat.type === 'refutacion') {
+        newCat.minQuestions = typeof newCat.minQuestions === 'number' ? newCat.minQuestions : 0;
+        newCat.questions = Array.isArray(newCat.questions) ? newCat.questions : [];
+        delete newCat.hasExamenCruzado;
+        delete newCat.timeExamenCruzadoFavor;
+        delete newCat.timeExamenCruzadoContra;
+        delete newCat.examenCruzadoIntroduccionUsed;
+      } else { // conclusion or other
+        delete newCat.hasExamenCruzado;
+        delete newCat.timeExamenCruzadoFavor;
+        delete newCat.timeExamenCruzadoContra;
+        delete newCat.examenCruzadoIntroduccionUsed;
+        delete newCat.minQuestions;
+        delete newCat.questions;
       }
       return { ...newCat, originalIndex: index };
     });
@@ -54,44 +71,58 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
     const categoryToUpdate = newCategories[index];
 
     if (field === 'name') {
-      categoryToUpdate[field] = value as string;
+      categoryToUpdate.name = value as string;
     } else if (field === 'timePerSpeaker') {
       const numValue = Number(value);
-      if (!isNaN(numValue)) {
-        const timeInSeconds = Math.max(0, numValue) * 60;
-        categoryToUpdate.timeFavor = timeInSeconds;
-        categoryToUpdate.timeContra = timeInSeconds;
-      }
+      const timeInSeconds = isNaN(numValue) ? 0 : Math.max(0, numValue) * 60;
+      categoryToUpdate.timeFavor = timeInSeconds;
+      categoryToUpdate.timeContra = timeInSeconds;
     } else if (field === 'timeExamenCruzadoFavor' || field === 'timeExamenCruzadoContra') {
-      const numValue = Number(value);
-      if (!isNaN(numValue)) {
-        categoryToUpdate[field] = Math.max(0, numValue) * 60;
+      if (categoryToUpdate.type === 'introduccion' && categoryToUpdate.hasExamenCruzado) {
+        const numValue = Number(value);
+        categoryToUpdate[field] = isNaN(numValue) ? 0 : Math.max(0, numValue) * 60;
       }
     } else if (field === 'categoryType') {
       categoryToUpdate.type = value as CategoryType;
-      // Reset/default specific fields when type changes
-      if (value !== 'introduccion') {
-        delete categoryToUpdate.hasExamenCruzado;
-      } else if (categoryToUpdate.hasExamenCruzado === undefined) {
-         categoryToUpdate.hasExamenCruzado = false;
-      }
-      if (value !== 'refutacion') {
+      // Reset fields based on new type
+      if (value === 'introduccion') {
+        categoryToUpdate.hasExamenCruzado = false; // Default for new 'introduccion'
+        delete categoryToUpdate.timeExamenCruzadoFavor; // Clear existing times
+        delete categoryToUpdate.timeExamenCruzadoContra;
         delete categoryToUpdate.minQuestions;
         delete categoryToUpdate.questions;
-      } else {
-        if (categoryToUpdate.minQuestions === undefined) categoryToUpdate.minQuestions = 0;
-        if (!categoryToUpdate.questions) categoryToUpdate.questions = [];
+        delete categoryToUpdate.examenCruzadoIntroduccionUsed; // Not edited here
+      } else if (value === 'refutacion') {
+        categoryToUpdate.minQuestions = 0; // Default for new 'refutacion'
+        categoryToUpdate.questions = [];   // Default for new 'refutacion'
+        delete categoryToUpdate.hasExamenCruzado;
+        delete categoryToUpdate.timeExamenCruzadoFavor;
+        delete categoryToUpdate.timeExamenCruzadoContra;
+        delete categoryToUpdate.examenCruzadoIntroduccionUsed;
+      } else { // conclusion
+        delete categoryToUpdate.hasExamenCruzado;
+        delete categoryToUpdate.timeExamenCruzadoFavor;
+        delete categoryToUpdate.timeExamenCruzadoContra;
+        delete categoryToUpdate.minQuestions;
+        delete categoryToUpdate.questions;
+        delete categoryToUpdate.examenCruzadoIntroduccionUsed;
       }
     } else if (field === 'hasExamenCruzado') {
-       if (categoryToUpdate.type === 'introduccion') {
-         categoryToUpdate.hasExamenCruzado = value as boolean;
-       }
+      if (categoryToUpdate.type === 'introduccion') {
+        categoryToUpdate.hasExamenCruzado = value as boolean;
+        if (!value) { // If switched off, remove associated times
+          delete categoryToUpdate.timeExamenCruzadoFavor;
+          delete categoryToUpdate.timeExamenCruzadoContra;
+        } else { // If switched on, ensure times are initialized (e.g., to 0 or previous values if any)
+          // For now, let them be undefined and user can input. Or default to 0.
+          categoryToUpdate.timeExamenCruzadoFavor = categoryToUpdate.timeExamenCruzadoFavor ?? 0;
+          categoryToUpdate.timeExamenCruzadoContra = categoryToUpdate.timeExamenCruzadoContra ?? 0;
+        }
+      }
     } else if (field === 'minQuestions') {
       if (categoryToUpdate.type === 'refutacion') {
         const numValue = Number(value);
         categoryToUpdate.minQuestions = isNaN(numValue) ? 0 : Math.max(0, numValue);
-        // Optionally adjust questions array if minQuestions changes
-        // For simplicity, we'll let the question tracker handle actual question instances
       }
     }
     setCategories(newCategories);
@@ -116,10 +147,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
         timeFavor: 3 * 60,
         timeContra: 3 * 60,
         type: 'conclusion', // Default new categories to 'conclusion'
-        // Initialize type-specific fields as undefined or default
-        hasExamenCruzado: false, // default for 'introduccion', relevant if type changes
-        minQuestions: 0,       // default for 'refutacion'
-        questions: [],         // default for 'refutacion'
+        // Type-specific fields will be undefined or cleaned by useEffect/handleCategoryChange logic
       }
     ]);
   };
@@ -130,20 +158,29 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
 
   const handleSave = () => {
     const processedCategories = categories.map(cat => {
-      const { originalIndex, ...restOfCat } = cat; // Remove originalIndex before saving
+      const { originalIndex, ...restOfCat } = cat; // Remove originalIndex
       const finalCat: CategoryConfig = { ...restOfCat };
 
+      // Clean up based on type
       if (finalCat.type !== 'introduccion') {
         delete finalCat.hasExamenCruzado;
+        delete finalCat.timeExamenCruzadoFavor;
+        delete finalCat.timeExamenCruzadoContra;
         delete finalCat.examenCruzadoIntroduccionUsed;
+      } else { // 'introduccion' type
+        if (!finalCat.hasExamenCruzado) { // If hasExamenCruzado is false, remove times
+          delete finalCat.timeExamenCruzadoFavor;
+          delete finalCat.timeExamenCruzadoContra;
+        } else { // ensure they are numbers if they exist
+            finalCat.timeExamenCruzadoFavor = finalCat.timeExamenCruzadoFavor !== undefined ? Number(finalCat.timeExamenCruzadoFavor) : undefined;
+            finalCat.timeExamenCruzadoContra = finalCat.timeExamenCruzadoContra !== undefined ? Number(finalCat.timeExamenCruzadoContra) : undefined;
+        }
       }
+
       if (finalCat.type !== 'refutacion') {
         delete finalCat.minQuestions;
         delete finalCat.questions;
       }
-      // Ensure numeric conversion for optional times
-      finalCat.timeExamenCruzadoFavor = finalCat.timeExamenCruzadoFavor !== undefined ? Number(finalCat.timeExamenCruzadoFavor) : undefined;
-      finalCat.timeExamenCruzadoContra = finalCat.timeExamenCruzadoContra !== undefined ? Number(finalCat.timeExamenCruzadoContra) : undefined;
       
       return finalCat;
     });
@@ -182,7 +219,6 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
             <Input id="negativeWarning" type="number" value={settings.negativeWarningThreshold} onChange={(e) => handleSettingChange('negativeWarningThreshold', e.target.value)} className="col-span-3" />
           </div>
 
-
           <div className="flex justify-between items-center mt-6 mb-2">
             <h3 className="font-semibold text-lg">Categorías</h3>
             <Button variant="outline" size="sm" onClick={handleAddCategory}>
@@ -211,7 +247,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                   </div>
                   
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor={`timePerSpeaker-${index}`} className="text-right col-span-1">Tiempo por Orador (min)</Label>
+                    <Label htmlFor={`timePerSpeaker-${index}`} className="text-right col-span-1">Tiempo Orador (min)</Label>
                     <Input 
                       id={`timePerSpeaker-${index}`} 
                       type="number" 
@@ -222,11 +258,11 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                   </div>
 
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right col-span-1">Tipo de Intervención</Label>
+                    <Label className="text-right col-span-1">Tipo Intervención</Label>
                     <RadioGroup
                       value={cat.type}
                       onValueChange={(value) => handleCategoryChange(index, 'categoryType', value as CategoryType)}
-                      className="col-span-3 flex space-x-2 items-center"
+                      className="col-span-3 flex space-x-2 items-center pt-1"
                     >
                       {(['introduccion', 'refutacion', 'conclusion'] as CategoryType[]).map(typeValue => (
                         <div key={typeValue} className="flex items-center space-x-1">
@@ -241,7 +277,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
 
                   {cat.type === 'introduccion' && (
                     <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor={`hasExamenCruzado-${index}`} className="text-right col-span-1">Permitir Examen Cruzado</Label>
+                      <Label htmlFor={`hasExamenCruzado-${index}`} className="text-right col-span-1">Permitir Ex. Cruzado</Label>
                       <div className="col-span-3 flex items-center">
                         <Switch
                           id={`hasExamenCruzado-${index}`}
@@ -252,22 +288,8 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                     </div>
                   )}
 
-                  {cat.type === 'refutacion' && (
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor={`minQuestions-${index}`} className="text-right col-span-1">Preguntas Mínimas</Label>
-                      <Input 
-                        id={`minQuestions-${index}`} 
-                        type="number" 
-                        value={cat.minQuestions ?? 0} 
-                        onChange={(e) => handleCategoryChange(index, 'minQuestions', e.target.value)} 
-                        className="col-span-3" 
-                        min="0"
-                        placeholder="0"
-                      />
-                    </div>
-                  )}
-                  
-                  {(cat.timeExamenCruzadoFavor !== undefined || cat.timeExamenCruzadoContra !== undefined || cat.id.startsWith('new_cat_')) && (
+                  {/* Examen Cruzado time inputs, only if type is 'introduccion' AND hasExamenCruzado is true */}
+                  {cat.type === 'introduccion' && cat.hasExamenCruzado && (
                     <>
                       <div className="grid grid-cols-4 items-center gap-4">
                         <Label htmlFor={`timeExamenFavor-${index}`} className="text-right col-span-1">Examen Favor (min)</Label>
@@ -292,6 +314,22 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                         />
                       </div>
                     </>
+                  )}
+
+
+                  {cat.type === 'refutacion' && (
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor={`minQuestions-${index}`} className="text-right col-span-1">Preguntas Mínimas</Label>
+                      <Input 
+                        id={`minQuestions-${index}`} 
+                        type="number" 
+                        value={cat.minQuestions ?? 0} 
+                        onChange={(e) => handleCategoryChange(index, 'minQuestions', e.target.value)} 
+                        className="col-span-3" 
+                        min="0"
+                        placeholder="0"
+                      />
+                    </div>
                   )}
                 </div>
               </div>

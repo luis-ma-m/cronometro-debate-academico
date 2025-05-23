@@ -2,15 +2,15 @@ import React from 'react';
 import { CategoryConfig, GlobalSettings, TimerUpdatePayload, PositionType, Question } from '@/types/chronometer';
 import { useDebateTimer } from '@/hooks/useDebateTimer';
 import DebateTimerDisplay from './DebateTimerDisplay';
-// Placeholder for QuestionTracker, will be created later
-// import QuestionTracker from './QuestionTracker'; 
+import QuestionTracker from './QuestionTracker'; 
+import { v4 as uuidv4 } from 'uuid'; // For generating question IDs
 
 interface CategoryCardProps {
   category: CategoryConfig;
   settings: Pick<GlobalSettings, 'positiveWarningThreshold' | 'negativeWarningThreshold'>;
   onTimerUpdate: (payload: TimerUpdatePayload) => void;
   displayOnlyPosition?: PositionType;
-  onQuestionUpdate: (categoryId: string, updatedQuestions: Question[]) => void; // New prop
+  onQuestionUpdate: (categoryId: string, updatedQuestions: Question[]) => void;
 }
 
 const CategoryCard: React.FC<CategoryCardProps> = ({ 
@@ -18,18 +18,16 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
   settings, 
   onTimerUpdate,
   displayOnlyPosition,
-  onQuestionUpdate // Received prop
+  onQuestionUpdate
 }) => {
   const timerFavorId = `${category.id}_favor`;
   const timerContraId = `${category.id}_contra`;
-  const timerExamenFavorId = `${category.id}_examen_favor`; // Existing examen type
-  const timerExamenContraId = `${category.id}_examen_contra`; // Existing examen type
-  // const timerExamenIntroduccionId = `${category.id}_examen_introduccion`; // For new 'introduccion' examen
+  const timerExamenFavorId = `${category.id}_examen_favor`;
+  const timerExamenContraId = `${category.id}_examen_contra`;
+  // const timerExamenIntroduccionId = `${category.id}_examen_introduccion`; // For 'introduccion' examen
 
   const timerFavorHook = useDebateTimer({ initialTime: category.timeFavor, timerId: timerFavorId, onUpdate: onTimerUpdate });
   const timerContraHook = useDebateTimer({ initialTime: category.timeContra, timerId: timerContraId, onUpdate: onTimerUpdate });
-  
-  const hasExistingExamenCruzado = category.timeExamenCruzadoFavor !== undefined || category.timeExamenCruzadoContra !== undefined;
   
   const timerExamenFavorHook = useDebateTimer({ 
     initialTime: category.timeExamenCruzadoFavor || 0,
@@ -44,10 +42,6 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
     onUpdate: onTimerUpdate,
     disabled: category.timeExamenCruzadoContra === undefined
   });
-
-  // Placeholder for the new 'introduccion' type Examen Cruzado timer hook
-  // This will be set up when implementing that specific UI and logic
-  // const timerExamenIntroduccionHook = useDebateTimer({ ... });
 
   React.useEffect(() => {
     timerFavorHook.setNewTime(category.timeFavor);
@@ -69,55 +63,69 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
     }
   }, [category.timeExamenCruzadoContra, timerExamenContraHook.setNewTime]);
   
-  // TODO: Add useEffects for timerExamenIntroduccionHook when implemented
+  const handleQuestionToggle = (position: 'favor' | 'contra', questionId: string) => {
+    // Note: Question state is per category, not per position (favor/contra) for refutations.
+    // If questions were per-position, this logic would need adjustment.
+    // For now, assuming `category.questions` is the single source of truth for this category's refutation.
+    const currentQuestions = category.questions || [];
+    const updatedQs = currentQuestions.map(q => 
+      q.id === questionId ? {...q, answered: !q.answered } : q
+    );
+    onQuestionUpdate(category.id, updatedQs);
+  };
+
+  const handleAddQuestion = (position: 'favor' | 'contra') => {
+    // Same note as above: questions are per-category.
+    const currentQuestions = category.questions || [];
+    if (currentQuestions.length < 15) { // Max 15 questions
+      const newQuestion: Question = { id: uuidv4(), answered: false };
+      onQuestionUpdate(category.id, [...currentQuestions, newQuestion]);
+    }
+  };
 
   if (displayOnlyPosition) {
     let timerData;
     let positionName = '';
     let baseBg = '';
+    let currentPositionForTracker: 'favor' | 'contra' | null = null;
 
     switch (displayOnlyPosition) {
       case 'favor':
         timerData = timerFavorHook;
         positionName = 'A favor';
         baseBg = 'bg-soft-green';
+        currentPositionForTracker = 'favor';
         break;
       case 'contra':
         timerData = timerContraHook;
         positionName = 'En contra';
         baseBg = 'bg-soft-red';
+        currentPositionForTracker = 'contra';
         break;
       case 'examen_favor':
-        if (category.timeExamenCruzadoFavor !== undefined) {
+        if (category.type === 'introduccion' && category.hasExamenCruzado && category.timeExamenCruzadoFavor !== undefined) {
           timerData = timerExamenFavorHook;
           positionName = 'Examen Cruzado (A favor)';
-          baseBg = 'bg-soft-green';
+          baseBg = 'bg-soft-green'; // Or a specific color for examen
         }
         break;
       case 'examen_contra':
-        if (category.timeExamenCruzadoContra !== undefined) {
+         if (category.type === 'introduccion' && category.hasExamenCruzado && category.timeExamenCruzadoContra !== undefined) {
           timerData = timerExamenContraHook;
           positionName = 'Examen Cruzado (En contra)';
-          baseBg = 'bg-soft-red';
+          baseBg = 'bg-soft-red'; // Or a specific color for examen
         }
         break;
-      // case 'examen_introduccion': // For new 'introduccion' examen
-      //   if (category.type === 'introduccion' && category.hasExamenCruzado) {
-      //     timerData = timerExamenIntroduccionHook; // This hook needs to be defined
-      //     positionName = 'Examen Cruzado (Introducción)';
-      //     baseBg = 'bg-blue-100'; // Example contrasting color
-      //   }
+      // case 'examen_introduccion': // Placeholder for 'introduccion' specific examen timer
       //   break;
     }
 
-    // Placeholder for Question Tracker for 'refutacion' type when displayed as single timer
-    const showQuestionTracker = category.type === 'refutacion' && displayOnlyPosition && (displayOnlyPosition === 'favor' || displayOnlyPosition === 'contra');
-
+    const showQuestionTracker = category.type === 'refutacion' && currentPositionForTracker;
 
     if (timerData) {
       return (
         <div className="w-full flex flex-col items-center py-4">
-           {/* TODO: Add "Examen Cruzado" button for 'introduccion' type here if 'displayOnlyPosition' is 'favor' or 'contra' */}
+          {/* TODO: Add "Examen Cruzado" button for 'introduccion' type here if 'displayOnlyPosition' is 'favor' or 'contra' */}
           <DebateTimerDisplay
             time={timerData.time}
             isRunning={timerData.isRunning}
@@ -128,27 +136,16 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
             positionName={positionName}
             size="large"
           />
-          {/* 
-          {showQuestionTracker && category.questions && (
-            <div className="mt-4 w-full max-w-md">
+          {showQuestionTracker && category.questions && currentPositionForTracker && (
+            <div className="mt-4 w-full max-w-sm">
               <QuestionTracker 
                 questions={category.questions}
-                minQuestions={category.minQuestions || 0}
-                onQuestionToggle={(questionId) => {
-                  const updatedQs = category.questions?.map(q => q.id === questionId ? {...q, answered: !q.answered} : q) || [];
-                  onQuestionUpdate(category.id, updatedQs);
-                }}
-                onAddQuestion={() => {
-                  if ((category.questions?.length || 0) < 15) {
-                    const newQuestion: Question = { id: `q_${Date.now()}`, answered: false };
-                    onQuestionUpdate(category.id, [...(category.questions || []), newQuestion]);
-                  }
-                }}
-                position={displayOnlyPosition as 'favor' | 'contra'} // This needs careful handling
+                onQuestionToggle={(questionId) => handleQuestionToggle(currentPositionForTracker as 'favor' | 'contra', questionId)}
+                onAddQuestion={() => handleAddQuestion(currentPositionForTracker as 'favor' | 'contra')}
+                position={currentPositionForTracker as 'favor' | 'contra'}
               />
             </div>
           )}
-           */}
         </div>
       );
     }
@@ -159,17 +156,19 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
     );
   }
 
-  // Fallback grid display (This section will also need updates for new features)
-  // ... keep existing code for grid display. It will also need:
-  //    - Examen Cruzado button for 'introduccion' type
-  //    - QuestionTracker for 'refutacion' type for each side (favor/contra)
+  // Fallback grid display
   return (
-    <div className="bg-card p-6 rounded-lg shadow-md w-full">
-      <h2 className="text-2xl font-bold mb-4 text-center text-card-foreground">{category.name} ({category.type})</h2>
+    <div className="bg-card p-4 md:p-6 rounded-lg shadow-md w-full">
+      <h2 className="text-xl md:text-2xl font-bold mb-4 text-center text-card-foreground">
+        {category.name} 
+        <span className="text-sm font-normal ml-2 text-muted-foreground">
+          ({category.type === 'introduccion' ? 'Introducción' : category.type === 'refutacion' ? 'Refutación' : 'Conclusión'})
+        </span>
+      </h2>
       {/* TODO: Add "Examen Cruzado" button for 'introduccion' type if category.type === 'introduccion' && category.hasExamenCruzado */}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+        <div className="flex flex-col space-y-2">
           <DebateTimerDisplay
             time={timerFavorHook.time}
             isRunning={timerFavorHook.isRunning}
@@ -179,9 +178,16 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
             baseBgColor="bg-soft-green"
             positionName="A favor"
           />
-          {/* TODO: If category.type === 'refutacion', render QuestionTracker for 'favor' side */}
+          {category.type === 'refutacion' && category.questions && (
+            <QuestionTracker
+              questions={category.questions}
+              onQuestionToggle={(questionId) => handleQuestionToggle('favor', questionId)}
+              onAddQuestion={() => handleAddQuestion('favor')}
+              position="favor"
+            />
+          )}
         </div>
-        <div>
+        <div className="flex flex-col space-y-2">
           <DebateTimerDisplay
             time={timerContraHook.time}
             isRunning={timerContraHook.isRunning}
@@ -191,29 +197,36 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
             baseBgColor="bg-soft-red"
             positionName="En contra"
           />
-          {/* TODO: If category.type === 'refutacion', render QuestionTracker for 'contra' side */}
+          {category.type === 'refutacion' && category.questions && (
+            <QuestionTracker
+              questions={category.questions}
+              onQuestionToggle={(questionId) => handleQuestionToggle('contra', questionId)}
+              onAddQuestion={() => handleAddQuestion('contra')}
+              position="contra"
+            />
+          )}
         </div>
 
-        {/* Existing Examen Cruzado sections */}
-        {category.timeExamenCruzadoFavor !== undefined && (
+        {/* Examen Cruzado sections, only if type is 'introduccion' and hasExamenCruzado is true */}
+        {category.type === 'introduccion' && category.hasExamenCruzado && category.timeExamenCruzadoFavor !== undefined && (
           <DebateTimerDisplay
             time={timerExamenFavorHook.time}
             isRunning={timerExamenFavorHook.isRunning}
             onStartPause={timerExamenFavorHook.startPause}
             onReset={timerExamenFavorHook.reset}
             settings={settings}
-            baseBgColor="bg-soft-green" // Or a different color for examen
+            baseBgColor="bg-blue-100" 
             positionName="Examen Cruzado (A favor)"
           />
         )}
-        {category.timeExamenCruzadoContra !== undefined && (
+        {category.type === 'introduccion' && category.hasExamenCruzado && category.timeExamenCruzadoContra !== undefined && (
           <DebateTimerDisplay
             time={timerExamenContraHook.time}
             isRunning={timerExamenContraHook.isRunning}
             onStartPause={timerExamenContraHook.startPause}
             onReset={timerExamenContraHook.reset}
             settings={settings}
-            baseBgColor="bg-soft-red" // Or a different color for examen
+            baseBgColor="bg-orange-100"
             positionName="Examen Cruzado (En contra)"
           />
         )}
