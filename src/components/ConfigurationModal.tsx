@@ -11,6 +11,36 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { v4 as uuidv4 } from 'uuid';
 
+// Helper type for local state with string inputs for editable numeric fields
+interface EditableCategoryConfig extends Omit<CategoryConfig, 'timeFavor' | 'timeContra' | 'timeExamenCruzadoFavor' | 'timeExamenCruzadoContra' | 'minQuestions'> {
+  id: string; // Ensure id is always present
+  name: string;
+  type: CategoryType;
+  hasExamenCruzado?: boolean;
+  
+  timePerSpeaker: string; // In minutes, as string
+  timeExamenCruzadoFavor?: string; // In minutes, as string
+  timeExamenCruzadoContra?: string; // In minutes, as string
+  minQuestions?: string; // As string
+  questions?: Question[]; // Keep as is
+
+  originalIndex?: number;
+  examenCruzadoIntroduccionUsed?: boolean;
+}
+
+interface EditableGlobalSettings extends Omit<GlobalSettings, 'positiveWarningThreshold' | 'negativeWarningThreshold'> {
+  h1Text: string;
+  logoUrl: string;
+  positiveWarningThreshold: string; // In seconds, as string
+  negativeWarningThreshold: string; // In seconds, as string
+}
+
+interface ValidationErrors {
+  [key: string]: string | undefined; // e.g., 'categories[0].timePerSpeaker': 'Error message'
+  settingsPositiveWarning?: string;
+  settingsNegativeWarning?: string;
+}
+
 interface ConfigurationModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -26,178 +56,126 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
   currentSettings,
   onSave,
 }) => {
-  const [categories, setCategories] = useState<CategoryConfig[]>([]);
-  const [settings, setSettings] = useState<GlobalSettings>(currentSettings);
+  const [categories, setCategories] = useState<EditableCategoryConfig[]>([]);
+  const [settings, setSettings] = useState<EditableGlobalSettings>({
+    h1Text: '',
+    logoUrl: '',
+    positiveWarningThreshold: '',
+    negativeWarningThreshold: '',
+  });
+  const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
 
   useEffect(() => {
-    const processed = currentCategories.map((cat, index) => {
-      const newCat: CategoryConfig = JSON.parse(JSON.stringify(cat));
-      // Ensure type exists, default to 'conclusion' for legacy or new
-      if (!newCat.type) {
-        newCat.type = 'conclusion';
-      }
+    if (isOpen) {
+      const processedCategories: EditableCategoryConfig[] = currentCategories.map((cat, index) => {
+        const editableCat: EditableCategoryConfig = {
+          id: cat.id,
+          name: cat.name,
+          type: cat.type || 'conclusion',
+          timePerSpeaker: cat.timeFavor === 0 ? '' : String(cat.timeFavor / 60),
+          questions: cat.questions ? [...cat.questions] : [], // Deep copy questions
+          originalIndex: index,
+          examenCruzadoIntroduccionUsed: cat.examenCruzadoIntroduccionUsed,
+        };
 
-      // Initialize/clean fields based on type
-      if (newCat.type === 'introduccion') {
-        newCat.hasExamenCruzado = typeof newCat.hasExamenCruzado === 'boolean' ? newCat.hasExamenCruzado : false;
-        // If hasExamenCruzado is false, examen times should not exist
-        if (!newCat.hasExamenCruzado) {
-          delete newCat.timeExamenCruzadoFavor;
-          delete newCat.timeExamenCruzadoContra;
-        }
-        delete newCat.minQuestions;
-        delete newCat.questions;
-      } else if (newCat.type === 'refutacion') {
-        newCat.minQuestions = typeof newCat.minQuestions === 'number' ? newCat.minQuestions : 0;
-        newCat.questions = Array.isArray(newCat.questions) ? newCat.questions : [];
-        delete newCat.hasExamenCruzado;
-        delete newCat.timeExamenCruzadoFavor;
-        delete newCat.timeExamenCruzadoContra;
-        delete newCat.examenCruzadoIntroduccionUsed;
-      } else { // conclusion or other
-        delete newCat.hasExamenCruzado;
-        delete newCat.timeExamenCruzadoFavor;
-        delete newCat.timeExamenCruzadoContra;
-        delete newCat.examenCruzadoIntroduccionUsed;
-        delete newCat.minQuestions;
-        delete newCat.questions;
-      }
-      return { ...newCat, originalIndex: index };
-    });
-    setCategories(processed);
-    setSettings(JSON.parse(JSON.stringify(currentSettings)));
-  }, [isOpen, currentCategories, currentSettings]);
-
-  const syncMinQuestions = (categoryId: string, min: number) => {
-    setCategories(prev => {
-      return prev.map(cat => {
-        if (cat.id === categoryId && cat.type === 'refutacion') {
-          const questions = Array.isArray(cat.questions) ? [...cat.questions] : [];
-          
-          // If we need more questions, add them
-          if (questions.length < min) {
-            const questionsToAdd = min - questions.length;
-            for (let i = 0; i < questionsToAdd; i++) {
-              questions.push({ id: uuidv4(), answered: false });
-            }
-          } 
-          // If we need fewer questions, remove unanswered ones from the end
-          else if (questions.length > min) {
-            // Count how many answered questions we have
-            const answeredCount = questions.filter(q => q.answered).length;
-            
-            // If we have more answered questions than min, keep them all
-            if (answeredCount >= min) {
-              // Keep all answered questions
-              return {
-                ...cat,
-                minQuestions: min,
-                questions: questions.filter(q => q.answered)
-              };
-            }
-            
-            // Otherwise, keep min questions, prioritizing answered ones
-            const answeredQuestions = questions.filter(q => q.answered);
-            const unansweredQuestions = questions.filter(q => !q.answered);
-            
-            const unansweredToKeep = min - answeredQuestions.length;
-            const newQuestions = [
-              ...answeredQuestions,
-              ...unansweredQuestions.slice(0, unansweredToKeep)
-            ];
-            
-            return {
-              ...cat,
-              minQuestions: min,
-              questions: newQuestions
-            };
+        if (editableCat.type === 'introduccion') {
+          editableCat.hasExamenCruzado = typeof cat.hasExamenCruzado === 'boolean' ? cat.hasExamenCruzado : false;
+          if (editableCat.hasExamenCruzado) {
+            editableCat.timeExamenCruzadoFavor = cat.timeExamenCruzadoFavor === undefined || cat.timeExamenCruzadoFavor === 0 ? '' : String(cat.timeExamenCruzadoFavor / 60);
+            editableCat.timeExamenCruzadoContra = cat.timeExamenCruzadoContra === undefined || cat.timeExamenCruzadoContra === 0 ? '' : String(cat.timeExamenCruzadoContra / 60);
           }
-          
-          return {
-            ...cat,
-            minQuestions: min,
-            questions
-          };
+        } else if (editableCat.type === 'refutacion') {
+          editableCat.minQuestions = cat.minQuestions === undefined || cat.minQuestions === 0 ? '' : String(cat.minQuestions);
         }
-        return cat;
+        return editableCat;
       });
-    });
-  };
+      setCategories(processedCategories);
 
-  const handleCategoryChange = (index: number, field: keyof CategoryConfig | 'timePerSpeaker' | 'categoryType', value: string | number | boolean | CategoryType) => {
+      setSettings({
+        h1Text: currentSettings.h1Text,
+        logoUrl: currentSettings.logoUrl,
+        positiveWarningThreshold: currentSettings.positiveWarningThreshold === 0 ? '' : String(currentSettings.positiveWarningThreshold),
+        negativeWarningThreshold: currentSettings.negativeWarningThreshold === 0 ? '' : String(currentSettings.negativeWarningThreshold),
+      });
+      setValidationErrors({}); // Reset errors when modal opens
+    }
+  }, [isOpen, currentCategories, currentSettings]);
+  
+  const handleCategoryChange = (index: number, field: keyof EditableCategoryConfig | 'categoryType', value: string | boolean | CategoryType) => {
     const newCategories = [...categories];
-    const categoryToUpdate = newCategories[index];
+    const categoryToUpdate = { ...newCategories[index] };
+
+    let errorKey = `categories[${index}].${field}`;
 
     if (field === 'name') {
       categoryToUpdate.name = value as string;
-    } else if (field === 'timePerSpeaker') {
-      const numValue = Number(value);
-      const timeInSeconds = isNaN(numValue) ? 0 : Math.max(0, numValue) * 60;
-      categoryToUpdate.timeFavor = timeInSeconds;
-      categoryToUpdate.timeContra = timeInSeconds;
-    } else if (field === 'timeExamenCruzadoFavor' || field === 'timeExamenCruzadoContra') {
-      if (categoryToUpdate.type === 'introduccion' && categoryToUpdate.hasExamenCruzado) {
-        const numValue = Number(value);
-        categoryToUpdate[field] = isNaN(numValue) ? 0 : Math.max(0, numValue) * 60;
-      }
+    } else if (field === 'timePerSpeaker' || field === 'timeExamenCruzadoFavor' || field === 'timeExamenCruzadoContra' || field === 'minQuestions') {
+      (categoryToUpdate as any)[field] = value as string;
     } else if (field === 'categoryType') {
       categoryToUpdate.type = value as CategoryType;
-      // Reset fields based on new type
+      // Reset fields based on new type, ensure string fields are reset properly for editable state
       if (value === 'introduccion') {
-        categoryToUpdate.hasExamenCruzado = false; // Default for new 'introduccion'
-        delete categoryToUpdate.timeExamenCruzadoFavor; // Clear existing times
-        delete categoryToUpdate.timeExamenCruzadoContra;
-        delete categoryToUpdate.minQuestions;
-        delete categoryToUpdate.questions;
-        delete categoryToUpdate.examenCruzadoIntroduccionUsed; // Not edited here
+        categoryToUpdate.hasExamenCruzado = false;
+        categoryToUpdate.timeExamenCruzadoFavor = '';
+        categoryToUpdate.timeExamenCruzadoContra = '';
+        delete categoryToUpdate.minQuestions; // no string version needed if not applicable
+        categoryToUpdate.questions = []; // Clear questions as well for consistency
       } else if (value === 'refutacion') {
-        categoryToUpdate.minQuestions = 0; // Default for new 'refutacion'
-        categoryToUpdate.questions = [];   // Default for new 'refutacion'
+        categoryToUpdate.minQuestions = ''; // Default for new 'refutacion'
+        categoryToUpdate.questions = [];
         delete categoryToUpdate.hasExamenCruzado;
         delete categoryToUpdate.timeExamenCruzadoFavor;
         delete categoryToUpdate.timeExamenCruzadoContra;
-        delete categoryToUpdate.examenCruzadoIntroduccionUsed;
       } else { // conclusion
         delete categoryToUpdate.hasExamenCruzado;
         delete categoryToUpdate.timeExamenCruzadoFavor;
         delete categoryToUpdate.timeExamenCruzadoContra;
         delete categoryToUpdate.minQuestions;
-        delete categoryToUpdate.questions;
-        delete categoryToUpdate.examenCruzadoIntroduccionUsed;
+        categoryToUpdate.questions = [];
       }
+      // Clear potential errors from fields of previous type
+      setValidationErrors(prev => ({
+        ...prev,
+        [`categories[${index}].timeExamenCruzadoFavor`]: undefined,
+        [`categories[${index}].timeExamenCruzadoContra`]: undefined,
+        [`categories[${index}].minQuestions`]: undefined,
+      }));
+      errorKey = ''; // Handled above
     } else if (field === 'hasExamenCruzado') {
       if (categoryToUpdate.type === 'introduccion') {
         categoryToUpdate.hasExamenCruzado = value as boolean;
-        if (!value) { // If switched off, remove associated times
-          delete categoryToUpdate.timeExamenCruzadoFavor;
-          delete categoryToUpdate.timeExamenCruzadoContra;
-        } else { // If switched on, ensure times are initialized (e.g., to 0 or previous values if any)
-          // For now, let them be undefined and user can input. Or default to 0.
-          categoryToUpdate.timeExamenCruzadoFavor = categoryToUpdate.timeExamenCruzadoFavor ?? 0;
-          categoryToUpdate.timeExamenCruzadoContra = categoryToUpdate.timeExamenCruzadoContra ?? 0;
+        if (!value) {
+          categoryToUpdate.timeExamenCruzadoFavor = '';
+          categoryToUpdate.timeExamenCruzadoContra = '';
+          setValidationErrors(prev => ({
+            ...prev,
+            [`categories[${index}].timeExamenCruzadoFavor`]: undefined,
+            [`categories[${index}].timeExamenCruzadoContra`]: undefined,
+          }));
+        } else {
+          // Fields are already strings, user will input or leave them ''
         }
       }
-    } else if (field === 'minQuestions') {
-      if (categoryToUpdate.type === 'refutacion') {
-        const numValue = Number(value);
-        const min = isNaN(numValue) ? 0 : Math.max(0, numValue);
-        categoryToUpdate.minQuestions = min;
-        
-        // Call syncMinQuestions to enforce the minimum questions
-        syncMinQuestions(categoryToUpdate.id, min);
-      }
+       errorKey = ''; // Not directly validated on change
+    } else {
+      // For other fields like 'id', 'questions', 'originalIndex' that are not directly bound to an input causing this handler
+      (categoryToUpdate as any)[field] = value;
+      errorKey = ''; // No specific error key for these
     }
+    
+    newCategories[index] = categoryToUpdate;
     setCategories(newCategories);
+
+    if (errorKey) {
+      setValidationErrors(prev => ({ ...prev, [errorKey]: undefined }));
+    }
   };
   
-  const handleSettingChange = (field: keyof GlobalSettings, value: string | number) => {
-    setSettings(prev => {
-      if (typeof prev[field] === 'number') {
-        const numValue = Number(value);
-        return { ...prev, [field]: isNaN(numValue) ? prev[field] : numValue };
-      }
-      return { ...prev, [field]: value };
-    });
+  const handleSettingChange = (field: keyof EditableGlobalSettings, value: string) => {
+    setSettings(prev => ({ ...prev, [field]: value }));
+    if (field === 'positiveWarningThreshold' || field === 'negativeWarningThreshold') {
+      setValidationErrors(prev => ({ ...prev, [`settings${field.charAt(0).toUpperCase() + field.slice(1)}`]: undefined }));
+    }
   };
 
   const handleAddCategory = () => {
@@ -206,49 +184,200 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
       {
         id: `new_cat_${Date.now()}`,
         name: 'Nueva Categoría',
-        timeFavor: 3 * 60,
-        timeContra: 3 * 60,
-        type: 'conclusion', // Default new categories to 'conclusion'
-        // Type-specific fields will be undefined or cleaned by useEffect/handleCategoryChange logic
+        timePerSpeaker: '3', // Default to 3 minutes as string
+        type: 'conclusion',
+        questions: [],
       }
     ]);
   };
 
   const handleDeleteCategory = (index: number) => {
     setCategories(prev => prev.filter((_, i) => i !== index));
+    // Also clear any validation errors associated with the deleted category
+    const newErrors = {...validationErrors};
+    Object.keys(newErrors).forEach(key => {
+      if (key.startsWith(`categories[${index}].`)) {
+        delete newErrors[key];
+      } else if (key.startsWith('categories[')) {
+        // Adjust indices for subsequent categories if needed, though less critical if just deleting
+      }
+    });
+    setValidationErrors(newErrors);
   };
 
-  const handleSave = () => {
-    const processedCategories = categories.map(cat => {
-      const { originalIndex, ...restOfCat } = cat; // Remove originalIndex
-      const finalCat: CategoryConfig = { ...restOfCat };
+  const validateAndSave = () => {
+    const newErrors: ValidationErrors = {};
+    let isValid = true;
 
-      // Clean up based on type
-      if (finalCat.type !== 'introduccion') {
-        delete finalCat.hasExamenCruzado;
-        delete finalCat.timeExamenCruzadoFavor;
-        delete finalCat.timeExamenCruzadoContra;
-        delete finalCat.examenCruzadoIntroduccionUsed;
-      } else { // 'introduccion' type
-        if (!finalCat.hasExamenCruzado) { // If hasExamenCruzado is false, remove times
-          delete finalCat.timeExamenCruzadoFavor;
-          delete finalCat.timeExamenCruzadoContra;
-        } else { // ensure they are numbers if they exist
-            finalCat.timeExamenCruzadoFavor = finalCat.timeExamenCruzadoFavor !== undefined ? Number(finalCat.timeExamenCruzadoFavor) : undefined;
-            finalCat.timeExamenCruzadoContra = finalCat.timeExamenCruzadoContra !== undefined ? Number(finalCat.timeExamenCruzadoContra) : undefined;
+    const finalCategories: CategoryConfig[] = [];
+
+    categories.forEach((cat, index) => {
+      const currentCatFinal: Partial<CategoryConfig> & { id: string; name: string; type: CategoryType } = {
+        id: cat.id,
+        name: cat.name,
+        type: cat.type,
+        questions: [...(cat.questions || [])],
+        examenCruzadoIntroduccionUsed: cat.examenCruzadoIntroduccionUsed,
+      };
+
+      // Validate Name (though not explicitly requested for error, good practice)
+      if (!cat.name.trim()) {
+        newErrors[`categories[${index}].name`] = 'El nombre es requerido.';
+        isValid = false;
+      }
+
+      // Validate timePerSpeaker
+      const timePerSpeakerVal = cat.timePerSpeaker.trim();
+      if (timePerSpeakerVal === '') {
+        newErrors[`categories[${index}].timePerSpeaker`] = 'Requerido (min).';
+        isValid = false;
+      } else {
+        const num = parseInt(timePerSpeakerVal, 10);
+        if (isNaN(num) || num < 0) {
+          newErrors[`categories[${index}].timePerSpeaker`] = 'Número inválido (min).';
+          isValid = false;
+        } else {
+          currentCatFinal.timeFavor = num * 60;
+          currentCatFinal.timeContra = num * 60;
         }
       }
 
-      if (finalCat.type !== 'refutacion') {
-        delete finalCat.minQuestions;
-        delete finalCat.questions;
+      if (cat.type === 'introduccion') {
+        currentCatFinal.hasExamenCruzado = cat.hasExamenCruzado;
+        if (cat.hasExamenCruzado) {
+          // Examen Favor
+          const timeExamenFavorVal = cat.timeExamenCruzadoFavor?.trim();
+          if (timeExamenFavorVal && timeExamenFavorVal !== '') {
+            const num = parseInt(timeExamenFavorVal, 10);
+            if (isNaN(num) || num < 0) {
+              newErrors[`categories[${index}].timeExamenCruzadoFavor`] = 'Inválido (min).';
+              isValid = false;
+            } else {
+              currentCatFinal.timeExamenCruzadoFavor = num * 60;
+            }
+          } else {
+            currentCatFinal.timeExamenCruzadoFavor = 0; // Optional, default to 0 if empty
+          }
+          // Examen Contra
+          const timeExamenContraVal = cat.timeExamenCruzadoContra?.trim();
+          if (timeExamenContraVal && timeExamenContraVal !== '') {
+            const num = parseInt(timeExamenContraVal, 10);
+            if (isNaN(num) || num < 0) {
+              newErrors[`categories[${index}].timeExamenCruzadoContra`] = 'Inválido (min).';
+              isValid = false;
+            } else {
+              currentCatFinal.timeExamenCruzadoContra = num * 60;
+            }
+          } else {
+            currentCatFinal.timeExamenCruzadoContra = 0; // Optional, default to 0 if empty
+          }
+        }
+      } else if (cat.type === 'refutacion') {
+        const minQuestionsVal = cat.minQuestions?.trim();
+        let minQParsed = 0;
+        if (minQuestionsVal && minQuestionsVal !== '') {
+          const num = parseInt(minQuestionsVal, 10);
+          if (isNaN(num) || num < 0) {
+            newErrors[`categories[${index}].minQuestions`] = 'Número inválido.';
+            isValid = false;
+          } else {
+            minQParsed = num;
+          }
+        }
+        currentCatFinal.minQuestions = minQParsed;
+        
+        // Sync questions logic (adapted from old syncMinQuestions)
+        let currentQuestions = currentCatFinal.questions || [];
+        if (currentQuestions.length < minQParsed) {
+          const questionsToAdd = minQParsed - currentQuestions.length;
+          for (let i = 0; i < questionsToAdd; i++) {
+            currentQuestions.push({ id: uuidv4(), answered: false });
+          }
+        } else if (currentQuestions.length > minQParsed) {
+          const answeredCount = currentQuestions.filter(q => q.answered).length;
+          if (answeredCount >= minQParsed) {
+            currentQuestions = currentQuestions.filter(q => q.answered);
+          } else {
+            const answeredQuestions = currentQuestions.filter(q => q.answered);
+            const unansweredQuestions = currentQuestions.filter(q => !q.answered);
+            const unansweredToKeep = minQParsed - answeredQuestions.length;
+            currentQuestions = [
+              ...answeredQuestions,
+              ...unansweredQuestions.slice(0, Math.max(0, unansweredToKeep))
+            ];
+          }
+        }
+        currentCatFinal.questions = currentQuestions;
       }
-      
-      return finalCat;
+      finalCategories.push(currentCatFinal as CategoryConfig);
     });
-    onSave(processedCategories, settings);
-    onClose();
+
+    const finalSettings: Partial<GlobalSettings> = {
+      h1Text: settings.h1Text,
+      logoUrl: settings.logoUrl,
+    };
+
+    // Validate positiveWarningThreshold
+    const positiveWarningVal = settings.positiveWarningThreshold.trim();
+    if (positiveWarningVal === '') {
+      newErrors.settingsPositiveWarning = 'Requerido (seg).';
+      isValid = false;
+    } else {
+      const num = parseInt(positiveWarningVal, 10);
+      if (isNaN(num) || num < 0) {
+        newErrors.settingsPositiveWarning = 'Número inválido (seg).';
+        isValid = false;
+      } else {
+        finalSettings.positiveWarningThreshold = num;
+      }
+    }
+
+    // Validate negativeWarningThreshold
+    const negativeWarningVal = settings.negativeWarningThreshold.trim();
+    if (negativeWarningVal === '') {
+      newErrors.settingsNegativeWarning = 'Requerido (seg).';
+      isValid = false;
+    } else {
+      const num = parseInt(negativeWarningVal, 10);
+      if (isNaN(num)) {
+        newErrors.settingsNegativeWarning = 'Número inválido (seg).';
+        isValid = false;
+      } else if (num >= 0) {
+        newErrors.settingsNegativeWarning = 'Valor negativo requerido (seg).';
+        isValid = false;
+      } else {
+        finalSettings.negativeWarningThreshold = num;
+      }
+    }
+    
+    setValidationErrors(newErrors);
+
+    if (isValid) {
+      // Clean up categories based on type one last time before saving
+      const cleanedFinalCategories = finalCategories.map(cat => {
+        const cleanCat = { ...cat };
+        if (cleanCat.type !== 'introduccion') {
+          delete cleanCat.hasExamenCruzado;
+          delete cleanCat.timeExamenCruzadoFavor;
+          delete cleanCat.timeExamenCruzadoContra;
+          delete cleanCat.examenCruzadoIntroduccionUsed;
+        } else {
+          if (!cleanCat.hasExamenCruzado) {
+            delete cleanCat.timeExamenCruzadoFavor;
+            delete cleanCat.timeExamenCruzadoContra;
+          }
+        }
+        if (cleanCat.type !== 'refutacion') {
+          delete cleanCat.minQuestions;
+          delete cleanCat.questions;
+        }
+        return cleanCat;
+      });
+      onSave(cleanedFinalCategories, finalSettings as GlobalSettings);
+      onClose();
+    }
   };
+
 
   if (!isOpen) return null;
 
@@ -272,13 +401,33 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
             <Label htmlFor="logoUrl" className="text-right col-span-1">URL del Logo</Label>
             <Input id="logoUrl" value={settings.logoUrl} onChange={(e) => handleSettingChange('logoUrl', e.target.value)} className="col-span-3" />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="positiveWarning" className="text-right col-span-1">Aviso Positivo (seg)</Label>
-            <Input id="positiveWarning" type="number" value={settings.positiveWarningThreshold} onChange={(e) => handleSettingChange('positiveWarningThreshold', e.target.value)} className="col-span-3" />
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label htmlFor="positiveWarning" className="text-right col-span-1 pt-2">Aviso Positivo (seg)</Label>
+            <div className="col-span-3">
+              <Input 
+                id="positiveWarning" 
+                type="number" 
+                value={settings.positiveWarningThreshold} 
+                onChange={(e) => handleSettingChange('positiveWarningThreshold', e.target.value)} 
+                className="w-full"
+                placeholder="Ej: 30"
+              />
+              {validationErrors.settingsPositiveWarning && <p className="text-sm text-destructive mt-1">{validationErrors.settingsPositiveWarning}</p>}
+            </div>
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="negativeWarning" className="text-right col-span-1">Aviso Negativo (seg)</Label>
-            <Input id="negativeWarning" type="number" value={settings.negativeWarningThreshold} onChange={(e) => handleSettingChange('negativeWarningThreshold', e.target.value)} className="col-span-3" />
+          <div className="grid grid-cols-4 items-start gap-4">
+            <Label htmlFor="negativeWarning" className="text-right col-span-1 pt-2">Aviso Negativo (seg)</Label>
+            <div className="col-span-3">
+              <Input 
+                id="negativeWarning" 
+                type="number" 
+                value={settings.negativeWarningThreshold} 
+                onChange={(e) => handleSettingChange('negativeWarningThreshold', e.target.value)} 
+                className="w-full"
+                placeholder="Ej: -30"
+              />
+              {validationErrors.settingsNegativeWarning && <p className="text-sm text-destructive mt-1">{validationErrors.settingsNegativeWarning}</p>}
+            </div>
           </div>
 
           <div className="flex justify-between items-center mt-6 mb-2">
@@ -303,20 +452,32 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                   <Trash2 className="h-4 w-4" />
                 </Button>
                 <div> 
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor={`catName-${index}`} className="text-right col-span-1">Nombre</Label>
-                    <Input id={`catName-${index}`} value={cat.name} onChange={(e) => handleCategoryChange(index, 'name', e.target.value)} className="col-span-3" />
+                  <div className="grid grid-cols-4 items-start gap-4">
+                    <Label htmlFor={`catName-${index}`} className="text-right col-span-1 pt-2">Nombre</Label>
+                    <div className="col-span-3">
+                      <Input 
+                        id={`catName-${index}`} 
+                        value={cat.name} 
+                        onChange={(e) => handleCategoryChange(index, 'name', e.target.value)} 
+                        className="w-full" 
+                      />
+                      {validationErrors[`categories[${index}].name`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].name`]}</p>}
+                    </div>
                   </div>
                   
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor={`timePerSpeaker-${index}`} className="text-right col-span-1">Tiempo Orador (min)</Label>
-                    <Input 
-                      id={`timePerSpeaker-${index}`} 
-                      type="number" 
-                      value={cat.timeFavor / 60} 
-                      onChange={(e) => handleCategoryChange(index, 'timePerSpeaker', e.target.value)} 
-                      className="col-span-3" 
-                    />
+                  <div className="grid grid-cols-4 items-start gap-4">
+                    <Label htmlFor={`timePerSpeaker-${index}`} className="text-right col-span-1 pt-2">Tiempo Orador (min)</Label>
+                    <div className="col-span-3">
+                      <Input 
+                        id={`timePerSpeaker-${index}`} 
+                        type="number" 
+                        value={cat.timePerSpeaker} 
+                        onChange={(e) => handleCategoryChange(index, 'timePerSpeaker', e.target.value)} 
+                        className="w-full" 
+                        placeholder="Ej: 5"
+                      />
+                      {validationErrors[`categories[${index}].timePerSpeaker`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timePerSpeaker`]}</p>}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-4 items-center gap-4">
@@ -350,47 +511,54 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                     </div>
                   )}
 
-                  {/* Examen Cruzado time inputs, only if type is 'introduccion' AND hasExamenCruzado is true */}
                   {cat.type === 'introduccion' && cat.hasExamenCruzado && (
                     <>
-                      <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor={`timeExamenFavor-${index}`} className="text-right col-span-1">Examen Favor (min)</Label>
-                        <Input 
-                          id={`timeExamenFavor-${index}`} 
-                          type="number" 
-                          value={(cat.timeExamenCruzadoFavor ?? 0) / 60} 
-                          onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoFavor', e.target.value)} 
-                          className="col-span-3" 
-                          placeholder="Opcional (min)"
-                        />
+                      <div className="grid grid-cols-4 items-start gap-4">
+                        <Label htmlFor={`timeExamenFavor-${index}`} className="text-right col-span-1 pt-2">Examen Favor (min)</Label>
+                        <div className="col-span-3">
+                          <Input 
+                            id={`timeExamenFavor-${index}`} 
+                            type="number" 
+                            value={cat.timeExamenCruzadoFavor ?? ''} 
+                            onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoFavor', e.target.value)} 
+                            className="w-full" 
+                            placeholder="Opcional (min)"
+                          />
+                          {validationErrors[`categories[${index}].timeExamenCruzadoFavor`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timeExamenCruzadoFavor`]}</p>}
+                        </div>
                       </div>
-                      <div className="grid grid-cols-4 items-center gap-4">
-                        <Label htmlFor={`timeExamenContra-${index}`} className="text-right col-span-1">Examen Contra (min)</Label>
-                        <Input 
-                          id={`timeExamenContra-${index}`} 
-                          type="number" 
-                          value={(cat.timeExamenCruzadoContra ?? 0) / 60} 
-                          onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoContra', e.target.value)} 
-                          className="col-span-3"
-                          placeholder="Opcional (min)"
-                        />
+                      <div className="grid grid-cols-4 items-start gap-4">
+                        <Label htmlFor={`timeExamenContra-${index}`} className="text-right col-span-1 pt-2">Examen Contra (min)</Label>
+                        <div className="col-span-3">
+                          <Input 
+                            id={`timeExamenContra-${index}`} 
+                            type="number" 
+                            value={cat.timeExamenCruzadoContra ?? ''} 
+                            onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoContra', e.target.value)} 
+                            className="w-full"
+                            placeholder="Opcional (min)"
+                          />
+                          {validationErrors[`categories[${index}].timeExamenCruzadoContra`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timeExamenCruzadoContra`]}</p>}
+                        </div>
                       </div>
                     </>
                   )}
 
-
                   {cat.type === 'refutacion' && (
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor={`minQuestions-${index}`} className="text-right col-span-1">Preguntas Mínimas</Label>
-                      <Input 
-                        id={`minQuestions-${index}`} 
-                        type="number" 
-                        value={cat.minQuestions ?? 0} 
-                        onChange={(e) => handleCategoryChange(index, 'minQuestions', e.target.value)} 
-                        className="col-span-3" 
-                        min="0"
-                        placeholder="0"
-                      />
+                    <div className="grid grid-cols-4 items-start gap-4">
+                      <Label htmlFor={`minQuestions-${index}`} className="text-right col-span-1 pt-2">Preguntas Mínimas</Label>
+                      <div className="col-span-3">
+                        <Input 
+                          id={`minQuestions-${index}`} 
+                          type="number" 
+                          value={cat.minQuestions ?? ''} 
+                          onChange={(e) => handleCategoryChange(index, 'minQuestions', e.target.value)} 
+                          className="w-full" 
+                          min="0"
+                          placeholder="Ej: 2 (0 si es opcional)"
+                        />
+                        {validationErrors[`categories[${index}].minQuestions`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].minQuestions`]}</p>}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -403,7 +571,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
           <DialogClose asChild>
             <Button type="button" variant="outline">Cancelar</Button>
           </DialogClose>
-          <Button type="button" onClick={handleSave}>Guardar Cambios</Button>
+          <Button type="button" onClick={validateAndSave}>Guardar Cambios</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
