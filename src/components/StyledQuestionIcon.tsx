@@ -16,8 +16,8 @@ const StyledQuestionIcon: React.FC<StyledQuestionIconProps> = ({ isFilled, isAle
   }
 
   if (isAlertUnfilled) {
-    // Unanswered-alert: Yellow fill (using fill-yellow-400), icon lines take background color
-    return <AlertCircle className={cn("h-4 w-4 fill-yellow-400 text-background", className)} />;
+    // Unanswered-alert: Yellow fill, dark yellow icon lines for contrast
+    return <AlertCircle className={cn("h-4 w-4 fill-yellow-400 text-yellow-700", className)} />;
   }
 
   // Unanswered-neutral: Grey border, no fill
