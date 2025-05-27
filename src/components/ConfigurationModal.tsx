@@ -232,13 +232,16 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
         newErrors[`categories[${index}].timePerSpeaker`] = 'Requerido (min).';
         isValid = false;
       } else {
-        const num = parseInt(timePerSpeakerVal, 10);
+        const num = parseFloat(timePerSpeakerVal);
         if (isNaN(num) || num < 0) {
           newErrors[`categories[${index}].timePerSpeaker`] = 'Número inválido (min).';
           isValid = false;
+        } else if (timePerSpeakerVal.includes('.') && timePerSpeakerVal.split('.')[1].length > 2) {
+          newErrors[`categories[${index}].timePerSpeaker`] = 'Máximo 2 decimales (min).';
+          isValid = false;
         } else {
-          currentCatFinal.timeFavor = num * 60;
-          currentCatFinal.timeContra = num * 60;
+          currentCatFinal.timeFavor = Math.round(num * 60);
+          currentCatFinal.timeContra = Math.round(num * 60);
         }
       }
 
@@ -248,28 +251,34 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
           // Examen Favor
           const timeExamenFavorVal = cat.timeExamenCruzadoFavor?.trim();
           if (timeExamenFavorVal && timeExamenFavorVal !== '') {
-            const num = parseInt(timeExamenFavorVal, 10);
+            const num = parseFloat(timeExamenFavorVal);
             if (isNaN(num) || num < 0) {
               newErrors[`categories[${index}].timeExamenCruzadoFavor`] = 'Inválido (min).';
               isValid = false;
+            } else if (timeExamenFavorVal.includes('.') && timeExamenFavorVal.split('.')[1].length > 2) {
+              newErrors[`categories[${index}].timeExamenCruzadoFavor`] = 'Máximo 2 decimales (min).';
+              isValid = false;
             } else {
-              currentCatFinal.timeExamenCruzadoFavor = num * 60;
+              currentCatFinal.timeExamenCruzadoFavor = Math.round(num * 60);
             }
           } else {
-            currentCatFinal.timeExamenCruzadoFavor = 0; // Optional, default to 0 if empty
+            currentCatFinal.timeExamenCruzadoFavor = 0;
           }
           // Examen Contra
           const timeExamenContraVal = cat.timeExamenCruzadoContra?.trim();
           if (timeExamenContraVal && timeExamenContraVal !== '') {
-            const num = parseInt(timeExamenContraVal, 10);
+            const num = parseFloat(timeExamenContraVal);
             if (isNaN(num) || num < 0) {
               newErrors[`categories[${index}].timeExamenCruzadoContra`] = 'Inválido (min).';
               isValid = false;
+            } else if (timeExamenContraVal.includes('.') && timeExamenContraVal.split('.')[1].length > 2) {
+              newErrors[`categories[${index}].timeExamenCruzadoContra`] = 'Máximo 2 decimales (min).';
+              isValid = false;
             } else {
-              currentCatFinal.timeExamenCruzadoContra = num * 60;
+              currentCatFinal.timeExamenCruzadoContra = Math.round(num * 60);
             }
           } else {
-            currentCatFinal.timeExamenCruzadoContra = 0; // Optional, default to 0 if empty
+            currentCatFinal.timeExamenCruzadoContra = 0;
           }
         }
       } else if (cat.type === 'refutacion') {
@@ -470,11 +479,12 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                     <div className="col-span-3">
                       <Input 
                         id={`timePerSpeaker-${index}`} 
-                        type="number" 
+                        type="number"
+                        step="0.01"
                         value={cat.timePerSpeaker} 
                         onChange={(e) => handleCategoryChange(index, 'timePerSpeaker', e.target.value)} 
                         className="w-full" 
-                        placeholder="Ej: 5"
+                        placeholder="Ej: 5 o 2.5"
                       />
                       {validationErrors[`categories[${index}].timePerSpeaker`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timePerSpeaker`]}</p>}
                     </div>
@@ -499,7 +509,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                   </div>
 
                   {cat.type === 'introduccion' && (
-                    <div className="grid grid-cols-4 items-center gap-4">
+                    <div className="grid grid-cols-4 items-center gap-4 my-2"> {/* Added my-2 here */}
                       <Label htmlFor={`hasExamenCruzado-${index}`} className="text-right col-span-1">Permitir Ex. Cruzado</Label>
                       <div className="col-span-3 flex items-center">
                         <Switch
@@ -519,10 +529,11 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                           <Input 
                             id={`timeExamenFavor-${index}`} 
                             type="number" 
+                            step="0.01"
                             value={cat.timeExamenCruzadoFavor ?? ''} 
                             onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoFavor', e.target.value)} 
                             className="w-full" 
-                            placeholder="Opcional (min)"
+                            placeholder="Opcional (ej: 1.5)"
                           />
                           {validationErrors[`categories[${index}].timeExamenCruzadoFavor`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timeExamenCruzadoFavor`]}</p>}
                         </div>
@@ -532,11 +543,12 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
                         <div className="col-span-3">
                           <Input 
                             id={`timeExamenContra-${index}`} 
-                            type="number" 
+                            type="number"
+                            step="0.01"
                             value={cat.timeExamenCruzadoContra ?? ''} 
                             onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoContra', e.target.value)} 
                             className="w-full"
-                            placeholder="Opcional (min)"
+                            placeholder="Opcional (ej: 1.5)"
                           />
                           {validationErrors[`categories[${index}].timeExamenCruzadoContra`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timeExamenCruzadoContra`]}</p>}
                         </div>
