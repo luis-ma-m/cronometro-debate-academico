@@ -87,45 +87,37 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
     let timerData;
     let positionName = '';
     let baseBg = '';
-    let currentPositionForTracker: 'favor' | 'contra' | null = null;
 
     switch (displayOnlyPosition) {
       case 'favor':
         timerData = timerFavorHook;
         positionName = 'A favor';
         baseBg = 'bg-soft-green';
-        currentPositionForTracker = 'favor';
         break;
       case 'contra':
         timerData = timerContraHook;
         positionName = 'En contra';
         baseBg = 'bg-soft-red';
-        currentPositionForTracker = 'contra';
         break;
       case 'examen_favor':
         if (category.type === 'introduccion' && category.hasExamenCruzado && category.timeExamenCruzadoFavor !== undefined) {
           timerData = timerExamenFavorHook;
           positionName = 'Examen Cruzado (A favor)';
-          baseBg = 'bg-soft-green'; // Or a specific color for examen
+          baseBg = 'bg-soft-green'; 
         }
         break;
       case 'examen_contra':
          if (category.type === 'introduccion' && category.hasExamenCruzado && category.timeExamenCruzadoContra !== undefined) {
           timerData = timerExamenContraHook;
           positionName = 'Examen Cruzado (En contra)';
-          baseBg = 'bg-soft-red'; // Or a specific color for examen
+          baseBg = 'bg-soft-red'; 
         }
         break;
-      // case 'examen_introduccion': // Placeholder for 'introduccion' specific examen timer
-      //   break;
     }
-
-    const showQuestionTracker = category.type === 'refutacion' && currentPositionForTracker;
 
     if (timerData) {
       return (
         <div className="w-full flex flex-col items-center py-4">
-          {/* TODO: Add "Examen Cruzado" button for 'introduccion' type here if 'displayOnlyPosition' is 'favor' or 'contra' */}
           <DebateTimerDisplay
             time={timerData.time}
             isRunning={timerData.isRunning}
@@ -136,16 +128,6 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
             positionName={positionName}
             size="large"
           />
-          {showQuestionTracker && category.questions && currentPositionForTracker && (
-            <div className="mt-4 w-full max-w-sm">
-              <QuestionTracker 
-                questions={category.questions}
-                onQuestionToggle={(questionId) => handleQuestionToggle(currentPositionForTracker as 'favor' | 'contra', questionId)}
-                onAddQuestion={() => handleAddQuestion(currentPositionForTracker as 'favor' | 'contra')}
-                position={currentPositionForTracker as 'favor' | 'contra'}
-              />
-            </div>
-          )}
         </div>
       );
     }
@@ -165,8 +147,7 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
           ({category.type === 'introduccion' ? 'Introducción' : category.type === 'refutacion' ? 'Refutación' : 'Conclusión'})
         </span>
       </h2>
-      {/* TODO: Add "Examen Cruzado" button for 'introduccion' type if category.type === 'introduccion' && category.hasExamenCruzado */}
-
+      
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
         <div className="flex flex-col space-y-2">
           <DebateTimerDisplay
@@ -184,6 +165,8 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
               onQuestionToggle={(questionId) => handleQuestionToggle('favor', questionId)}
               onAddQuestion={() => handleAddQuestion('favor')}
               position="favor"
+              // minQuestions is not passed here, so it defaults to 0.
+              // This is for the grid view, which wasn't mentioned as problematic.
             />
           )}
         </div>
@@ -203,6 +186,8 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
               onQuestionToggle={(questionId) => handleQuestionToggle('contra', questionId)}
               onAddQuestion={() => handleAddQuestion('contra')}
               position="contra"
+              // minQuestions is not passed here, so it defaults to 0.
+              // This is for the grid view, which wasn't mentioned as problematic.
             />
           )}
         </div>
