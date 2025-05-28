@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { CategoryConfig, GlobalSettings, TimerUpdatePayload, PositionType, Question } from '@/types/chronometer';
+import { CategoryConfig, GlobalSettings, PositionType, Question } from '@/types/chronometer';
 import CategoryCard from './CategoryCard';
 import { v4 as uuidv4 } from 'uuid';
 import QuestionTracker from './QuestionTracker';
@@ -7,15 +8,13 @@ import QuestionTracker from './QuestionTracker';
 interface CategoryDetailProps {
   category: CategoryConfig;
   settings: GlobalSettings;
-  onTimerUpdate: (payload: TimerUpdatePayload) => void;
   activePositionType: PositionType | null;
-  onQuestionUpdate: (categoryId: string, updatedQuestions: Question[]) => void; // New prop
+  onQuestionUpdate: (categoryId: string, updatedQuestions: Question[]) => void;
 }
 
 const CategoryDetail: React.FC<CategoryDetailProps> = ({ 
   category, 
   settings, 
-  onTimerUpdate, 
   activePositionType,
   onQuestionUpdate 
 }) => {
@@ -69,9 +68,8 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({
       <CategoryCard 
         category={category} 
         settings={settings} 
-        onTimerUpdate={onTimerUpdate}
         displayOnlyPosition={activePositionType}
-        onQuestionUpdate={onQuestionUpdate} // Pass down
+        onQuestionUpdate={onQuestionUpdate}
       />
       {renderQuestionTracker()}
     </div>

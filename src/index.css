@@ -45,10 +45,10 @@
     --sidebar-ring: 217.2 91.2% 59.8%;
 
     /* Custom colors for chronometer */
-    --soft-green-hsl: 90 75% 95%; /* Approx #F2FCE2 */
-    --soft-red-hsl: 350 100% 94%;   /* Approx #FFDEE2 */
-    --strong-red-hsl: 353 79% 55%; /* Approx #ea384c */
-    --pale-yellow-hsl: 55 92% 88%; /* Approx #FEF9C3 */
+    --soft-green-hsl: 90 75% 95%;
+    --soft-red-hsl: 350 100% 94%;
+    --strong-red-hsl: 353 79% 55%;
+    --pale-yellow-hsl: 55 92% 88%;
 
     --soft-green: hsl(var(--soft-green-hsl));
     --soft-red: hsl(var(--soft-red-hsl));
@@ -93,11 +93,67 @@
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 217.2 91.2% 59.8%;
 
-    /* Custom colors for chronometer in dark mode - can be adjusted later */
+    /* Custom colors for chronometer in dark mode */
     --soft-green-hsl: 90 30% 25%;
     --soft-red-hsl: 350 40% 25%;
     --strong-red-hsl: 353 70% 45%;
     --pale-yellow-hsl: 55 40% 25%;
+  }
+
+  /* High Contrast Theme */
+  .high-contrast {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 0%;
+    --card-foreground: 0 0% 100%;
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 20%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 20%;
+    --muted-foreground: 0 0% 80%;
+    --accent: 0 0% 100%;
+    --accent-foreground: 0 0% 0%;
+    --border: 0 0% 40%;
+    --input: 0 0% 20%;
+    --ring: 0 0% 100%;
+
+    /* High contrast timer colors */
+    --soft-green: hsl(120 100% 25%);
+    --soft-red: hsl(0 100% 25%);
+    --strong-red: hsl(0 100% 50%);
+    --pale-yellow: hsl(60 100% 25%);
+  }
+
+  /* Dyslexic-Friendly Theme */
+  .dyslexic-friendly {
+    font-family: 'OpenDyslexic', 'Comic Sans MS', cursive, sans-serif;
+    letter-spacing: 0.05em;
+    line-height: 1.6;
+    
+    --background: 250 60% 98%;
+    --foreground: 230 30% 20%;
+    --card: 250 60% 98%;
+    --card-foreground: 230 30% 20%;
+    
+    /* Warm, readable colors */
+    --soft-green: hsl(120 50% 85%);
+    --soft-red: hsl(0 50% 85%);
+    --strong-red: hsl(0 70% 45%);
+    --pale-yellow: hsl(50 80% 80%);
+  }
+
+  /* Screen reader only content */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
 
@@ -108,5 +164,23 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Animation for yellow warning */
+@keyframes yellow-blink {
+  0%, 50% { background-color: hsl(var(--pale-yellow-hsl)); }
+  51%, 100% { background-color: transparent; }
+}
+
+.animate-yellow-blink {
+  animation: yellow-blink 1s infinite;
+}
+
+/* Focus styles for better accessibility */
+@layer utilities {
+  .focus-visible\:ring-focus:focus-visible {
+    outline: 3px solid hsl(var(--ring));
+    outline-offset: 2px;
   }
 }
