@@ -3,6 +3,7 @@
 
 A professional debate chronometer for academic tournaments supporting BP, WSDC, and CNED formats with real-time timers, question tracking, and cross-examination management.
 
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/your-username/debate-chronometer)
 [![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/your-username/debate-chronometer)
