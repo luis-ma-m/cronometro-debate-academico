@@ -3,14 +3,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import FakeTimers from '@sinonjs/fake-timers';
 
 // Mock Worker API for testing
-class MockWorker implements Worker {
-  onmessage: ((this: Worker, ev: MessageEvent) => any) | null = null;
-  onmessageerror: ((this: Worker, ev: MessageEvent) => any) | null = null;
-  onerror: ((this: Worker, ev: ErrorEvent) => any) | null = null;
+class MockWorker {
+  onmessage: ((this: MockWorker, ev: MessageEvent) => any) | null = null;
+  onmessageerror: ((this: MockWorker, ev: MessageEvent) => any) | null = null;
+  onerror: ((this: MockWorker, ev: ErrorEvent) => any) | null = null;
   
   constructor(private url: string | URL, private options?: WorkerOptions) {}
   
-  postMessage(data: any, transfer?: Transferable[]): void {
+  postMessage(data: any): void {
     // Simulate worker message processing
     if (this.onmessage) {
       // This would normally come from the worker thread
@@ -36,7 +36,7 @@ class MockWorker implements Worker {
 
 // Setup global mocks
 beforeEach(() => {
-  global.Worker = MockWorker as any;
+  (global as any).Worker = MockWorker;
   global.performance = {
     now: () => Date.now()
   } as Performance;

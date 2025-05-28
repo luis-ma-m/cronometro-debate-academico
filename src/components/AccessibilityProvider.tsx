@@ -22,7 +22,15 @@ interface AccessibilityProviderProps {
 }
 
 export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ children }) => {
-  const { accessibilityMode, setAccessibilityMode: setStoreAccessibilityMode } = useChronometerStore();
+  const { 
+    accessibilityMode, 
+    setAccessibilityMode: setStoreAccessibilityMode,
+    categories,
+    activeCategoryId,
+    activePositionType,
+    setActiveCategoryId,
+    setActivePositionType
+  } = useChronometerStore();
 
   const announceTime = (message: string) => {
     const announcement = document.getElementById('time-announcer');
@@ -50,6 +58,63 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
     setAccessibilityMode(accessibilityMode);
   }, [accessibilityMode]);
 
+  // Navigate to next speech/position
+  const navigateToNext = () => {
+    if (!activeCategoryId) {
+      // Select first category if none selected
+      if (categories.length > 0) {
+        setActiveCategoryId(categories[0].id);
+      }
+      return;
+    }
+
+    const currentCategory = categories.find(cat => cat.id === activeCategoryId);
+    if (!currentCategory) return;
+
+    if (!activePositionType) {
+      // Select first available position
+      setActivePositionType('favor');
+      return;
+    }
+
+    // Navigate through positions within current category
+    if (activePositionType === 'favor') {
+      setActivePositionType('contra');
+    } else if (activePositionType === 'contra') {
+      // Check if examen cruzado is available
+      if (currentCategory.type === 'introduccion' && 
+          currentCategory.hasExamenCruzado && 
+          currentCategory.timeExamenCruzadoFavor !== undefined) {
+        setActivePositionType('examen_favor');
+      } else {
+        // Move to next category
+        const currentIndex = categories.findIndex(cat => cat.id === activeCategoryId);
+        if (currentIndex < categories.length - 1) {
+          setActiveCategoryId(categories[currentIndex + 1].id);
+          setActivePositionType('favor');
+        }
+      }
+    } else if (activePositionType === 'examen_favor') {
+      if (currentCategory.timeExamenCruzadoContra !== undefined) {
+        setActivePositionType('examen_contra');
+      } else {
+        // Move to next category
+        const currentIndex = categories.findIndex(cat => cat.id === activeCategoryId);
+        if (currentIndex < categories.length - 1) {
+          setActiveCategoryId(categories[currentIndex + 1].id);
+          setActivePositionType('favor');
+        }
+      }
+    } else if (activePositionType === 'examen_contra') {
+      // Move to next category
+      const currentIndex = categories.findIndex(cat => cat.id === activeCategoryId);
+      if (currentIndex < categories.length - 1) {
+        setActiveCategoryId(categories[currentIndex + 1].id);
+        setActivePositionType('favor');
+      }
+    }
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -58,16 +123,13 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
         return;
       }
 
-      const store = useChronometerStore.getState();
-      
       switch (event.code) {
         case 'Space':
           event.preventDefault();
           // Toggle current active timer
-          if (store.activeCategoryId && store.activePositionType) {
-            // This will be handled by the active timer component
+          if (activeCategoryId && activePositionType) {
             const toggleEvent = new CustomEvent('chronometer-toggle', {
-              detail: { categoryId: store.activeCategoryId, position: store.activePositionType }
+              detail: { categoryId: activeCategoryId, position: activePositionType }
             });
             window.dispatchEvent(toggleEvent);
           }
@@ -76,9 +138,9 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
         case 'KeyR':
           event.preventDefault();
           // Reset current active timer
-          if (store.activeCategoryId && store.activePositionType) {
+          if (activeCategoryId && activePositionType) {
             const resetEvent = new CustomEvent('chronometer-reset', {
-              detail: { categoryId: store.activeCategoryId, position: store.activePositionType }
+              detail: { categoryId: activeCategoryId, position: activePositionType }
             });
             window.dispatchEvent(resetEvent);
           }
@@ -87,15 +149,14 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
         case 'ArrowRight':
           event.preventDefault();
           // Navigate to next speech/position
-          const nextEvent = new CustomEvent('chronometer-next');
-          window.dispatchEvent(nextEvent);
+          navigateToNext();
           break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [activeCategoryId, activePositionType, categories, setActiveCategoryId, setActivePositionType]);
 
   return (
     <AccessibilityContext.Provider value={{ announceTime, setAccessibilityMode }}>
