@@ -66,10 +66,10 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
           // Toggle current active timer
           if (store.activeCategoryId && store.activePositionType) {
             // This will be handled by the active timer component
-            const event = new CustomEvent('chronometer-toggle', {
+            const toggleEvent = new CustomEvent('chronometer-toggle', {
               detail: { categoryId: store.activeCategoryId, position: store.activePositionType }
             });
-            window.dispatchEvent(event);
+            window.dispatchEvent(toggleEvent);
           }
           break;
           
@@ -77,18 +77,18 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
           event.preventDefault();
           // Reset current active timer
           if (store.activeCategoryId && store.activePositionType) {
-            const event = new CustomEvent('chronometer-reset', {
+            const resetEvent = new CustomEvent('chronometer-reset', {
               detail: { categoryId: store.activeCategoryId, position: store.activePositionType }
             });
-            window.dispatchEvent(event);
+            window.dispatchEvent(resetEvent);
           }
           break;
           
         case 'ArrowRight':
           event.preventDefault();
           // Navigate to next speech/position
-          const event = new CustomEvent('chronometer-next');
-          window.dispatchEvent(event);
+          const nextEvent = new CustomEvent('chronometer-next');
+          window.dispatchEvent(nextEvent);
           break;
       }
     };

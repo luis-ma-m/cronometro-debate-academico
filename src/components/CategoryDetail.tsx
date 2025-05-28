@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { CategoryConfig, GlobalSettings, PositionType, Question } from '@/types/chronometer';
+import { CategoryConfig, GlobalSettings, PositionType, Question, TimerUpdatePayload } from '@/types/chronometer';
 import CategoryCard from './CategoryCard';
 import { v4 as uuidv4 } from 'uuid';
 import QuestionTracker from './QuestionTracker';
@@ -45,6 +45,12 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({
     onQuestionUpdate(category.id, [...category.questions, newQuestion]);
   };
 
+  // Handle timer updates (can be a no-op since we're using Zustand store)
+  const handleTimerUpdate = (payload: TimerUpdatePayload) => {
+    // Timer updates are now handled by the Zustand store
+    console.log('Timer update:', payload);
+  };
+
   const renderQuestionTracker = () => {
     if (category.type !== 'refutacion' || !category.questions) return null;
 
@@ -68,6 +74,7 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({
       <CategoryCard 
         category={category} 
         settings={settings} 
+        onTimerUpdate={handleTimerUpdate}
         displayOnlyPosition={activePositionType}
         onQuestionUpdate={onQuestionUpdate}
       />

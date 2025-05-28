@@ -3,12 +3,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import FakeTimers from '@sinonjs/fake-timers';
 
 // Mock Worker API for testing
-global.Worker = class Worker {
-  onmessage: ((event: MessageEvent) => void) | null = null;
+class MockWorker implements Worker {
+  onmessage: ((this: Worker, ev: MessageEvent) => any) | null = null;
+  onmessageerror: ((this: Worker, ev: MessageEvent) => any) | null = null;
+  onerror: ((this: Worker, ev: ErrorEvent) => any) | null = null;
   
-  constructor(private url: string | URL) {}
+  constructor(private url: string | URL, private options?: WorkerOptions) {}
   
-  postMessage(data: any) {
+  postMessage(data: any, transfer?: Transferable[]): void {
     // Simulate worker message processing
     if (this.onmessage) {
       // This would normally come from the worker thread
@@ -26,16 +28,23 @@ global.Worker = class Worker {
     }
   }
   
-  terminate() {}
-};
+  terminate(): void {}
+  addEventListener(): void {}
+  removeEventListener(): void {}
+  dispatchEvent(): boolean { return true; }
+}
 
-global.performance = {
-  now: () => Date.now()
-} as Performance;
-
-global.requestAnimationFrame = (callback: FrameRequestCallback) => {
-  return setTimeout(() => callback(Date.now()), 16);
-};
+// Setup global mocks
+beforeEach(() => {
+  global.Worker = MockWorker as any;
+  global.performance = {
+    now: () => Date.now()
+  } as Performance;
+  
+  global.requestAnimationFrame = (callback: FrameRequestCallback): number => {
+    return setTimeout(() => callback(Date.now()), 16) as any;
+  };
+});
 
 describe('ChronometerWorker Precision Tests', () => {
   let clock: FakeTimers.InstalledClock;
