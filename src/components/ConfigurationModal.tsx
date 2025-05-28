@@ -2,44 +2,12 @@ import * as React from 'react';
 const { useState, useEffect } = React;
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { CategoryConfig, GlobalSettings, CategoryType, Question } from '@/types/chronometer';
+import { CategoryConfig, GlobalSettings, CategoryType } from '@/types/chronometer';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { PlusCircle, Trash2 } from 'lucide-react';
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Switch } from "@/components/ui/switch";
 import { v4 as uuidv4 } from 'uuid';
-
-// Helper type for local state with string inputs for editable numeric fields
-interface EditableCategoryConfig extends Omit<CategoryConfig, 'timeFavor' | 'timeContra' | 'timeExamenCruzadoFavor' | 'timeExamenCruzadoContra' | 'minQuestions'> {
-  id: string; // Ensure id is always present
-  name: string;
-  type: CategoryType;
-  hasExamenCruzado?: boolean;
-  
-  timePerSpeaker: string; // In minutes, as string
-  timeExamenCruzadoFavor?: string; // In minutes, as string
-  timeExamenCruzadoContra?: string; // In minutes, as string
-  minQuestions?: string; // As string
-  questions?: Question[]; // Keep as is
-
-  originalIndex?: number;
-  examenCruzadoIntroduccionUsed?: boolean;
-}
-
-interface EditableGlobalSettings extends Omit<GlobalSettings, 'positiveWarningThreshold' | 'negativeWarningThreshold'> {
-  h1Text: string;
-  logoUrl: string;
-  positiveWarningThreshold: string; // In seconds, as string
-  negativeWarningThreshold: string; // In seconds, as string
-}
-
-interface ValidationErrors {
-  [key: string]: string | undefined; // e.g., 'categories[0].timePerSpeaker': 'Error message'
-  settingsPositiveWarning?: string;
-  settingsNegativeWarning?: string;
-}
+import GlobalSettingsForm from './GlobalSettingsForm';
+import CategoryList from './CategoryList';
+import { EditableCategoryConfig, EditableGlobalSettings, ValidationErrors } from '@/types/configuration';
 
 interface ConfigurationModalProps {
   isOpen: boolean;
@@ -387,7 +355,6 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
     }
   };
 
-
   if (!isOpen) return null;
 
   return (
@@ -400,184 +367,20 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[70vh] p-1">
-        <div className="grid gap-4 py-4 pr-2">
-          <h3 className="font-semibold text-lg mb-2">Ajustes Globales</h3>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="h1Text" className="text-right col-span-1">Título H1</Label>
-            <Input id="h1Text" value={settings.h1Text} onChange={(e) => handleSettingChange('h1Text', e.target.value)} className="col-span-3" />
+          <div className="grid gap-4 py-4 pr-2">
+            <GlobalSettingsForm
+              settings={settings}
+              validationErrors={validationErrors}
+              onSettingChange={handleSettingChange}
+            />
+            <CategoryList
+              categories={categories}
+              validationErrors={validationErrors}
+              onCategoryChange={handleCategoryChange}
+              onAddCategory={handleAddCategory}
+              onDeleteCategory={handleDeleteCategory}
+            />
           </div>
-          <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="logoUrl" className="text-right col-span-1">URL del Logo</Label>
-            <Input id="logoUrl" value={settings.logoUrl} onChange={(e) => handleSettingChange('logoUrl', e.target.value)} className="col-span-3" />
-          </div>
-          <div className="grid grid-cols-4 items-start gap-4">
-            <Label htmlFor="positiveWarning" className="text-right col-span-1 pt-2">Aviso Positivo (seg)</Label>
-            <div className="col-span-3">
-              <Input 
-                id="positiveWarning" 
-                type="number" 
-                value={settings.positiveWarningThreshold} 
-                onChange={(e) => handleSettingChange('positiveWarningThreshold', e.target.value)} 
-                className="w-full"
-                placeholder="Ej: 30"
-              />
-              {validationErrors.settingsPositiveWarning && <p className="text-sm text-destructive mt-1">{validationErrors.settingsPositiveWarning}</p>}
-            </div>
-          </div>
-          <div className="grid grid-cols-4 items-start gap-4">
-            <Label htmlFor="negativeWarning" className="text-right col-span-1 pt-2">Aviso Negativo (seg)</Label>
-            <div className="col-span-3">
-              <Input 
-                id="negativeWarning" 
-                type="number" 
-                value={settings.negativeWarningThreshold} 
-                onChange={(e) => handleSettingChange('negativeWarningThreshold', e.target.value)} 
-                className="w-full"
-                placeholder="Ej: -30"
-              />
-              {validationErrors.settingsNegativeWarning && <p className="text-sm text-destructive mt-1">{validationErrors.settingsNegativeWarning}</p>}
-            </div>
-          </div>
-
-          <div className="flex justify-between items-center mt-6 mb-2">
-            <h3 className="font-semibold text-lg">Turnos</h3>
-            <Button variant="outline" size="sm" onClick={handleAddCategory}>
-              <PlusCircle className="mr-2 h-4 w-4" /> Añadir turno
-            </Button>
-          </div>
-          <div className="space-y-3">
-            {categories.map((cat, index) => (
-              <div
-                key={cat.id || `cat-${index}`}
-                className="border p-3 pr-12 rounded-md space-y-3 relative bg-card"
-              >
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="absolute top-2 right-2 text-destructive hover:text-destructive/80"
-                  onClick={() => handleDeleteCategory(index)}
-                  aria-label="Eliminar categoría"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <div> 
-                  <div className="grid grid-cols-4 items-start gap-4">
-                    <Label htmlFor={`catName-${index}`} className="text-right col-span-1 pt-2">Nombre</Label>
-                    <div className="col-span-3">
-                      <Input 
-                        id={`catName-${index}`} 
-                        value={cat.name} 
-                        onChange={(e) => handleCategoryChange(index, 'name', e.target.value)} 
-                        className="w-full" 
-                      />
-                      {validationErrors[`categories[${index}].name`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].name`]}</p>}
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-4 items-start gap-4">
-                    <Label htmlFor={`timePerSpeaker-${index}`} className="text-right col-span-1 pt-2">Tiempo Orador (min)</Label>
-                    <div className="col-span-3">
-                      <Input 
-                        id={`timePerSpeaker-${index}`} 
-                        type="number"
-                        step="0.01"
-                        value={cat.timePerSpeaker} 
-                        onChange={(e) => handleCategoryChange(index, 'timePerSpeaker', e.target.value)} 
-                        className="w-full" 
-                        placeholder="Ej: 5 o 2.5"
-                      />
-                      {validationErrors[`categories[${index}].timePerSpeaker`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timePerSpeaker`]}</p>}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label className="text-right col-span-1">Tipo Intervención</Label>
-                    <RadioGroup
-                      value={cat.type}
-                      onValueChange={(value) => handleCategoryChange(index, 'categoryType', value as CategoryType)}
-                      className="col-span-3 flex space-x-2 items-center pt-1"
-                    >
-                      {(['introduccion', 'refutacion', 'conclusion'] as CategoryType[]).map(typeValue => (
-                        <div key={typeValue} className="flex items-center space-x-1">
-                          <RadioGroupItem value={typeValue} id={`type-${index}-${typeValue}`} />
-                          <Label htmlFor={`type-${index}-${typeValue}`} className="capitalize text-sm font-normal">
-                            {typeValue === 'introduccion' ? 'Introducción' : typeValue === 'refutacion' ? 'Refutación' : 'Conclusión'}
-                          </Label>
-                        </div>
-                      ))}
-                    </RadioGroup>
-                  </div>
-
-                  {cat.type === 'introduccion' && (
-                    <div className="grid grid-cols-4 items-center gap-4 my-2"> {/* Added my-2 here */}
-                      <Label htmlFor={`hasExamenCruzado-${index}`} className="text-right col-span-1">Permitir Ex. Cruzado</Label>
-                      <div className="col-span-3 flex items-center">
-                        <Switch
-                          id={`hasExamenCruzado-${index}`}
-                          checked={cat.hasExamenCruzado || false}
-                          onCheckedChange={(checked) => handleCategoryChange(index, 'hasExamenCruzado', checked)}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {cat.type === 'introduccion' && cat.hasExamenCruzado && (
-                    <>
-                      <div className="grid grid-cols-4 items-start gap-4">
-                        <Label htmlFor={`timeExamenFavor-${index}`} className="text-right col-span-1 pt-2">Examen Favor (min)</Label>
-                        <div className="col-span-3">
-                          <Input 
-                            id={`timeExamenFavor-${index}`} 
-                            type="number" 
-                            step="0.01"
-                            value={cat.timeExamenCruzadoFavor ?? ''} 
-                            onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoFavor', e.target.value)} 
-                            className="w-full" 
-                            placeholder="Opcional (ej: 1.5)"
-                          />
-                          {validationErrors[`categories[${index}].timeExamenCruzadoFavor`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timeExamenCruzadoFavor`]}</p>}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-4 items-start gap-4">
-                        <Label htmlFor={`timeExamenContra-${index}`} className="text-right col-span-1 pt-2">Examen Contra (min)</Label>
-                        <div className="col-span-3">
-                          <Input 
-                            id={`timeExamenContra-${index}`} 
-                            type="number"
-                            step="0.01"
-                            value={cat.timeExamenCruzadoContra ?? ''} 
-                            onChange={(e) => handleCategoryChange(index, 'timeExamenCruzadoContra', e.target.value)} 
-                            className="w-full"
-                            placeholder="Opcional (ej: 1.5)"
-                          />
-                          {validationErrors[`categories[${index}].timeExamenCruzadoContra`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].timeExamenCruzadoContra`]}</p>}
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {cat.type === 'refutacion' && (
-                    <div className="grid grid-cols-4 items-start gap-4">
-                      <Label htmlFor={`minQuestions-${index}`} className="text-right col-span-1 pt-2">Preguntas Mínimas</Label>
-                      <div className="col-span-3">
-                        <Input 
-                          id={`minQuestions-${index}`} 
-                          type="number" 
-                          value={cat.minQuestions ?? ''} 
-                          onChange={(e) => handleCategoryChange(index, 'minQuestions', e.target.value)} 
-                          className="w-full" 
-                          min="0"
-                          placeholder="Ej: 2 (0 si es opcional)"
-                        />
-                        {validationErrors[`categories[${index}].minQuestions`] && <p className="text-sm text-destructive mt-1">{validationErrors[`categories[${index}].minQuestions`]}</p>}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
         </ScrollArea>
         <DialogFooter>
           <DialogClose asChild>
