@@ -1,3 +1,4 @@
+
 /**
  * MIT License
  * Copyright (c) 2025 Luis Martín Maíllo
@@ -17,13 +18,12 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { PlusCircle } from 'lucide-react';
 import CategoryForm from './CategoryForm';
-import { EditableCategoryConfig, ValidationErrors } from '@/types/configuration';
-import { CategoryType } from '@/types/chronometer';
+import { EditableCategoryConfig, ValidationErrors, CategoryChangeField, CategoryChangeValue } from '@/types/configuration';
 
 interface CategoryListProps {
   categories: EditableCategoryConfig[];
   validationErrors: ValidationErrors;
-  onCategoryChange: (index: number, field: keyof EditableCategoryConfig | 'categoryType', value: string | boolean | CategoryType) => void;
+  onCategoryChange: (index: number, field: CategoryChangeField, value: CategoryChangeValue) => void;
   onAddCategory: () => void;
   onDeleteCategory: (index: number) => void;
 }

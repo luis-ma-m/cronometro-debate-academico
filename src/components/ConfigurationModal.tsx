@@ -22,7 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { v4 as uuidv4 } from 'uuid';
 import GlobalSettingsForm from './GlobalSettingsForm';
 import CategoryList from './CategoryList';
-import { EditableCategoryConfig, EditableGlobalSettings, ValidationErrors } from '@/types/configuration';
+import { EditableCategoryConfig, EditableGlobalSettings, ValidationErrors, CategoryChangeField, CategoryChangeValue } from '@/types/configuration';
 
 interface ConfigurationModalProps {
   isOpen: boolean;
@@ -84,7 +84,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
     }
   }, [isOpen, currentCategories, currentSettings]);
   
-  const handleCategoryChange = (index: number, field: keyof EditableCategoryConfig | 'categoryType', value: string | boolean | CategoryType) => {
+  const handleCategoryChange = (index: number, field: CategoryChangeField, value: CategoryChangeValue) => {
     const newCategories = [...categories];
     const categoryToUpdate = { ...newCategories[index] };
 
@@ -93,7 +93,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
     if (field === 'name') {
       categoryToUpdate.name = value as string;
     } else if (field === 'timePerSpeaker' || field === 'timeExamenCruzadoFavor' || field === 'timeExamenCruzadoContra' || field === 'minQuestions') {
-      (categoryToUpdate as any)[field] = value as string;
+      categoryToUpdate[field] = value as string;
     } else if (field === 'categoryType') {
       categoryToUpdate.type = value as CategoryType;
       // Reset fields based on new type, ensure string fields are reset properly for editable state
@@ -101,7 +101,7 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
         categoryToUpdate.hasExamenCruzado = false;
         categoryToUpdate.timeExamenCruzadoFavor = '';
         categoryToUpdate.timeExamenCruzadoContra = '';
-        delete categoryToUpdate.minQuestions; // no string version needed if not applicable
+        delete categoryToUpdate.minQuestions;
         categoryToUpdate.questions = []; // Clear questions as well for consistency
       } else if (value === 'refutacion') {
         categoryToUpdate.minQuestions = ''; // Default for new 'refutacion'
@@ -135,14 +135,12 @@ const ConfigurationModal: React.FC<ConfigurationModalProps> = ({
             [`categories[${index}].timeExamenCruzadoFavor`]: undefined,
             [`categories[${index}].timeExamenCruzadoContra`]: undefined,
           }));
-        } else {
-          // Fields are already strings, user will input or leave them ''
         }
       }
-       errorKey = ''; // Not directly validated on change
+      errorKey = ''; // Not directly validated on change
     } else {
       // For other fields like 'id', 'questions', 'originalIndex' that are not directly bound to an input causing this handler
-      (categoryToUpdate as any)[field] = value;
+      categoryToUpdate[field as keyof EditableCategoryConfig] = value as never;
       errorKey = ''; // No specific error key for these
     }
     

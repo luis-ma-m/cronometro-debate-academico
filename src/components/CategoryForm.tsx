@@ -1,3 +1,4 @@
+
 /**
  * MIT License
  * Copyright (c) 2025 Luis Martín Maíllo
@@ -20,14 +21,14 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Trash2 } from 'lucide-react';
-import { EditableCategoryConfig, ValidationErrors } from '@/types/configuration';
+import { EditableCategoryConfig, ValidationErrors, CategoryChangeField, CategoryChangeValue } from '@/types/configuration';
 import { CategoryType } from '@/types/chronometer';
 
 interface CategoryFormProps {
   category: EditableCategoryConfig;
   index: number;
   validationErrors: ValidationErrors;
-  onCategoryChange: (index: number, field: keyof EditableCategoryConfig | 'categoryType', value: string | boolean | CategoryType) => void;
+  onCategoryChange: (index: number, field: CategoryChangeField, value: CategoryChangeValue) => void;
   onDeleteCategory: (index: number) => void;
 }
 

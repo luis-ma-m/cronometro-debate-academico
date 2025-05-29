@@ -30,3 +30,9 @@ export interface ValidationErrors {
   settingsPositiveWarning?: string;
   settingsNegativeWarning?: string;
 }
+
+// Union type for all possible category change fields
+export type CategoryChangeField = keyof EditableCategoryConfig | 'categoryType';
+
+// Union type for all possible values that can be set
+export type CategoryChangeValue = string | boolean | CategoryType;
