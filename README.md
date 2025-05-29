@@ -57,11 +57,11 @@ pnpm preview
 
 ## 📚 Debate Format Configuration
 
-### Supported Formats
+### Compatible Formats
 
 | Format | Categories | Timer Duration | Cross-Examination | Question Tracking |
 |--------|------------|----------------|-------------------|-------------------|
-| **BP (British Parliamentary)** | Opening Government, Opening Opposition, Closing Government, Closing Opposition | 7 min speeches | Optional | Yes for refutations |
+| **FUTURE, NOT IMPLEMENTED - BP (British Parliamentary)** | Opening Government, Opening Opposition, Closing Government, Closing Opposition | 7 min speeches | Optional | Yes for refutations |
 | **WSDC (World Schools)** | Introduction, Refutation 1, Refutation 2, Conclusion | 4-5 min speeches | 1.5 min | Yes for refutations |
 | **CNED (Spanish Academic)** | Introducción, Refutación 1, Refutación 2, Conclusión | 3-5 min speeches | 1.5 min | Minimum 1-2 questions |
 
@@ -70,14 +70,14 @@ pnpm preview
 Configure debate formats via URL parameters:
 
 ```bash
-# British Parliamentary format
+# FUTURE, NOT IMPLEMENTED - British Parliamentary format
 ?format=bp&duration=420&cross_exam=false
 
 # World Schools format
 ?format=wsdc&duration=300&cross_exam=90&questions=2
 
 # Custom format via JSON
-?config={"categories":[{"name":"Opening","duration":480,"type":"introduction","hasExamenCruzado":true}]}
+?config={"categories":[{"name":"Opening","duration":480,"type":"introduction","cross_exam":true}]}
 ```
 
 ### JSON Configuration
@@ -97,7 +97,7 @@ Configure debate formats via URL parameters:
       "timeFavor": 240,
       "timeContra": 240,
       "type": "introduccion",
-      "hasExamenCruzado": true,
+      "cross_exam": true,
       "timeExamenCruzadoFavor": 90,
       "timeExamenCruzadoContra": 90
     }
@@ -115,24 +115,21 @@ Configure debate formats via URL parameters:
 
 ### Accessibility (WCAG AA Compliant)
 - **Semantic HTML**: Proper `<section>`, `<header>`, `<button>` elements
-- **ARIA Live Regions**: Screen reader announcements for time warnings
 - **Keyboard Navigation**: 
   - `Space`: Start/Stop current timer
   - `R`: Reset current timer  
   - `→`: Navigate to next speech
-- **High Contrast Mode**: Enhanced visibility option
-- **Dyslexic-Friendly Theme**: OpenDyslexic font and optimized spacing
 
 ### Real-time State Management
 - **Zustand Store**: Centralized state with automatic persistence
-- **localStorage Sync**: Survives browser refreshes and tab closures
+- **FUTURE, NOT IMPLEMENTED - localStorage Sync**: Survives browser refreshes and tab closures
 - **Cross-component Updates**: Real-time synchronization across all timers
 
 ### Question Tracking
 - **Visual Progress**: Answered/unanswered question indicators
 - **Minimum Requirements**: Enforced minimum questions per refutation
 - **Dynamic Addition**: Add questions during debate
-- **Statistical Summary**: Question completion rates in summary view
+- **Statistical Summary**: Full summary of the status of the debate, chronometers and even questions for each category.
 
 ## 🧪 Testing
 
@@ -255,20 +252,9 @@ pnpm build
 
 ## 🎯 Roadmap
 
-- [ ] PWA support with offline functionality
-- [ ] Real-time collaboration with WebRTC
 - [ ] Tournament bracket integration
-- [ ] Advanced analytics and reporting
-- [ ] Mobile app (React Native)
 - [ ] Judge scoring integration
-
-## 📞 Support
-
-- 📧 Email: support@debate-chronometer.com
-- 💬 Discord: [Join our community](https://discord.gg/debate-chronometer)
-- 🐛 Issues: [GitHub Issues](https://github.com/your-username/debate-chronometer/issues)
-- 📖 Documentation: [Full Documentation](https://docs.debate-chronometer.com)
 
 ---
 
-Built with ❤️ by the debate community, for the debate community.
+Built with ❤️ by Luis Martín Maíllo, for the debate community.
