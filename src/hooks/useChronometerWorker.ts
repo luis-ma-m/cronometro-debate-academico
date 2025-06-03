@@ -31,7 +31,6 @@ export const useChronometerWorker = ({
   const [drift, setDrift] = useState(0);
   const workerRef = useRef<Worker | null>(null);
   const updateTimerState = useChronometerStore(state => state.updateTimerState);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize Web Worker
   useEffect(() => {
@@ -62,14 +61,13 @@ export const useChronometerWorker = ({
             updateTimerState(timerId, {
               id: timerId,
               currentTime,
-              isRunning: workerIsRunning
+              isRunning: type === 'TICK' ? workerIsRunning : false
             });
           }
         };
 
         workerRef.current.onerror = (error) => {
           console.error('Worker error:', error);
-          // Fallback to setTimeout if worker fails
           setTime(initialTime);
           setIsRunning(false);
         };
@@ -82,7 +80,6 @@ export const useChronometerWorker = ({
         });
       } catch (error) {
         console.error('Failed to create worker:', error);
-        // Worker not supported, handle gracefully
         setTime(initialTime);
       }
     }
@@ -90,9 +87,6 @@ export const useChronometerWorker = ({
     return () => {
       if (workerRef.current) {
         workerRef.current.terminate();
-      }
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
       }
     };
   }, [timerId, initialTime, onTick, updateTimerState]);
