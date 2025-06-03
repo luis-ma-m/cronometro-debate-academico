@@ -31,51 +31,68 @@ export const useChronometerWorker = ({
   const [drift, setDrift] = useState(0);
   const workerRef = useRef<Worker | null>(null);
   const updateTimerState = useChronometerStore(state => state.updateTimerState);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize Web Worker
   useEffect(() => {
     if (typeof Worker !== 'undefined') {
-      workerRef.current = new Worker(
-        new URL('../workers/chronometerWorker.ts', import.meta.url),
-        { type: 'module' }
-      );
+      try {
+        workerRef.current = new Worker(
+          new URL('../workers/chronometerWorker.ts', import.meta.url),
+          { type: 'module' }
+        );
 
-      workerRef.current.onmessage = (event) => {
-        const { type, timerId: responseTimerId, currentTime, isRunning: workerIsRunning, drift: workerDrift } = event.data;
-        
-        if (responseTimerId === timerId) {
-          setTime(currentTime);
-          setDrift(workerDrift);
+        workerRef.current.onmessage = (event) => {
+          const { type, timerId: responseTimerId, currentTime, isRunning: workerIsRunning, drift: workerDrift } = event.data;
           
-          if (type === 'TICK') {
-            setIsRunning(workerIsRunning);
-            onTick?.(currentTime, workerDrift);
-          } else if (type === 'STOPPED') {
-            setIsRunning(false);
-          } else if (type === 'RESET_COMPLETE') {
-            setIsRunning(false);
+          if (responseTimerId === timerId) {
+            setTime(currentTime);
+            setDrift(workerDrift);
+            
+            if (type === 'TICK') {
+              setIsRunning(workerIsRunning);
+              onTick?.(currentTime, workerDrift);
+            } else if (type === 'STOPPED') {
+              setIsRunning(false);
+            } else if (type === 'RESET_COMPLETE') {
+              setIsRunning(false);
+            }
+
+            // Update global store
+            updateTimerState(timerId, {
+              id: timerId,
+              currentTime,
+              isRunning: workerIsRunning
+            });
           }
+        };
 
-          // Update global store
-          updateTimerState(timerId, {
-            id: timerId,
-            currentTime,
-            isRunning: workerIsRunning
-          });
-        }
-      };
+        workerRef.current.onerror = (error) => {
+          console.error('Worker error:', error);
+          // Fallback to setTimeout if worker fails
+          setTime(initialTime);
+          setIsRunning(false);
+        };
 
-      // Initialize timer in worker
-      workerRef.current.postMessage({
-        type: 'SET_TIME',
-        timerId,
-        initialTime
-      });
+        // Initialize timer in worker
+        workerRef.current.postMessage({
+          type: 'SET_TIME',
+          timerId,
+          initialTime
+        });
+      } catch (error) {
+        console.error('Failed to create worker:', error);
+        // Worker not supported, handle gracefully
+        setTime(initialTime);
+      }
     }
 
     return () => {
       if (workerRef.current) {
         workerRef.current.terminate();
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
       }
     };
   }, [timerId, initialTime, onTick, updateTimerState]);
@@ -89,56 +106,86 @@ export const useChronometerWorker = ({
         initialTime
       });
       setTime(initialTime);
+      setIsRunning(false);
     }
   }, [initialTime, timerId]);
 
   const start = useCallback(() => {
     if (disabled || !workerRef.current) return;
     
-    workerRef.current.postMessage({
-      type: 'START',
-      timerId,
-      initialTime: time
-    });
-    setIsRunning(true);
+    try {
+      workerRef.current.postMessage({
+        type: 'START',
+        timerId,
+        initialTime: time
+      });
+      setIsRunning(true);
+    } catch (error) {
+      console.error('Failed to start timer:', error);
+    }
   }, [disabled, timerId, time]);
 
   const pause = useCallback(() => {
     if (disabled || !workerRef.current) return;
     
-    workerRef.current.postMessage({
-      type: 'PAUSE',
-      timerId
-    });
+    try {
+      workerRef.current.postMessage({
+        type: 'PAUSE',
+        timerId
+      });
+    } catch (error) {
+      console.error('Failed to pause timer:', error);
+      setIsRunning(false);
+    }
   }, [disabled, timerId]);
 
   const resume = useCallback(() => {
     if (disabled || !workerRef.current) return;
     
-    workerRef.current.postMessage({
-      type: 'RESUME',
-      timerId
-    });
-    setIsRunning(true);
+    try {
+      workerRef.current.postMessage({
+        type: 'RESUME',
+        timerId
+      });
+      setIsRunning(true);
+    } catch (error) {
+      console.error('Failed to resume timer:', error);
+    }
   }, [disabled, timerId]);
 
   const reset = useCallback(() => {
     if (disabled || !workerRef.current) return;
     
-    workerRef.current.postMessage({
-      type: 'RESET',
-      timerId
-    });
-    setTime(initialTime);
+    try {
+      workerRef.current.postMessage({
+        type: 'RESET',
+        timerId
+      });
+      setTime(initialTime);
+      setIsRunning(false);
+    } catch (error) {
+      console.error('Failed to reset timer:', error);
+      setTime(initialTime);
+      setIsRunning(false);
+    }
   }, [disabled, timerId, initialTime]);
 
   const setNewTime = useCallback((newTime: number) => {
     if (workerRef.current) {
-      workerRef.current.postMessage({
-        type: 'SET_TIME',
-        timerId,
-        initialTime: newTime
-      });
+      try {
+        workerRef.current.postMessage({
+          type: 'SET_TIME',
+          timerId,
+          initialTime: newTime
+        });
+        setTime(newTime);
+        setIsRunning(false);
+      } catch (error) {
+        console.error('Failed to set new time:', error);
+        setTime(newTime);
+        setIsRunning(false);
+      }
+    } else {
       setTime(newTime);
       setIsRunning(false);
     }

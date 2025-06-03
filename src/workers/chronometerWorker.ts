@@ -23,63 +23,55 @@ interface TimerState {
   startTime: number;
   pausedTime: number;
   lastTickTime: number;
+  intervalId?: number;
 }
 
 class ChronometerWorker {
   private timers: Map<string, TimerState> = new Map();
-  private animationFrameId: number | null = null;
-  private lastFrameTime = 0;
+  private tickInterval: number | null = null;
 
   constructor() {
     this.tick = this.tick.bind(this);
-    this.startRenderLoop();
+    this.startTickLoop();
   }
 
-  private startRenderLoop() {
-    const renderLoop = (currentTime: number) => {
-      this.tick(currentTime);
-      this.animationFrameId = requestAnimationFrame(renderLoop);
-    };
-    this.animationFrameId = requestAnimationFrame(renderLoop);
+  private startTickLoop() {
+    // Use setInterval for more reliable timing
+    this.tickInterval = setInterval(() => {
+      this.tick();
+    }, 100) as unknown as number; // 10 FPS for better performance
   }
 
-  private tick(currentTime: number) {
-    const deltaTime = currentTime - this.lastFrameTime;
+  private tick() {
+    const now = performance.now();
+    const activeTimers = Array.from(this.timers.values()).filter(timer => timer.isRunning);
     
-    // Target 60 FPS (16.67ms per frame)
-    if (deltaTime >= 16.67) {
-      this.lastFrameTime = currentTime;
+    for (const timer of activeTimers) {
+      const elapsed = (now - timer.startTime) / 1000; // Convert to seconds
+      const newTime = Math.max(timer.initialTime - elapsed, -999); // Allow negative time up to -999
       
-      const activeTimers = Array.from(this.timers.values()).filter(timer => timer.isRunning);
+      // Calculate drift (difference between expected and actual time)
+      const expectedTime = timer.currentTime - 0.1; // Expected change per 100ms
+      const drift = Math.abs(newTime - expectedTime);
       
-      for (const timer of activeTimers) {
-        const now = performance.now();
-        const elapsed = (now - timer.startTime) / 1000; // Convert to seconds
-        const newTime = timer.initialTime - elapsed;
-        
-        // Calculate drift (difference between expected and actual time)
-        const expectedTime = timer.currentTime - (deltaTime / 1000);
-        const drift = Math.abs(newTime - expectedTime);
-        
-        timer.currentTime = newTime;
-        timer.lastTickTime = now;
-        
-        // Send tick update to main thread
-        const response: TimerResponse = {
-          type: 'TICK',
-          timerId: timer.id,
-          currentTime: newTime,
-          isRunning: true,
-          drift
-        };
-        
-        postMessage(response);
-      }
+      timer.currentTime = newTime;
+      timer.lastTickTime = now;
+      
+      // Send tick update to main thread
+      const response: TimerResponse = {
+        type: 'TICK',
+        timerId: timer.id,
+        currentTime: newTime,
+        isRunning: true,
+        drift
+      };
+      
+      postMessage(response);
     }
   }
 
   handleMessage(message: TimerMessage) {
-    const { type, timerId, initialTime, currentTime } = message;
+    const { type, timerId, initialTime } = message;
     
     if (!timerId) return;
 
@@ -143,12 +135,25 @@ class ChronometerWorker {
         break;
 
       case 'SET_TIME':
-        const setTimer = this.timers.get(timerId);
-        if (setTimer && initialTime !== undefined) {
-          setTimer.initialTime = initialTime;
-          setTimer.currentTime = initialTime;
-          setTimer.startTime = performance.now();
-          setTimer.isRunning = false;
+        if (initialTime !== undefined) {
+          const existingTimer = this.timers.get(timerId);
+          if (existingTimer) {
+            existingTimer.initialTime = initialTime;
+            existingTimer.currentTime = initialTime;
+            existingTimer.startTime = performance.now();
+            existingTimer.isRunning = false;
+          } else {
+            const timer: TimerState = {
+              id: timerId,
+              initialTime,
+              currentTime: initialTime,
+              isRunning: false,
+              startTime: performance.now(),
+              pausedTime: 0,
+              lastTickTime: performance.now()
+            };
+            this.timers.set(timerId, timer);
+          }
         }
         break;
     }
