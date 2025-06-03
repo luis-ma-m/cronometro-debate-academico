@@ -17,12 +17,12 @@ interface TimerResponse {
 
 interface TimerState {
   id: string;
-  initialTimeMs: number; // Store in milliseconds for consistency
-  currentTimeMs: number; // Store in milliseconds for consistency
+  initialTimeMs: number;
+  currentTimeMs: number;
   isRunning: boolean;
-  startTimestamp: number; // When the timer was started/resumed
-  pausedDuration: number; // Total time spent paused (in ms)
-  lastTickTime: number;
+  startTimestamp: number;
+  pausedTimeMs: number; // Total accumulated paused time
+  lastPauseTimestamp: number; // When last paused
 }
 
 class ChronometerWorker {
@@ -35,7 +35,9 @@ class ChronometerWorker {
   }
 
   private startTickLoop() {
-    // Use setInterval for reliable timing at 10 FPS
+    if (this.tickInterval) {
+      clearInterval(this.tickInterval);
+    }
     this.tickInterval = setInterval(() => {
       this.tick();
     }, 100) as unknown as number;
@@ -46,32 +48,44 @@ class ChronometerWorker {
     const activeTimers = Array.from(this.timers.values()).filter(timer => timer.isRunning);
     
     for (const timer of activeTimers) {
-      // Calculate elapsed time since start, minus any paused duration
-      const elapsedMs = now - timer.startTimestamp - timer.pausedDuration;
-      const remainingMs = timer.initialTimeMs - elapsedMs;
+      // Calculate total elapsed time since start, excluding paused periods
+      const rawElapsedMs = now - timer.startTimestamp;
+      const elapsedMs = rawElapsedMs - timer.pausedTimeMs;
       
-      // Convert to seconds for the response (display purposes)
-      const currentTimeSeconds = remainingMs / 1000;
-      
-      // Calculate drift (difference between expected and actual time)
-      const expectedMs = timer.currentTimeMs;
-      const actualMs = remainingMs;
-      const drift = Math.abs(actualMs - expectedMs) / 1000; // Convert to seconds for drift reporting
+      // Calculate remaining time in milliseconds
+      const remainingMs = Math.max(0, timer.initialTimeMs - elapsedMs);
       
       // Update timer state
       timer.currentTimeMs = remainingMs;
-      timer.lastTickTime = now;
       
-      // Send tick update to main thread
-      const response: TimerResponse = {
+      // Convert to seconds for display
+      const currentTimeSeconds = remainingMs / 1000;
+      
+      // Calculate drift (minimal for this implementation)
+      const drift = 0;
+      
+      // Auto-stop when time expires
+      if (remainingMs <= 0) {
+        timer.isRunning = false;
+        
+        postMessage({
+          type: 'STOPPED',
+          timerId: timer.id,
+          currentTime: 0,
+          isRunning: false,
+          drift: 0
+        } as TimerResponse);
+        continue;
+      }
+      
+      // Send normal tick update
+      postMessage({
         type: 'TICK',
         timerId: timer.id,
         currentTime: currentTimeSeconds,
         isRunning: true,
         drift
-      };
-      
-      postMessage(response);
+      } as TimerResponse);
     }
   }
 
@@ -87,11 +101,11 @@ class ChronometerWorker {
           const timer: TimerState = {
             id: timerId,
             initialTimeMs: initialTime * 1000, // Convert seconds to milliseconds
-            currentTimeMs: initialTime * 1000, // Convert seconds to milliseconds
+            currentTimeMs: initialTime * 1000,
             isRunning: true,
             startTimestamp: now,
-            pausedDuration: 0,
-            lastTickTime: now
+            pausedTimeMs: 0,
+            lastPauseTimestamp: 0
           };
           this.timers.set(timerId, timer);
         }
@@ -100,12 +114,14 @@ class ChronometerWorker {
       case 'PAUSE':
         const pauseTimer = this.timers.get(timerId);
         if (pauseTimer && pauseTimer.isRunning) {
+          const now = performance.now();
           pauseTimer.isRunning = false;
+          pauseTimer.lastPauseTimestamp = now;
           
           postMessage({
             type: 'STOPPED',
             timerId,
-            currentTime: pauseTimer.currentTimeMs / 1000, // Convert back to seconds
+            currentTime: pauseTimer.currentTimeMs / 1000,
             isRunning: false,
             drift: 0
           } as TimerResponse);
@@ -116,11 +132,15 @@ class ChronometerWorker {
         const resumeTimer = this.timers.get(timerId);
         if (resumeTimer && !resumeTimer.isRunning) {
           const now = performance.now();
-          // Calculate how long we were paused and add it to total paused duration
-          const pauseDuration = now - resumeTimer.lastTickTime;
-          resumeTimer.pausedDuration += pauseDuration;
+          
+          // Add the paused duration to total paused time
+          if (resumeTimer.lastPauseTimestamp > 0) {
+            const pauseDuration = now - resumeTimer.lastPauseTimestamp;
+            resumeTimer.pausedTimeMs += pauseDuration;
+          }
+          
           resumeTimer.isRunning = true;
-          resumeTimer.lastTickTime = now;
+          resumeTimer.lastPauseTimestamp = 0;
         }
         break;
 
@@ -131,13 +151,13 @@ class ChronometerWorker {
           resetTimer.currentTimeMs = resetTimer.initialTimeMs;
           resetTimer.isRunning = false;
           resetTimer.startTimestamp = now;
-          resetTimer.pausedDuration = 0;
-          resetTimer.lastTickTime = now;
+          resetTimer.pausedTimeMs = 0;
+          resetTimer.lastPauseTimestamp = 0;
           
           postMessage({
             type: 'RESET_COMPLETE',
             timerId,
-            currentTime: resetTimer.initialTimeMs / 1000, // Convert back to seconds
+            currentTime: resetTimer.initialTimeMs / 1000,
             isRunning: false,
             drift: 0
           } as TimerResponse);
@@ -149,21 +169,21 @@ class ChronometerWorker {
           const now = performance.now();
           const existingTimer = this.timers.get(timerId);
           if (existingTimer) {
-            existingTimer.initialTimeMs = initialTime * 1000; // Convert seconds to milliseconds
-            existingTimer.currentTimeMs = initialTime * 1000; // Convert seconds to milliseconds
+            existingTimer.initialTimeMs = initialTime * 1000;
+            existingTimer.currentTimeMs = initialTime * 1000;
             existingTimer.startTimestamp = now;
-            existingTimer.pausedDuration = 0;
+            existingTimer.pausedTimeMs = 0;
+            existingTimer.lastPauseTimestamp = 0;
             existingTimer.isRunning = false;
-            existingTimer.lastTickTime = now;
           } else {
             const timer: TimerState = {
               id: timerId,
-              initialTimeMs: initialTime * 1000, // Convert seconds to milliseconds
-              currentTimeMs: initialTime * 1000, // Convert seconds to milliseconds
+              initialTimeMs: initialTime * 1000,
+              currentTimeMs: initialTime * 1000,
               isRunning: false,
               startTimestamp: now,
-              pausedDuration: 0,
-              lastTickTime: now
+              pausedTimeMs: 0,
+              lastPauseTimestamp: 0
             };
             this.timers.set(timerId, timer);
           }

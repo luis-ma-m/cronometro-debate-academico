@@ -49,7 +49,7 @@ export const useChronometerWorker = ({
             setDrift(workerDrift);
             
             if (type === 'TICK') {
-              setIsRunning(workerIsRunning);
+              setIsRunning(true);
               onTick?.(currentTime, workerDrift);
             } else if (type === 'STOPPED') {
               setIsRunning(false);
@@ -61,7 +61,7 @@ export const useChronometerWorker = ({
             updateTimerState(timerId, {
               id: timerId,
               currentTime,
-              isRunning: type === 'TICK' ? workerIsRunning : false
+              isRunning: type === 'TICK'
             });
           }
         };
@@ -127,6 +127,7 @@ export const useChronometerWorker = ({
         type: 'PAUSE',
         timerId
       });
+      // Don't set isRunning here - wait for worker response
     } catch (error) {
       console.error('Failed to pause timer:', error);
       setIsRunning(false);
