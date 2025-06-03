@@ -1,3 +1,4 @@
+
 /**
  * MIT License
  * Copyright (c) 2025 Luis Martín Maíllo
@@ -13,10 +14,10 @@
  * copies or substantial portions of the Software.
  */
 
-
 import React from 'react';
 import { CategoryConfig, GlobalSettings, PositionType, Question, TimerUpdatePayload } from '@/types/chronometer';
 import CategoryCard from './CategoryCard';
+import TimerControl from './TimerControl';
 import { v4 as uuidv4 } from 'uuid';
 import QuestionTracker from './QuestionTracker';
 
@@ -84,15 +85,74 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({
     );
   };
 
+  const renderSingleTimer = () => {
+    let initialTime = 0;
+    let positionName = '';
+    let baseBgColor = '';
+
+    switch (activePositionType) {
+      case 'favor':
+        initialTime = category.timeFavor;
+        positionName = 'A favor';
+        baseBgColor = 'bg-soft-green';
+        break;
+      case 'contra':
+        initialTime = category.timeContra;
+        positionName = 'En contra';
+        baseBgColor = 'bg-soft-red';
+        break;
+      case 'examen_favor':
+        if (category.type === 'introduccion' && category.hasExamenCruzado && category.timeExamenCruzadoFavor !== undefined) {
+          initialTime = category.timeExamenCruzadoFavor;
+          positionName = 'Examen Cruzado (A favor)';
+          baseBgColor = 'bg-soft-green';
+        } else {
+          return (
+            <div className="text-center p-8 text-muted-foreground">
+              Examen Cruzado no disponible para esta categoría.
+            </div>
+          );
+        }
+        break;
+      case 'examen_contra':
+        if (category.type === 'introduccion' && category.hasExamenCruzado && category.timeExamenCruzadoContra !== undefined) {
+          initialTime = category.timeExamenCruzadoContra;
+          positionName = 'Examen Cruzado (En contra)';
+          baseBgColor = 'bg-soft-red';
+        } else {
+          return (
+            <div className="text-center p-8 text-muted-foreground">
+              Examen Cruzado no disponible para esta categoría.
+            </div>
+          );
+        }
+        break;
+      default:
+        return (
+          <div className="text-center p-8 text-muted-foreground">
+            Turno no disponible.
+          </div>
+        );
+    }
+
+    return (
+      <div className="w-full flex flex-col items-center py-4">
+        <TimerControl
+          initialTime={initialTime}
+          categoryId={category.id}
+          position={activePositionType}
+          settings={settings}
+          baseBgColor={baseBgColor}
+          positionName={positionName}
+          size="large"
+        />
+      </div>
+    );
+  };
+
   return (
     <div className="w-full max-w-4xl mx-auto">
-      <CategoryCard 
-        category={category} 
-        settings={settings} 
-        onTimerUpdate={handleTimerUpdate}
-        displayOnlyPosition={activePositionType}
-        onQuestionUpdate={onQuestionUpdate}
-      />
+      {renderSingleTimer()}
       {renderQuestionTracker()}
     </div>
   );
