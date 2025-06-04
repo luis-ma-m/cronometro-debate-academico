@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { TimerUpdatePayload } from '@/types/chronometer';
 
@@ -15,111 +14,109 @@ export const useDebateTimer = ({
   onUpdate,
   disabled = false
 }: UseDebateTimerProps) => {
-  // Store time internally in milliseconds to avoid unit conversion bugs
-  const initialTimeMs = initialTime * 1000;
-  const [remainingMs, setRemainingMs] = useState(initialTimeMs);
+  // [1] UNIFY TO MILLISECONDS AT LOAD - convert once and store in ms
+  const speechDurationMs = initialTime * 1000;
+  
+  // State for remaining time in milliseconds
+  const [remainingMs, setRemainingMs] = useState(speechDurationMs);
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   
+  // [2] SINGLE INTERVAL REF AND TIMING REFS
   const intervalRef = useRef<number | null>(null);
   const startTimestampRef = useRef<number | null>(null);
-  const pausedDurationRef = useRef<number>(0);
+  const elapsedMs = useRef<number>(0);
 
   // Report timer state to parent via callback
   const reportUpdate = useCallback(() => {
     if (onUpdate) {
       onUpdate({
         id: timerId,
-        currentTime: remainingMs / 1000, // Convert back to seconds for external API
+        currentTime: remainingMs / 1000, // Convert to seconds for external API
         isRunning
       });
     }
   }, [onUpdate, timerId, remainingMs, isRunning]);
 
-  // Clear any existing interval
-  const clearCurrentInterval = useCallback(() => {
-    if (intervalRef.current) {
+  // [2] REWRITE tick() TO WORK PURELY IN MS
+  const tick = useCallback(() => {
+    if (startTimestampRef.current === null) return;
+
+    // Compute how many ms have passed
+    const now = performance.now();
+    const delta = now - startTimestampRef.current; // in ms
+    elapsedMs.current = delta;
+
+    // Compute remaining ms
+    const remaining = speechDurationMs - delta; // both in ms
+
+    if (remaining <= 0) {
+      // Force it to exactly zero so display doesn't flicker negative
+      setRemainingMs(0);
+      stopTimer(); // exactly once
+      return;
+    }
+
+    // Otherwise update the displayed time
+    setRemainingMs(remaining);
+  }, [speechDurationMs]);
+
+  // [4] GUARD AGAINST MULTIPLE INTERVALS - startTimer()
+  const startTimer = useCallback(() => {
+    if (disabled || intervalRef.current !== null) return; // prevents stacking intervals
+    
+    // Compute a fresh startTimestampRef
+    if (!isPaused) {
+      // Fresh start
+      startTimestampRef.current = performance.now();
+      elapsedMs.current = 0;
+    } else {
+      // Resuming from pause - we want to resume from the existing elapsedMs
+      startTimestampRef.current = performance.now() - elapsedMs.current;
+    }
+    
+    // Create exactly one interval and store its ID
+    intervalRef.current = window.setInterval(tick, 50); // 50ms for smooth updates
+    
+    // [5] FIX THE UI-STATE MISMATCH
+    setIsRunning(true);
+    setIsPaused(false); // ensure "paused" flag is off
+  }, [disabled, isPaused, tick]);
+
+  // pauseTimer()
+  const pauseTimer = useCallback(() => {
+    if (!isRunning) return;
+    
+    if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-  }, []);
-
-  // Set a new time value (useful when config changes)
-  const setNewTime = useCallback((newTimeSeconds: number) => {
-    const newTimeMs = newTimeSeconds * 1000;
-    setRemainingMs(newTimeMs);
-    setIsRunning(false);
-    setIsPaused(false);
-    clearCurrentInterval();
-    startTimestampRef.current = null;
-    pausedDurationRef.current = 0;
-  }, [clearCurrentInterval]);
-
-  // Start the timer
-  const startTimer = useCallback(() => {
-    if (disabled || intervalRef.current) return; // Prevent multiple intervals
     
-    setIsRunning(true);
-    setIsPaused(false);
-    startTimestampRef.current = Date.now();
-    
-    intervalRef.current = window.setInterval(() => {
-      const now = Date.now();
-      const elapsedMs = now - startTimestampRef.current! - pausedDurationRef.current;
-      const newRemainingMs = Math.max(0, initialTimeMs - elapsedMs);
-      
-      setRemainingMs(newRemainingMs);
-      
-      // Stop when time expires
-      if (newRemainingMs <= 0) {
-        setIsRunning(false);
-        setIsPaused(false);
-        clearInterval(intervalRef.current!);
-        intervalRef.current = null;
-      }
-    }, 50);
-  }, [disabled, initialTimeMs]);
-
-  // Pause the timer
-  const pauseTimer = useCallback(() => {
-    if (!isRunning || !startTimestampRef.current) return;
-    
-    const now = Date.now();
-    const sessionDuration = now - startTimestampRef.current - pausedDurationRef.current;
-    pausedDurationRef.current += sessionDuration;
-    
+    // [5] FIX THE UI-STATE MISMATCH
     setIsRunning(false);
     setIsPaused(true);
-    clearCurrentInterval();
-    startTimestampRef.current = now; // Reset for next session
-  }, [isRunning, clearCurrentInterval]);
+    // elapsedMs.current already holds how many ms have passed so far
+  }, [isRunning]);
 
-  // Resume the timer
+  // resumeTimer()
   const resumeTimer = useCallback(() => {
     if (isRunning || !isPaused) return;
-    
-    setIsRunning(true);
-    setIsPaused(false);
-    startTimestampRef.current = Date.now();
-    
-    intervalRef.current = window.setInterval(() => {
-      const now = Date.now();
-      const elapsedMs = now - startTimestampRef.current! - pausedDurationRef.current;
-      const newRemainingMs = Math.max(0, initialTimeMs - elapsedMs);
-      
-      setRemainingMs(newRemainingMs);
-      
-      // Stop when time expires
-      if (newRemainingMs <= 0) {
-        setIsRunning(false);
-        setIsPaused(false);
-        clearInterval(intervalRef.current!);
-        intervalRef.current = null;
-      }
-    }, 50);
-  }, [isRunning, isPaused, initialTimeMs]);
+    startTimer(); // Will handle resume logic via isPaused check
+  }, [isRunning, isPaused, startTimer]);
 
-  // Toggle start/pause
+  // [5] FIX THE UI-STATE MISMATCH - stopTimer()
+  const stopTimer = useCallback(() => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    setIsRunning(false);
+    setIsPaused(false); // reset so the Play button shows
+    elapsedMs.current = 0;
+    startTimestampRef.current = null;
+  }, []);
+
+  // Combined start/pause toggle
   const startPause = useCallback(() => {
     if (disabled) return;
     
@@ -132,44 +129,65 @@ export const useDebateTimer = ({
     }
   }, [disabled, isRunning, isPaused, startTimer, pauseTimer, resumeTimer]);
 
-  // Reset the timer to its initial value
+  // [5] FIX THE UI-STATE MISMATCH - reset()
   const reset = useCallback(() => {
     if (disabled) return;
     
-    setRemainingMs(initialTimeMs);
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    elapsedMs.current = 0;
+    startTimestampRef.current = null;
     setIsRunning(false);
     setIsPaused(false);
-    clearCurrentInterval();
+    setRemainingMs(speechDurationMs); // show the full time again
+  }, [disabled, speechDurationMs]);
+
+  // Set new time (useful when config changes)
+  const setNewTime = useCallback((newTimeSeconds: number) => {
+    const newDurationMs = newTimeSeconds * 1000;
+    
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    elapsedMs.current = 0;
     startTimestampRef.current = null;
-    pausedDurationRef.current = 0;
-  }, [initialTimeMs, disabled, clearCurrentInterval]);
+    setIsRunning(false);
+    setIsPaused(false);
+    setRemainingMs(newDurationMs);
+  }, []);
 
   // Handle disabled state
   useEffect(() => {
     if (disabled && isRunning) {
-      setIsRunning(false);
-      setIsPaused(false);
-      clearCurrentInterval();
+      stopTimer();
     }
-  }, [disabled, isRunning, clearCurrentInterval]);
+  }, [disabled, isRunning, stopTimer]);
 
   // Update when initial time changes
   useEffect(() => {
-    const newTimeMs = initialTime * 1000;
-    setRemainingMs(newTimeMs);
+    const newDurationMs = initialTime * 1000;
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    elapsedMs.current = 0;
+    startTimestampRef.current = null;
     setIsRunning(false);
     setIsPaused(false);
-    clearCurrentInterval();
-    startTimestampRef.current = null;
-    pausedDurationRef.current = 0;
-  }, [initialTime, clearCurrentInterval]);
+    setRemainingMs(newDurationMs);
+  }, [initialTime]);
 
-  // Cleanup interval on unmount
+  // [4] GUARD AGAINST MULTIPLE INTERVALS - cleanup on unmount
   useEffect(() => {
     return () => {
-      clearCurrentInterval();
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+      }
     };
-  }, [clearCurrentInterval]);
+  }, []);
 
   // Report initial state and changes
   useEffect(() => {
