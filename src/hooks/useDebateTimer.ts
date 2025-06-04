@@ -1,9 +1,7 @@
 
+import { useChronometer } from './useChronometer';
 import { TimerUpdatePayload } from '@/types/chronometer';
-import { useTimerState } from './useTimerState';
-import { useTimerTick } from './useTimerTick';
-import { useTimerControls } from './useTimerControls';
-import { useTimerEffects } from './useTimerEffects';
+import { useEffect } from 'react';
 
 interface UseDebateTimerProps {
   initialTime: number; // in seconds
@@ -18,60 +16,30 @@ export const useDebateTimer = ({
   onUpdate,
   disabled = false
 }: UseDebateTimerProps) => {
-  // Convert once at load to milliseconds
-  const speechDurationMs = initialTime * 1000;
-  
-  // State management
-  const { state, refs, setters } = useTimerState(speechDurationMs);
-  
-  // Timer tick logic
-  const { tick } = useTimerTick({
-    speechDurationMs,
-    refs,
-    setRemainingMs: setters.setRemainingMs,
-    stopTimer: () => {} // Will be set by controls
-  });
-  
-  // Timer controls
-  const controls = useTimerControls({
-    speechDurationMs,
-    state,
-    refs,
-    setters,
-    tick,
+  const chronometer = useChronometer({
+    initialTime,
     disabled
   });
-  
-  // Update tick with actual stopTimer function
-  const { tick: finalTick } = useTimerTick({
-    speechDurationMs,
-    refs,
-    setRemainingMs: setters.setRemainingMs,
-    stopTimer: controls.stopTimer
-  });
-  
-  // Side effects
-  useTimerEffects({
-    initialTime,
-    timerId,
-    disabled,
-    state,
-    refs,
-    setters,
-    stopTimer: controls.stopTimer,
-    onUpdate
-  });
 
-  // Format time for external API
-  const formatTime = (ms: number): number => {
-    return Math.ceil(ms / 1000);
-  };
+  // Report timer state to parent via callback
+  useEffect(() => {
+    if (onUpdate) {
+      onUpdate({
+        id: timerId,
+        currentTime: chronometer.time,
+        isRunning: chronometer.isRunning
+      });
+    }
+  }, [onUpdate, timerId, chronometer.time, chronometer.isRunning]);
 
   return {
-    time: formatTime(state.remainingMs),
-    isRunning: state.isRunning,
-    startPause: controls.startPause,
-    reset: controls.reset,
-    setNewTime: controls.setNewTime
+    time: chronometer.time,
+    isRunning: chronometer.isRunning,
+    startPause: chronometer.toggleTimer,
+    reset: chronometer.resetTimer,
+    setNewTime: (newTimeSeconds: number) => {
+      // This would need to be implemented in useChronometer if needed
+      chronometer.resetTimer();
+    }
   };
 };

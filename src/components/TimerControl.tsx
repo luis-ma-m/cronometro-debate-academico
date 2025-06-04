@@ -1,22 +1,14 @@
+
 /**
  * MIT License
  * Copyright (c) 2025 Luis Martín Maíllo
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- * 
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
  */
 
 import React, { useEffect, useCallback } from 'react';
 import { useChronometerWorker } from '@/hooks/useChronometerWorker';
 import { useAccessibility } from '@/components/AccessibilityProvider';
-import DebateTimerDisplay from './DebateTimerDisplay';
+import TimerDisplay from './TimerDisplay';
+import TimerControls from './TimerControls';
 import { GlobalSettings, PositionType } from '@/types/chronometer';
 
 interface TimerControlProps {
@@ -108,16 +100,27 @@ const TimerControl: React.FC<TimerControlProps> = ({
   };
 
   return (
-    <DebateTimerDisplay
-      time={time}
-      isRunning={isRunning}
-      onStartPause={handleStartPause}
-      onReset={reset}
-      settings={settings}
-      baseBgColor={baseBgColor}
-      positionName={positionName}
-      size={size}
-    />
+    <div className={`rounded-lg shadow ${size === 'large' ? 'bg-card' : baseBgColor} ${size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto' : 'p-4'}`}>
+      <TimerDisplay
+        time={time}
+        isRunning={isRunning}
+        initialTime={initialTime}
+        title={positionName}
+        size={size}
+        warningThreshold={settings.positiveWarningThreshold}
+        criticalThreshold={Math.min(30, settings.positiveWarningThreshold / 2)}
+      />
+      
+      <div className="mt-4">
+        <TimerControls
+          isRunning={isRunning}
+          isPaused={time < initialTime && !isRunning}
+          onToggle={handleStartPause}
+          onReset={reset}
+          size={size}
+        />
+      </div>
+    </div>
   );
 };
 
