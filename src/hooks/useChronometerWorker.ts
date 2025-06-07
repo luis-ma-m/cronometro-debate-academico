@@ -30,7 +30,12 @@ export const useChronometerWorker = ({
   const [isRunning, setIsRunning] = useState(false);
   const [drift, setDrift] = useState(0);
   const workerRef = useRef<Worker | null>(null);
+  const onTickRef = useRef<typeof onTick>();
   const updateTimerState = useChronometerStore(state => state.updateTimerState);
+
+  useEffect(() => {
+    onTickRef.current = onTick;
+  }, [onTick]);
 
   // Initialize Web Worker
   useEffect(() => {
@@ -50,7 +55,7 @@ export const useChronometerWorker = ({
             
             if (type === 'TICK') {
               setIsRunning(true);
-              onTick?.(currentTime, workerDrift);
+              onTickRef.current?.(currentTime, workerDrift);
             } else if (type === 'STOPPED') {
               setIsRunning(false);
             } else if (type === 'RESET_COMPLETE') {
@@ -89,7 +94,7 @@ export const useChronometerWorker = ({
         workerRef.current.terminate();
       }
     };
-  }, [timerId, initialTime, onTick, updateTimerState]);
+  }, [timerId, initialTime, updateTimerState]);
 
   // Update worker when initial time changes
   useEffect(() => {
