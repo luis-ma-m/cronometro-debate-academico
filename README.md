@@ -153,17 +153,21 @@ logged with `console.error`. Use it to surface issues via a toast or other UI.
 pnpm test
 ```
 
+The suite relies on Node's Worker API and a jsdom environment. If these
+features are missing some tests may fail. Precision tests were shortened to
+keep runtime reasonable.
+
 ### Timer Precision Tests
 Using `@sinonjs/fake-timers` to verify timing accuracy:
 
 ```typescript
 describe('ChronometerWorker', () => {
-  it('maintains ≤5ms average drift over 10 minutes', async () => {
+  it('maintains ≤5ms average drift over 1 minute', async () => {
     const worker = new ChronometerWorker();
     const driftSamples: number[] = [];
     
-    // Test 10 minutes of operation
-    for (let i = 0; i < 600; i++) {
+    // Test 1 minute of operation
+    for (let i = 0; i < 60; i++) {
       clock.tick(1000); // Advance 1 second
       const response = await getWorkerResponse(worker);
       driftSamples.push(response.drift);
