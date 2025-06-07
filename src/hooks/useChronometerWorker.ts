@@ -7,6 +7,8 @@ interface UseChronometerWorkerProps {
   timerId: string;
   disabled?: boolean;
   onTick?: (currentTime: number, drift: number) => void;
+  /** Optional error callback. Receives the thrown error and a context message. */
+  onError?: (error: unknown, context: string) => void;
 }
 
 interface TimerControls {
@@ -24,7 +26,8 @@ export const useChronometerWorker = ({
   initialTime, 
   timerId, 
   disabled = false,
-  onTick
+  onTick,
+  onError
 }: UseChronometerWorkerProps): TimerControls => {
   const [time, setTime] = useState(initialTime);
   const [isRunning, setIsRunning] = useState(false);
@@ -32,13 +35,18 @@ export const useChronometerWorker = ({
   const workerRef = useRef<Worker | null>(null);
   const onTickRef = useRef<typeof onTick>();
   const updateTimerState = useChronometerStore(state => state.updateTimerState);
-  const onTickRef = useRef<typeof onTick>();
+  const handleError = useCallback(
+    (context: string, error: unknown) => {
+      if (onError) {
+        onError(error, context);
+      } else {
+        console.error(context, error);
+      }
+    },
+    [onError]
+  );
 
   // Keep latest onTick callback without reinitializing worker
-  useEffect(() => {
-    onTickRef.current = onTick;
-  }, [onTick]);
-
   useEffect(() => {
     onTickRef.current = onTick;
   }, [onTick]);
@@ -78,7 +86,7 @@ export const useChronometerWorker = ({
         };
 
         workerRef.current.onerror = (error) => {
-          console.error('Worker error:', error);
+          handleError('Worker error:', error);
           setTime(initialTime);
           setIsRunning(false);
         };
@@ -90,7 +98,7 @@ export const useChronometerWorker = ({
           initialTime
         });
       } catch (error) {
-        console.error('Failed to create worker:', error);
+        handleError('Failed to create worker:', error);
         setTime(initialTime);
       }
     }
@@ -126,7 +134,7 @@ export const useChronometerWorker = ({
       });
       setIsRunning(true);
     } catch (error) {
-      console.error('Failed to start timer:', error);
+      handleError('Failed to start timer:', error);
     }
   }, [disabled, timerId, time]);
 
@@ -140,7 +148,7 @@ export const useChronometerWorker = ({
       });
       // Don't set isRunning here - wait for worker response
     } catch (error) {
-      console.error('Failed to pause timer:', error);
+      handleError('Failed to pause timer:', error);
       setIsRunning(false);
     }
   }, [disabled, timerId]);
@@ -155,7 +163,7 @@ export const useChronometerWorker = ({
       });
       setIsRunning(true);
     } catch (error) {
-      console.error('Failed to resume timer:', error);
+      handleError('Failed to resume timer:', error);
     }
   }, [disabled, timerId]);
 
@@ -170,7 +178,7 @@ export const useChronometerWorker = ({
       setTime(initialTime);
       setIsRunning(false);
     } catch (error) {
-      console.error('Failed to reset timer:', error);
+      handleError('Failed to reset timer:', error);
       setTime(initialTime);
       setIsRunning(false);
     }
@@ -187,7 +195,7 @@ export const useChronometerWorker = ({
         setTime(newTime);
         setIsRunning(false);
       } catch (error) {
-        console.error('Failed to set new time:', error);
+        handleError('Failed to set new time:', error);
         setTime(newTime);
         setIsRunning(false);
       }
