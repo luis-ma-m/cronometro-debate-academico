@@ -11,7 +11,6 @@ export interface TimerDisplayProps {
   initialTime: number
   title?: string
   size?: 'normal' | 'large'
-  showProgress?: boolean
   /** Seconds remaining at which to show a warning (time > 0) */
   warningThreshold?: number
   /** Negative seconds at which to start pulsing (e.g. -10) */
@@ -24,7 +23,6 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
   initialTime,
   title,
   size = 'normal',
-  showProgress = true,
   warningThreshold = 60,
   negativeWarningThreshold = -10,
 }) => {
@@ -34,8 +32,6 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
   const isNegative = time < 0
   const isNegativeWarning = time <= negativeWarningThreshold
 
-  // Percentage for progress bar (clamped 0–100)
-  const percentage = Math.max(0, Math.min(100, (time / initialTime) * 100))
 
   // Container background / border / animation
   const containerClasses = cn(
@@ -81,29 +77,6 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
         {formatTime(time)}
       </div>
 
-      {showProgress && (
-        <div className="w-full">
-          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-            <div
-              className={cn(
-                'h-full transition-all duration-1000 ease-linear',
-                {
-                  'bg-green-500': !isWarning && !isExpired && !isNegative,
-                  'bg-yellow-500': isWarning,
-                  'bg-red-500': isExpired || isNegative,
-                }
-              )}
-              style={{ width: `${percentage}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {isRunning && (
-        <div className="text-sm text-muted-foreground">
-          En ejecución...
-        </div>
-      )}
     </div>
   )
 }
