@@ -113,6 +113,7 @@ const TimerControl: React.FC<TimerControlProps> = ({
         title={positionName}
         size={size}
         warningThreshold={settings.positiveWarningThreshold}
+        negativeWarningThreshold={settings.negativeWarningThreshold}
       />
       
       <div className="mt-4">
