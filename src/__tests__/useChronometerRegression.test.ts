@@ -8,7 +8,7 @@ Object.defineProperty(global, 'performance', {
   writable: true
 });
 
-describe.skip('useChronometer regression - timer continues after first second', () => {
+describe('useChronometer regression - timer continues after first second', () => {
   let currentTime = 0;
 
   beforeEach(() => {
@@ -32,7 +32,7 @@ describe.skip('useChronometer regression - timer continues after first second', 
     // After 1 second it should still be running with about 2s remaining
     currentTime = 1000;
     act(() => {
-      vi.advanceTimersByTime(50);
+      vi.advanceTimersByTime(1000);
     });
     expect(result.current.isRunning).toBe(true);
     expect(result.current.time).toBe(2);
@@ -40,7 +40,7 @@ describe.skip('useChronometer regression - timer continues after first second', 
     // After 2 seconds it should continue running with ~1s left
     currentTime = 2000;
     act(() => {
-      vi.advanceTimersByTime(50);
+      vi.advanceTimersByTime(1000);
     });
     expect(result.current.isRunning).toBe(true);
     expect(result.current.time).toBe(1);
@@ -48,7 +48,7 @@ describe.skip('useChronometer regression - timer continues after first second', 
     // At 3 seconds it should stop
     currentTime = 3000;
     act(() => {
-      vi.advanceTimersByTime(50);
+      vi.advanceTimersByTime(1000);
     });
     expect(result.current.isRunning).toBe(false);
     expect(result.current.time).toBe(0);
