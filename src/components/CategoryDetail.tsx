@@ -20,6 +20,7 @@ import CategoryCard from './CategoryCard';
 import TimerControl from './TimerControl';
 import { v4 as uuidv4 } from 'uuid';
 import QuestionTracker from './QuestionTracker';
+import { useChronometerStore } from '@/stores/chronometerStore';
 
 interface CategoryDetailProps {
   category: CategoryConfig;
@@ -61,10 +62,15 @@ const CategoryDetail: React.FC<CategoryDetailProps> = ({
     onQuestionUpdate(category.id, [...category.questions, newQuestion]);
   };
 
-  // Handle timer updates (can be a no-op since we're using Zustand store)
+  // Handle timer updates
+  const updateTimerState = useChronometerStore(state => state.updateTimerState);
+
   const handleTimerUpdate = (payload: TimerUpdatePayload) => {
-    // Timer updates are now handled by the Zustand store
-    console.log('Timer update:', payload);
+    updateTimerState(payload.id, {
+      id: payload.id,
+      currentTime: payload.currentTime,
+      isRunning: payload.isRunning
+    });
   };
 
   const renderQuestionTracker = () => {
