@@ -19,13 +19,13 @@ import FakeTimers from '@sinonjs/fake-timers';
 
 // Mock Worker API for testing
 class MockWorker {
-  onmessage: ((this: MockWorker, ev: MessageEvent) => any) | null = null;
-  onmessageerror: ((this: MockWorker, ev: MessageEvent) => any) | null = null;
-  onerror: ((this: MockWorker, ev: ErrorEvent) => any) | null = null;
+  onmessage: ((this: MockWorker, ev: MessageEvent) => void) | null = null;
+  onmessageerror: ((this: MockWorker, ev: MessageEvent) => void) | null = null;
+  onerror: ((this: MockWorker, ev: ErrorEvent) => void) | null = null;
   
   constructor(private url: string | URL, private options?: WorkerOptions) {}
   
-  postMessage(data: any): void {
+  postMessage(data: { timerId: string }): void {
     // Simulate worker message processing
     if (this.onmessage) {
       // This would normally come from the worker thread
@@ -51,13 +51,13 @@ class MockWorker {
 
 // Setup global mocks
 beforeEach(() => {
-  (global as any).Worker = MockWorker;
+  (globalThis as { Worker: typeof Worker }).Worker = MockWorker as unknown as typeof Worker;
   global.performance = {
     now: () => Date.now()
   } as Performance;
   
   global.requestAnimationFrame = (callback: FrameRequestCallback): number => {
-    return setTimeout(() => callback(Date.now()), 16) as any;
+    return setTimeout(() => callback(Date.now()), 16) as unknown as number;
   };
 });
 
@@ -150,7 +150,13 @@ describe.skip('ChronometerWorker Precision Tests', () => {
 
   it('should reset timer state accurately', async () => {
     const worker = new Worker('/src/workers/chronometerWorker.ts');
-    let resetResponse: any = null;
+    let resetResponse: {
+      type: 'RESET_COMPLETE';
+      timerId: string;
+      currentTime: number;
+      isRunning: boolean;
+      drift: number;
+    } | null = null;
     
     worker.onmessage = (event) => {
       if (event.data.type === 'RESET_COMPLETE') {

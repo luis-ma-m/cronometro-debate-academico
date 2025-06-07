@@ -15,10 +15,14 @@ class MockWorker {
 
   constructor(public url: string | URL, public options?: WorkerOptions) {
     MockWorker.count++;
-    (global as any).latestWorker = this;
+    (globalThis as { latestWorker?: MockWorker }).latestWorker = this;
   }
 
-  postMessage(data: any) {
+  postMessage(data: {
+    type: 'SET_TIME' | 'START' | 'RESET';
+    timerId?: string;
+    initialTime?: number;
+  }) {
     this.timerId = data.timerId || this.timerId;
     switch (data.type) {
       case 'SET_TIME':
@@ -64,16 +68,16 @@ const settings: GlobalSettings = {
   negativeWarningThreshold: -10
 };
 
-let originalWorker: any;
+let originalWorker: typeof Worker;
 
 beforeEach(() => {
-  originalWorker = (global as any).Worker;
-  (global as any).Worker = MockWorker as any;
+  originalWorker = global.Worker;
+  global.Worker = MockWorker as unknown as typeof Worker;
   MockWorker.count = 0;
 });
 
 afterEach(() => {
-  (global as any).Worker = originalWorker;
+  global.Worker = originalWorker;
 });
 
 describe('useChronometerWorker stability', () => {
@@ -97,7 +101,7 @@ describe('useChronometerWorker stability', () => {
       fireEvent.click(toggle);
     });
 
-    const worker: any = (global as any).latestWorker;
+    const worker = (globalThis as { latestWorker: MockWorker }).latestWorker;
 
     act(() => {
       worker.simulateTick();

@@ -111,13 +111,13 @@ class ChronometerWorker {
         }
         break;
 
-      case 'PAUSE':
+      case 'PAUSE': {
         const pauseTimer = this.timers.get(timerId);
         if (pauseTimer && pauseTimer.isRunning) {
           const now = performance.now();
           pauseTimer.isRunning = false;
           pauseTimer.lastPauseTimestamp = now;
-          
+
           postMessage({
             type: 'STOPPED',
             timerId,
@@ -127,24 +127,26 @@ class ChronometerWorker {
           } as TimerResponse);
         }
         break;
+      }
 
-      case 'RESUME':
+      case 'RESUME': {
         const resumeTimer = this.timers.get(timerId);
         if (resumeTimer && !resumeTimer.isRunning) {
           const now = performance.now();
-          
+
           // Add the paused duration to total paused time
           if (resumeTimer.lastPauseTimestamp > 0) {
             const pauseDuration = now - resumeTimer.lastPauseTimestamp;
             resumeTimer.pausedTimeMs += pauseDuration;
           }
-          
+
           resumeTimer.isRunning = true;
           resumeTimer.lastPauseTimestamp = 0;
         }
         break;
+      }
 
-      case 'RESET':
+      case 'RESET': {
         const resetTimer = this.timers.get(timerId);
         if (resetTimer) {
           const now = performance.now();
@@ -153,7 +155,7 @@ class ChronometerWorker {
           resetTimer.startTimestamp = now;
           resetTimer.pausedTimeMs = 0;
           resetTimer.lastPauseTimestamp = 0;
-          
+
           postMessage({
             type: 'RESET_COMPLETE',
             timerId,
@@ -163,6 +165,7 @@ class ChronometerWorker {
           } as TimerResponse);
         }
         break;
+      }
 
       case 'SET_TIME':
         if (initialTime !== undefined) {

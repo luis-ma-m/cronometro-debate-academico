@@ -11,9 +11,13 @@ class MockWorker {
   initialTime = 0;
   currentTime = 0;
   constructor(public url: string | URL, public options?: WorkerOptions) {
-    (global as any).latestWorker = this;
+    (globalThis as { latestWorker?: MockWorker }).latestWorker = this;
   }
-  postMessage(data: any) {
+  postMessage(data: {
+    type: 'SET_TIME' | 'START' | 'RESUME' | 'PAUSE' | 'RESET';
+    timerId?: string;
+    initialTime?: number;
+  }) {
     this.timerId = data.timerId || this.timerId;
     switch (data.type) {
       case 'SET_TIME':
@@ -73,14 +77,14 @@ const settings: GlobalSettings = {
   negativeWarningThreshold: -10
 };
 
-let originalWorker: any;
+let originalWorker: typeof Worker;
 beforeEach(() => {
-  originalWorker = (global as any).Worker;
-  (global as any).Worker = MockWorker as any;
+  originalWorker = global.Worker;
+  global.Worker = MockWorker as unknown as typeof Worker;
 });
 
 afterEach(() => {
-  (global as any).Worker = originalWorker;
+  global.Worker = originalWorker;
 });
 
 describe('TimerControl handleStartPause edge case', () => {
@@ -104,7 +108,7 @@ describe('TimerControl handleStartPause edge case', () => {
       fireEvent.click(toggle); // start
     });
 
-    const worker: any = (global as any).latestWorker;
+    const worker = (globalThis as { latestWorker: MockWorker }).latestWorker;
 
     act(() => {
       worker.onmessage(

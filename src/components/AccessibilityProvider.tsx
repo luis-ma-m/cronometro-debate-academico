@@ -23,6 +23,7 @@ interface AccessibilityContextType {
 
 const AccessibilityContext = createContext<AccessibilityContextType | null>(null);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAccessibility = () => {
   const context = useContext(AccessibilityContext);
   if (!context) {
@@ -51,7 +52,7 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
     if (announcement) announcement.textContent = message;
   }, []);
 
-  const setAccessibilityMode = (mode: 'default' | 'high-contrast' | 'dyslexic-friendly') => {
+  const setAccessibilityMode = useCallback((mode: 'default' | 'high-contrast' | 'dyslexic-friendly') => {
     setStoreAccessibilityMode(mode);
     
     // Apply theme classes to document root
@@ -63,15 +64,15 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
     } else if (mode === 'dyslexic-friendly') {
       root.classList.add('dyslexic-friendly');
     }
-  };
+  }, [setStoreAccessibilityMode]);
 
   // Apply accessibility mode on mount and changes
   useEffect(() => {
     setAccessibilityMode(accessibilityMode);
-  }, [accessibilityMode]);
+  }, [accessibilityMode, setAccessibilityMode]);
 
   // Navigate to next speech/position
-  const navigateToNext = () => {
+  const navigateToNext = useCallback(() => {
     if (!activeCategoryId) {
       // Select first category if none selected
       if (categories.length > 0) {
@@ -125,7 +126,7 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
         setActivePositionType('favor');
       }
     }
-  };
+  }, [activeCategoryId, activePositionType, categories, setActiveCategoryId, setActivePositionType]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -168,7 +169,7 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeCategoryId, activePositionType, categories, setActiveCategoryId, setActivePositionType]);
+  }, [activeCategoryId, activePositionType, navigateToNext]);
 
   return (
     <AccessibilityContext.Provider value={{ announceTime, setAccessibilityMode }}>

@@ -46,7 +46,7 @@ export const useChronometer = ({
 
     setRemainingMs(remainingMs);
     onTick?.(Math.ceil(remainingMs / 1000));
-  }, [durationMs, onComplete, onTick]);
+  }, [durationMs, onComplete, onTick, stopTimer]);
 
   // Timer controls
   const startTimer = useCallback(() => {
