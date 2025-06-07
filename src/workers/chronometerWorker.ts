@@ -52,33 +52,19 @@ class ChronometerWorker {
       const rawElapsedMs = now - timer.startTimestamp;
       const elapsedMs = rawElapsedMs - timer.pausedTimeMs;
       
-      // Calculate remaining time in milliseconds
-      const remainingMs = Math.max(0, timer.initialTimeMs - elapsedMs);
-      
+      // Calculate remaining time in milliseconds (allow negatives)
+      const remainingMs = timer.initialTimeMs - elapsedMs;
+
       // Update timer state
       timer.currentTimeMs = remainingMs;
-      
+
       // Convert to seconds for display
       const currentTimeSeconds = remainingMs / 1000;
       
       // Calculate drift (minimal for this implementation)
       const drift = 0;
       
-      // Auto-stop when time expires
-      if (remainingMs <= 0) {
-        timer.isRunning = false;
-        
-        postMessage({
-          type: 'STOPPED',
-          timerId: timer.id,
-          currentTime: 0,
-          isRunning: false,
-          drift: 0
-        } as TimerResponse);
-        continue;
-      }
-      
-      // Send normal tick update
+      // Always post TICK updates, even past zero
       postMessage({
         type: 'TICK',
         timerId: timer.id,

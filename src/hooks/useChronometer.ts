@@ -28,6 +28,8 @@ export const useChronometer = ({
   const elapsedMsRef = useRef<number>(0);
 
   // Tick function
+  const prevRemainingRef = useRef(durationMs);
+
   const tick = useCallback(() => {
     if (startTimestampRef.current === null) return;
 
@@ -37,12 +39,12 @@ export const useChronometer = ({
 
     const remainingMs = durationMs - delta;
 
-    if (remainingMs <= 0) {
-      setRemainingMs(0);
-      stopTimer();
+    // Fire onComplete once when crossing zero
+    if (prevRemainingRef.current > 0 && remainingMs <= 0) {
       onComplete?.();
-      return;
     }
+
+    prevRemainingRef.current = remainingMs;
 
     setRemainingMs(remainingMs);
     onTick?.(Math.ceil(remainingMs / 1000));
