@@ -35,15 +35,15 @@ class MockWorker {
   }
 
   simulateTick() {
-    this.currentTime = Math.max(0, this.currentTime - 1);
+    this.currentTime = this.currentTime - 1;
     if (this.onmessage) {
       this.onmessage(
         new MessageEvent('message', {
           data: {
-            type: this.currentTime > 0 ? 'TICK' : 'STOPPED',
+            type: 'TICK',
             timerId: this.timerId,
             currentTime: this.currentTime,
-            isRunning: this.currentTime > 0,
+            isRunning: true,
             drift: 0
           }
         })

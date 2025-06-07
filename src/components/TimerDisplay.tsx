@@ -37,10 +37,27 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
 
   // Style classes based on size
   const containerClasses = cn(
-    'rounded-lg shadow-lg flex flex-col items-center space-y-4 transition-all duration-300',
+    'rounded-lg flex flex-col items-center space-y-4 transition-all duration-300',
     size === 'large' ? 'p-8 w-full max-w-md mx-auto' : 'p-6',
     {
-      'bg-card': !isWarning && !isCritical && !isExpired && !isNegativeWarning,
+const containerClasses = cn(
+  'rounded-lg flex flex-col items-center space-y-4 transition-all duration-300',
+  size === 'large' ? 'p-8 w-full max-w-md mx-auto' : 'p-6',
+  {
+    // default (positive and not warning/critical/expired)
+    'bg-card': !isWarning && !isCritical && !isExpired && !isNegative && !isNegativeWarning,
+
+    // positive thresholds
+    'bg-yellow-50 border-2 border-yellow-400': isWarning,
+    'bg-red-50 border-2 border-red-400': isCritical,
+    'bg-red-100 border-2 border-red-600': isExpired,
+
+    // negative time visuals
+    'bg-purple-50 border-2 border-purple-400': isNegative && !isNegativeWarning,
+    'bg-purple-100 border-2 border-purple-600 animate-pulse': isNegativeWarning,
+  }
+);
+ main
       'bg-yellow-50 border-2 border-yellow-400': isWarning,
       'bg-red-50 border-2 border-red-400': isCritical,
       'bg-red-100 border-2 border-red-600': isExpired,
