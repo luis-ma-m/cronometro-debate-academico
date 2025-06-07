@@ -33,10 +33,9 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
 
   // Style classes based on size
   const containerClasses = cn(
-    'rounded-lg shadow-lg flex flex-col items-center space-y-4 transition-all duration-300',
+    'rounded-lg flex flex-col items-center space-y-4 transition-all duration-300',
     size === 'large' ? 'p-8 w-full max-w-md mx-auto' : 'p-6',
     {
-      'bg-card': !isWarning && !isCritical && !isExpired,
       'bg-yellow-50 border-2 border-yellow-400': isWarning,
       'bg-red-50 border-2 border-red-400': isCritical,
       'bg-red-100 border-2 border-red-600': isExpired,
