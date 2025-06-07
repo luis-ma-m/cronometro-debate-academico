@@ -14,11 +14,11 @@ export const useChronometer = ({
   onTick,
   disabled = false
 }: UseChronometerProps) => {
-  // Convert to milliseconds once at load
-  const speechDurationMs = initialTime * 1000;
+  // Duration in milliseconds, allow dynamic updates
+  const [durationMs, setDurationMs] = useState(initialTime * 1000);
   
   // State
-  const [remainingMs, setRemainingMs] = useState(speechDurationMs);
+  const [remainingMs, setRemainingMs] = useState(durationMs);
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
 
@@ -35,7 +35,7 @@ export const useChronometer = ({
     const delta = now - startTimestampRef.current;
     elapsedMsRef.current = delta;
 
-    const remainingMs = speechDurationMs - delta;
+    const remainingMs = durationMs - delta;
 
     if (remainingMs <= 0) {
       setRemainingMs(0);
@@ -46,7 +46,7 @@ export const useChronometer = ({
 
     setRemainingMs(remainingMs);
     onTick?.(Math.ceil(remainingMs / 1000));
-  }, [speechDurationMs, onComplete, onTick]);
+  }, [durationMs, onComplete, onTick]);
 
   // Timer controls
   const startTimer = useCallback(() => {
@@ -105,8 +105,24 @@ export const useChronometer = ({
 
     setIsRunning(false);
     setIsPaused(false);
-    setRemainingMs(speechDurationMs);
-  }, [disabled, speechDurationMs]);
+    setRemainingMs(durationMs);
+  }, [disabled, durationMs]);
+
+  const setNewTime = useCallback((newTimeSeconds: number) => {
+    const newDurationMs = newTimeSeconds * 1000;
+
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    elapsedMsRef.current = 0;
+    startTimestampRef.current = null;
+
+    setDurationMs(newDurationMs);
+    setRemainingMs(newDurationMs);
+    setIsRunning(false);
+    setIsPaused(false);
+  }, []);
 
   const toggleTimer = useCallback(() => {
     if (disabled) return;
@@ -142,6 +158,7 @@ export const useChronometer = ({
     
     setIsRunning(false);
     setIsPaused(false);
+    setDurationMs(newDurationMs);
     setRemainingMs(newDurationMs);
   }, [initialTime]);
 
@@ -155,6 +172,7 @@ export const useChronometer = ({
     resumeTimer,
     stopTimer,
     resetTimer,
+    setNewTime,
     toggleTimer
   };
 };

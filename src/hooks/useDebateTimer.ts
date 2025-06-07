@@ -37,9 +37,6 @@ export const useDebateTimer = ({
     isRunning: chronometer.isRunning,
     startPause: chronometer.toggleTimer,
     reset: chronometer.resetTimer,
-    setNewTime: (newTimeSeconds: number) => {
-      // This would need to be implemented in useChronometer if needed
-      chronometer.resetTimer();
-    }
+    setNewTime: chronometer.setNewTime
   };
 };

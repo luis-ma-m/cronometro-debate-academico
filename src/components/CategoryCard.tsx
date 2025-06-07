@@ -60,23 +60,23 @@ const CategoryCard: React.FC<CategoryCardProps> = ({
 
   React.useEffect(() => {
     timerFavorHook.setNewTime(category.timeFavor);
-  }, [category.timeFavor, timerFavorHook.setNewTime]);
+  }, [category.timeFavor]);
 
   React.useEffect(() => {
     timerContraHook.setNewTime(category.timeContra);
-  }, [category.timeContra, timerContraHook.setNewTime]);
+  }, [category.timeContra]);
 
   React.useEffect(() => {
     if (category.timeExamenCruzadoFavor !== undefined) {
       timerExamenFavorHook.setNewTime(category.timeExamenCruzadoFavor);
     }
-  }, [category.timeExamenCruzadoFavor, timerExamenFavorHook.setNewTime]);
+  }, [category.timeExamenCruzadoFavor]);
 
   React.useEffect(() => {
     if (category.timeExamenCruzadoContra !== undefined) {
       timerExamenContraHook.setNewTime(category.timeExamenCruzadoContra);
     }
-  }, [category.timeExamenCruzadoContra, timerExamenContraHook.setNewTime]);
+  }, [category.timeExamenCruzadoContra]);
   
   const handleQuestionToggle = (position: 'favor' | 'contra', questionId: string) => {
     // Note: Question state is per category, not per position (favor/contra) for refutations.
