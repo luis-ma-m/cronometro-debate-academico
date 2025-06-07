@@ -52,13 +52,13 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
 
   if (size === 'large') {
     positionNameClasses += " text-3xl md:text-4xl mb-4";
-    timeValueClasses += " text-8xl md:text-9xl";
+    timeValueClasses += " text-[12rem] md:text-[16rem]";
     iconSizeClass = "h-8 w-8 md:h-10 md:h-10";
     buttonSize = "lg";
     timeDigitsContainerClasses = "p-4 md:p-6 rounded bg-transparent";
   } else {
     positionNameClasses += " text-xl";
-    timeValueClasses += " text-6xl";
+    timeValueClasses += " text-[7.5rem]";
   }
 
   // Determine alert states and corresponding classes
@@ -66,13 +66,13 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
     mainContainerAlertBgClass = "animate-yellow-blink"; 
     timeTextClasses = "text-black"; // Ensure contrast on yellow background
   } else if (time < 0) { // Any negative time
-    timeTextClasses = "text-strong-red"; // Text turns red for any negative time
+    timeTextClasses = "text-red-600"; // Text turns red for any negative time
     if (time < settings.negativeWarningThreshold) { // Negative time AND past the threshold
       mainContainerAlertBgClass = "bg-soft-red"; // Box turns pale red
     }
     // If time is negative but not past negativeWarningThreshold, 
     // mainContainerAlertBgClass remains empty, so box stays default color (white/card).
-    // timeTextClasses is already set to text-strong-red.
+    // timeTextClasses is already set to text-red-600.
   }
   // If none of the above (e.g. time is positive and above positiveWarningThreshold), 
   // mainContainerAlertBgClass and timeTextClasses remain empty (default appearance).

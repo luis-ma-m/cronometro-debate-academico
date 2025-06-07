@@ -166,7 +166,7 @@ describe('TimerDisplay negative time visuals', () => {
     });
 
     const timeEl = screen.getByText('-0:06');
-    expect(timeEl).toHaveClass('text-red-800');
+    expect(timeEl).toHaveClass('text-red-600');
     expect(timeEl.parentElement).toHaveClass('bg-soft-red');
   });
 });
