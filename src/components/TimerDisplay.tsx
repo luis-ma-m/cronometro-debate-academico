@@ -42,8 +42,8 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
     'rounded-lg flex flex-col items-center space-y-4 transition-all duration-300',
     size === 'large' ? 'p-8 w-full max-w-md mx-auto' : 'p-6',
     {
-      // Default (positive & above warning)
-      'bg-card': !isWarning && !isExpired && !isNegative,
+      // Default appearance (also used for negative time above threshold)
+      'bg-card': !isWarning && !isExpired && !isNegativeWarning,
 
       // Warning (approaching zero)
       'bg-yellow-50 border-2 border-yellow-400': isWarning,
@@ -51,11 +51,8 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
       // Expired exactly at zero
       'bg-red-100 border-2 border-red-600': isExpired,
 
-      // Negative but above negativeWarningThreshold
-      'bg-purple-50 border-2 border-purple-400': isNegative && !isNegativeWarning,
-
-      // Negative and beyond negativeWarningThreshold
-      'bg-purple-100 border-2 border-purple-600 animate-pulse': isNegativeWarning,
+      // Negative time past the configured threshold
+      'bg-soft-red border-2 border-red-600': isNegativeWarning,
     }
   )
 
