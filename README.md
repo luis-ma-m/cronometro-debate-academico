@@ -151,15 +151,6 @@ logged with `console.error`. Use it to surface issues via a toast or other UI.
 ```bash
 # Run all tests
 pnpm test
-
-# Run tests with coverage
-pnpm test:coverage
-
-# Run accessibility audit
-pnpm test:a11y
-
-# Run timer precision tests
-pnpm test:timers
 ```
 
 ### Timer Precision Tests
