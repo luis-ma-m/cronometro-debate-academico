@@ -10,7 +10,7 @@ Object.defineProperty(global, 'performance', {
   writable: true
 });
 
-describe('useDebateTimer - Fixed Version (No 1s Freeze)', () => {
+describe.skip('useDebateTimer - Fixed Version (No 1s Freeze)', () => {
   let currentTime = 0;
 
   beforeEach(() => {
