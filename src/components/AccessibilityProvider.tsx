@@ -13,7 +13,7 @@
  * copies or substantial portions of the Software.
  */
 
-import React, { createContext, useContext, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useCallback } from 'react';
 import { useChronometerStore } from '@/stores/chronometerStore';
 
 interface AccessibilityContextType {
@@ -46,12 +46,10 @@ export const AccessibilityProvider: React.FC<AccessibilityProviderProps> = ({ ch
     setActivePositionType
   } = useChronometerStore();
 
-  const announceTime = (message: string) => {
+  const announceTime = useCallback((message: string) => {
     const announcement = document.getElementById('time-announcer');
-    if (announcement) {
-      announcement.textContent = message;
-    }
-  };
+    if (announcement) announcement.textContent = message;
+  }, []);
 
   const setAccessibilityMode = (mode: 'default' | 'high-contrast' | 'dyslexic-friendly') => {
     setStoreAccessibilityMode(mode);
