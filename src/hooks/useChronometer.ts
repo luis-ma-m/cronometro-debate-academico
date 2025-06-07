@@ -27,6 +27,19 @@ export const useChronometer = ({
   const intervalRef = useRef<number | null>(null);
   const elapsedMsRef = useRef<number>(0);
 
+  const stopTimer = useCallback(() => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    setIsRunning(false);
+    setIsPaused(false);
+    elapsedMsRef.current = 0;
+    startTimestampRef.current = null;
+  }, []);
+
+
   // Tick function
   const prevRemainingRef = useRef(durationMs);
 
@@ -39,9 +52,12 @@ export const useChronometer = ({
 
     const remainingMs = durationMs - delta;
 
-    // Fire onComplete once when crossing zero
+    // Fire onComplete once and stop when crossing zero
     if (prevRemainingRef.current > 0 && remainingMs <= 0) {
       onComplete?.();
+      setRemainingMs(0);
+      stopTimer();
+      return;
     }
 
     prevRemainingRef.current = remainingMs;
@@ -83,17 +99,6 @@ export const useChronometer = ({
     startTimer();
   }, [isRunning, isPaused, startTimer]);
 
-  const stopTimer = useCallback(() => {
-    if (intervalRef.current !== null) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-
-    setIsRunning(false);
-    setIsPaused(false);
-    elapsedMsRef.current = 0;
-    startTimestampRef.current = null;
-  }, []);
 
   const resetTimer = useCallback(() => {
     if (disabled) return;
