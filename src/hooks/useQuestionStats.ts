@@ -23,7 +23,7 @@ export const useQuestionStats = (
     const answered = questions.filter(q => q.answered).length;
 
     return { total, answered };
-  }, [categoryId, _side, allCategories]); // _side included for future-proofing if behavior changes
+  }, [categoryId, allCategories]);
 
   return stats;
 };

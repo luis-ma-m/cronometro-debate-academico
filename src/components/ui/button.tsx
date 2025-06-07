@@ -50,6 +50,8 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 );
 Button.displayName = 'Button';
 
+/* eslint-disable react-refresh/only-export-components */
 export { Button, buttonVariants };
+/* eslint-enable react-refresh/only-export-components */
 // Note: Removed ButtonVariant and ButtonSize types as VariantProps infers them.
 
