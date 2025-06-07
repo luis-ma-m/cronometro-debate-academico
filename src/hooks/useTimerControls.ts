@@ -39,7 +39,7 @@ export const useTimerControls = ({
       startTimestampRef.current = performance.now() - elapsedMsRef.current;
     }
     
-    intervalRef.current = window.setInterval(tick, 50);
+    intervalRef.current = setInterval(tick, 50);
     setIsRunning(true);
     setIsPaused(false);
   }, [disabled, isPaused, tick, intervalRef, startTimestampRef, elapsedMsRef, setIsRunning, setIsPaused]);
