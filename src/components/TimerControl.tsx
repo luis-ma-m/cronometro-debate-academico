@@ -103,7 +103,9 @@ const TimerControl: React.FC<TimerControlProps> = ({
   };
 
   return (
-    <div className={`rounded-lg shadow ${size === 'large' ? 'bg-card' : baseBgColor} ${size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto' : 'p-4'}`}>
+    <div
+      className={`rounded-lg ${size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto' : 'p-4'}`}
+    >
       <TimerDisplay
         time={time}
         isRunning={isRunning}

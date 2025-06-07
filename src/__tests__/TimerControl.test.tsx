@@ -106,21 +106,21 @@ describe('TimerControl handleStartPause edge case', () => {
 
     const worker: any = (global as any).latestWorker;
 
+    // Simulate time running past zero
     act(() => {
       worker.onmessage(
         new MessageEvent('message', {
-          data: { type: 'STOPPED', timerId: 'cat_favor', currentTime: 0, isRunning: false, drift: 0 }
+          data: { type: 'TICK', timerId: 'cat_favor', currentTime: -1, isRunning: true, drift: 0 }
         })
       );
     });
 
-    expect(toggle).toHaveAttribute('aria-label', 'Reanudar');
+    expect(toggle).toHaveAttribute('aria-label', 'Pausar');
 
     act(() => {
-      fireEvent.click(toggle); // should reset and start
+      fireEvent.click(toggle); // pause when time is negative
     });
 
-    expect(toggle).toHaveAttribute('aria-label', 'Pausar');
-    expect(screen.getByText('0:05')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-label', 'Reanudar');
   });
 });
