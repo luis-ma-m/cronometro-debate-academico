@@ -4,7 +4,7 @@
  * Copyright (c) 2025 Luis Martín Maíllo
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import { useChronometerWorker } from '@/hooks/useChronometerWorker';
 import { useAccessibility } from '@/components/AccessibilityProvider';
 import TimerDisplay from './TimerDisplay';
@@ -56,6 +56,8 @@ const TimerControl: React.FC<TimerControlProps> = ({
     onTick: handleTick
   });
 
+  const [hasStarted, setHasStarted] = useState(false);
+
   // Handle keyboard shortcuts via custom events
   useEffect(() => {
     const handleToggle = (event: CustomEvent) => {
@@ -65,8 +67,10 @@ const TimerControl: React.FC<TimerControlProps> = ({
         } else {
           if (time < initialTime) {
             resume();
+            setHasStarted(true);
           } else {
             start();
+            setHasStarted(true);
           }
         }
       }
@@ -75,6 +79,7 @@ const TimerControl: React.FC<TimerControlProps> = ({
     const handleReset = (event: CustomEvent) => {
       if (event.detail.categoryId === categoryId && event.detail.position === position) {
         reset();
+        setHasStarted(false);
       }
     };
 
@@ -94,17 +99,25 @@ const TimerControl: React.FC<TimerControlProps> = ({
       if (time <= 0) {
         reset();
         resume();
+        setHasStarted(true);
       } else if (time < initialTime) {
         resume();
+        setHasStarted(true);
       } else {
         start();
+        setHasStarted(true);
       }
     }
   };
 
+  const handleResetClick = () => {
+    reset();
+    setHasStarted(false);
+  };
+
   return (
     <div
-      className={`rounded-lg ${size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto' : 'p-4'}`}
+      className={`rounded-lg ${size === 'large' ? 'p-6 md:p-8 w-fit mx-auto inline-block' : 'p-4 w-fit inline-block'}`}
     >
       <TimerDisplay
         time={time}
@@ -119,9 +132,9 @@ const TimerControl: React.FC<TimerControlProps> = ({
       <div className="mt-4">
         <TimerControls
           isRunning={isRunning}
-          isPaused={time < initialTime && !isRunning}
+          isPaused={!isRunning && hasStarted}
           onToggle={handleStartPause}
-          onReset={reset}
+          onReset={handleResetClick}
           size={size}
         />
       </div>

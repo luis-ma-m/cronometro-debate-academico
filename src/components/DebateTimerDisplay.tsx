@@ -43,7 +43,7 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
 }) => {
   let timeTextClasses = ""; 
   let positionNameClasses = "font-semibold";
-  let timeValueClasses = "font-bold";
+  let timeValueClasses = "font-bold whitespace-nowrap";
   let iconSizeClass = "h-6 w-6";
   let buttonSize: "icon" | "lg" = "icon";
   
@@ -84,7 +84,7 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
         // Background only applies when an alert class is present
         mainContainerAlertBgClass,
         // Padding and layout classes
-        size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto' : 'p-4'
+        size === 'large' ? 'p-6 md:p-8 w-fit mx-auto inline-block' : 'p-4 w-fit inline-block'
       )}
     >
       <h3 className={positionNameClasses}>{positionName}</h3>

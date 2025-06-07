@@ -36,7 +36,7 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
   // Container background / border / animation
   const containerClasses = cn(
     'rounded-lg flex flex-col items-center space-y-4 transition-all duration-300',
-    size === 'large' ? 'p-8 w-full max-w-md mx-auto' : 'p-6',
+    size === 'large' ? 'p-8 w-fit mx-auto inline-block' : 'p-6 w-fit inline-block',
     {
       // Default appearance (also used for negative time above threshold)
       'bg-card': !isWarning && !isExpired && !isNegativeWarning,
@@ -60,7 +60,7 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
 
   // Time text styling
   const timeClasses = cn(
-    'font-mono font-bold tabular-nums',
+    'font-mono font-bold tabular-nums whitespace-nowrap',
     size === 'large' ? 'text-[7.5rem] md:text-[9rem]' : 'text-7xl',
     {
       'text-foreground': !isWarning && !isExpired && !isNegative,
