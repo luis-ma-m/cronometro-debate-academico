@@ -32,13 +32,8 @@ export const useChronometerWorker = ({
   const workerRef = useRef<Worker | null>(null);
   const onTickRef = useRef<typeof onTick>();
   const updateTimerState = useChronometerStore(state => state.updateTimerState);
-  const onTickRef = useRef<typeof onTick>();
 
   // Keep latest onTick callback without reinitializing worker
-  useEffect(() => {
-    onTickRef.current = onTick;
-  }, [onTick]);
-
   useEffect(() => {
     onTickRef.current = onTick;
   }, [onTick]);
