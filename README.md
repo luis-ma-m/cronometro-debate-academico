@@ -140,6 +140,12 @@ browser or provide a polyfill to enable worker support. See
 [`src/hooks/useChronometerWorker.ts`](src/hooks/useChronometerWorker.ts) for
 implementation details.
 
+### Custom Error Handling
+
+`useChronometerWorker` accepts an optional `onError` callback. When provided,
+any worker-related exceptions are forwarded to this function instead of being
+logged with `console.error`. Use it to surface issues via a toast or other UI.
+
 ## 🧪 Testing
 
 ```bash
