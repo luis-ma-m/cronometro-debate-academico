@@ -48,7 +48,7 @@ export const useChronometerWorker = ({
         );
 
         workerRef.current.onmessage = (event) => {
-          const { type, timerId: responseTimerId, currentTime, isRunning: workerIsRunning, drift: workerDrift } = event.data;
+          const { type, timerId: responseTimerId, currentTime, drift: workerDrift } = event.data;
           
           if (responseTimerId === timerId) {
             setTime(currentTime);
