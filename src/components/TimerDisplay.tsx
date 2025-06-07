@@ -61,11 +61,11 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
   // Time text styling
   const timeClasses = cn(
     'font-mono font-bold tabular-nums',
-    size === 'large' ? 'text-6xl md:text-7xl' : 'text-4xl',
+    size === 'large' ? 'text-[7.5rem] md:text-[9rem]' : 'text-7xl',
     {
       'text-foreground': !isWarning && !isExpired && !isNegative,
       'text-yellow-700': isWarning,
-      'text-red-800': isExpired || isNegative,
+      'text-red-600': isExpired || isNegative,
     }
   )
 
