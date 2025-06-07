@@ -131,6 +131,15 @@ Configure debate formats via URL parameters:
 - **Dynamic Addition**: Add questions during debate
 - **Statistical Summary**: Full summary of the status of the debate, chronometers and even questions for each category.
 
+## 🌐 Environment Limitations
+
+This application relies on Web Workers for accurate timing. In environments where
+the Worker API isn't available—such as some mobile browsers or server-side
+rendering setups—the chronometers will not start. Run the app in a modern
+browser or provide a polyfill to enable worker support. See
+[`src/hooks/useChronometerWorker.ts`](src/hooks/useChronometerWorker.ts) for
+implementation details.
+
 ## 🧪 Testing
 
 ```bash
