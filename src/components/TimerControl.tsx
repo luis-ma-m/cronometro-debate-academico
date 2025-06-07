@@ -91,7 +91,10 @@ const TimerControl: React.FC<TimerControlProps> = ({
     if (isRunning) {
       pause();
     } else {
-      if (time < initialTime) {
+      if (time <= 0) {
+        reset();
+        resume();
+      } else if (time < initialTime) {
         resume();
       } else {
         start();
