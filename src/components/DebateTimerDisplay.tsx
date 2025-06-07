@@ -78,15 +78,15 @@ const DebateTimerDisplay: React.FC<DebateTimerDisplayProps> = ({
   // mainContainerAlertBgClass and timeTextClasses remain empty (default appearance).
 
   return (
-    <div className={cn(
-      `rounded-lg shadow flex flex-col items-center space-y-3`,
-      // Apply base background if no alert background is set, otherwise apply alert background
-      mainContainerAlertBgClass 
-        ? mainContainerAlertBgClass 
-        : (size === 'large' ? 'bg-card' : baseBgColor),
-      // Paddings are applied regardless of alert state
-      size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto' : 'p-4'
-    )}>
+    <div
+      className={cn(
+        'rounded-lg flex flex-col items-center space-y-3',
+        // Background only applies when an alert class is present
+        mainContainerAlertBgClass,
+        // Padding and layout classes
+        size === 'large' ? 'p-6 md:p-8 w-full max-w-md mx-auto' : 'p-4'
+      )}
+    >
       <h3 className={positionNameClasses}>{positionName}</h3>
       <div className={cn(timeValueClasses, timeDigitsContainerClasses, timeTextClasses)}>
         {formatTime(time)}
