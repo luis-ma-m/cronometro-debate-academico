@@ -106,21 +106,63 @@ describe('TimerControl handleStartPause edge case', () => {
 
     const worker: any = (global as any).latestWorker;
 
+    // Simulate time running past zero
     act(() => {
       worker.onmessage(
         new MessageEvent('message', {
-          data: { type: 'STOPPED', timerId: 'cat_favor', currentTime: 0, isRunning: false, drift: 0 }
+          data: { type: 'TICK', timerId: 'cat_favor', currentTime: -1, isRunning: true, drift: 0 }
         })
       );
     });
 
-    expect(toggle).toHaveAttribute('aria-label', 'Reanudar');
+    expect(toggle).toHaveAttribute('aria-label', 'Pausar');
 
     act(() => {
-      fireEvent.click(toggle); // should reset and start
+      fireEvent.click(toggle); // pause when time is negative
     });
 
-    expect(toggle).toHaveAttribute('aria-label', 'Pausar');
-    expect(screen.getByText('0:05')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-label', 'Reanudar');
+  });
+});
+
+describe('TimerDisplay negative time visuals', () => {
+  it('shows red text and pale red background when time below threshold', () => {
+    const customSettings: GlobalSettings = {
+      ...settings,
+      negativeWarningThreshold: -5
+    };
+
+    render(
+      <AccessibilityProvider>
+        <TimerControl
+          initialTime={5}
+          categoryId="cat"
+          position="favor"
+          settings={customSettings}
+          baseBgColor="bg-white"
+          positionName="Favor"
+        />
+      </AccessibilityProvider>
+    );
+
+    const toggle = screen.getByRole('button', { name: /^Iniciar$/i });
+
+    act(() => {
+      fireEvent.click(toggle); // start
+    });
+
+    const worker: any = (global as any).latestWorker;
+
+    act(() => {
+      worker.onmessage(
+        new MessageEvent('message', {
+          data: { type: 'TICK', timerId: 'cat_favor', currentTime: -6, isRunning: true, drift: 0 }
+        })
+      );
+    });
+
+    const timeEl = screen.getByText('-0:06');
+    expect(timeEl).toHaveClass('text-red-800');
+    expect(timeEl.parentElement).toHaveClass('bg-soft-red');
   });
 });
