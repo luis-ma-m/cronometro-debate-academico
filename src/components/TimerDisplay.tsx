@@ -1,18 +1,21 @@
+// src/components/TimerDisplay.tsx
+import React from 'react'
+import { cn } from '@/lib/utils'
+import { formatTime } from '@/utils/formatTime'
 
-import React from 'react';
-import { cn } from '@/lib/utils';
-import { formatTime } from '@/utils/formatTime';
-
-interface TimerDisplayProps {
-  time: number; // current time in seconds
-  isRunning: boolean;
-  initialTime: number;
-  title?: string;
-  size?: 'normal' | 'large';
-  showProgress?: boolean;
-  warningThreshold?: number;
-  criticalThreshold?: number;
-  negativeWarningThreshold?: number;
+export interface TimerDisplayProps {
+  /** Current time in seconds (can be negative) */
+  time: number
+  isRunning: boolean
+  /** Initial configured time in seconds */
+  initialTime: number
+  title?: string
+  size?: 'normal' | 'large'
+  showProgress?: boolean
+  /** Seconds remaining at which to show a warning (time > 0) */
+  warningThreshold?: number
+  /** Negative seconds at which to start pulsing (e.g. -10) */
+  negativeWarningThreshold?: number
 }
 
 const TimerDisplay: React.FC<TimerDisplayProps> = ({
@@ -23,75 +26,64 @@ const TimerDisplay: React.FC<TimerDisplayProps> = ({
   size = 'normal',
   showProgress = true,
   warningThreshold = 60,
-  criticalThreshold = 30,
-  negativeWarningThreshold = -10
+  negativeWarningThreshold = -10,
 }) => {
-  const percentage = Math.max(0, (time / initialTime) * 100);
+  // Derived states
+  const isWarning = time > 0 && time <= warningThreshold
+  const isExpired = time === 0
+  const isNegative = time < 0
+  const isNegativeWarning = time <= negativeWarningThreshold
 
-  // Determine alert state
-  const isWarning = time <= warningThreshold && time > criticalThreshold;
-  const isCritical = time <= criticalThreshold && time > 0;
-  const isExpired = time === 0;
-  const isNegative = time < 0;
-  const isNegativeWarning = time <= negativeWarningThreshold;
+  // Percentage for progress bar (clamped 0–100)
+  const percentage = Math.max(0, Math.min(100, (time / initialTime) * 100))
 
-  // Style classes based on size
+  // Container background / border / animation
   const containerClasses = cn(
     'rounded-lg flex flex-col items-center space-y-4 transition-all duration-300',
     size === 'large' ? 'p-8 w-full max-w-md mx-auto' : 'p-6',
     {
-const containerClasses = cn(
-  'rounded-lg flex flex-col items-center space-y-4 transition-all duration-300',
-  size === 'large' ? 'p-8 w-full max-w-md mx-auto' : 'p-6',
-  {
-    // default (positive and not warning/critical/expired)
-    'bg-card': !isWarning && !isCritical && !isExpired && !isNegative && !isNegativeWarning,
+      // Default (positive & above warning)
+      'bg-card': !isWarning && !isExpired && !isNegative,
 
-    // positive thresholds
-    'bg-yellow-50 border-2 border-yellow-400': isWarning,
-    'bg-red-50 border-2 border-red-400': isCritical,
-    'bg-red-100 border-2 border-red-600': isExpired,
-
-    // negative time visuals
-    'bg-purple-50 border-2 border-purple-400': isNegative && !isNegativeWarning,
-    'bg-purple-100 border-2 border-purple-600 animate-pulse': isNegativeWarning,
-  }
-);
- main
+      // Warning (approaching zero)
       'bg-yellow-50 border-2 border-yellow-400': isWarning,
-      'bg-red-50 border-2 border-red-400': isCritical,
-      'bg-red-100 border-2 border-red-600': isExpired,
-      'bg-soft-red': isNegativeWarning,
-      'animate-pulse': isRunning && (isCritical || isExpired)
-    }
-  );
 
+      // Expired exactly at zero
+      'bg-red-100 border-2 border-red-600': isExpired,
+
+      // Negative but above negativeWarningThreshold
+      'bg-purple-50 border-2 border-purple-400': isNegative && !isNegativeWarning,
+
+      // Negative and beyond negativeWarningThreshold
+      'bg-purple-100 border-2 border-purple-600 animate-pulse': isNegativeWarning,
+    }
+  )
+
+  // Title styling
   const titleClasses = cn(
     'font-semibold text-center',
     size === 'large' ? 'text-2xl mb-2' : 'text-lg mb-1'
-  );
+  )
 
+  // Time text styling
   const timeClasses = cn(
     'font-mono font-bold tabular-nums',
     size === 'large' ? 'text-6xl md:text-7xl' : 'text-4xl',
     {
-      'text-foreground': !isWarning && !isCritical && !isExpired && !isNegative,
+      'text-foreground': !isWarning && !isExpired && !isNegative,
       'text-yellow-700': isWarning,
-      'text-red-600': isCritical,
-      'text-red-800': isExpired || isNegative
+      'text-red-800': isExpired || isNegative,
     }
-  );
+  )
 
   return (
     <div className={containerClasses}>
-      {title && (
-        <h2 className={titleClasses}>{title}</h2>
-      )}
-      
+      {title && <h2 className={titleClasses}>{title}</h2>}
+
       <div className={timeClasses}>
         {formatTime(time)}
       </div>
-      
+
       {showProgress && (
         <div className="w-full">
           <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
@@ -99,9 +91,9 @@ const containerClasses = cn(
               className={cn(
                 'h-full transition-all duration-1000 ease-linear',
                 {
-                  'bg-green-500': !isWarning && !isCritical,
+                  'bg-green-500': !isWarning && !isExpired && !isNegative,
                   'bg-yellow-500': isWarning,
-                  'bg-red-500': isCritical || isExpired || isNegative
+                  'bg-red-500': isExpired || isNegative,
                 }
               )}
               style={{ width: `${percentage}%` }}
@@ -109,14 +101,14 @@ const containerClasses = cn(
           </div>
         </div>
       )}
-      
+
       {isRunning && (
         <div className="text-sm text-muted-foreground">
           En ejecución...
         </div>
       )}
     </div>
-  );
-};
+  )
+}
 
-export default TimerDisplay;
+export default TimerDisplay
