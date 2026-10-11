@@ -191,23 +191,9 @@ export default function App() {
   const persist = async (sourceData: Tournament = data): Promise<Tournament | null> => {
     setSaving(true);
     try {
+      // Presets are templates. Existing assignments retain their phase snapshots;
+      // a selected round adopts a changed preset only when that round is activated.
       let payload = sourceData;
-      if (formatDirty) {
-        if (sourceData.rooms.some((room) => room.timer.status === 'running' || room.timer.status === 'paused')) {
-          throw new Error('Pausa o finaliza los cronómetros antes de aplicar un cambio global de formato. No se alterará ningún debate en curso.');
-        }
-        const phases = sourceData.formatPhases?.length ? sourceData.formatPhases : LEDU_PHASES;
-        const timestamp = Date.now();
-        payload = {
-          ...sourceData,
-          rooms: sourceData.rooms.map((room) => ({
-            ...room,
-            phases,
-            timer: { ...createTimer(phases), revision: room.timer.revision + 1, updatedAt: timestamp },
-            updatedAt: timestamp,
-          })),
-        };
-      }
       payload = { ...payload, institutions: getInstitutionCatalog(payload) };
       // Older and newly created rooms may have no stored phases. Normalize them
       // to the configured tournament sequence (or the LEDU preset) before validating.
@@ -380,25 +366,47 @@ export default function App() {
     updateData((current) => ({ ...current, judges: [...current.judges, judge] }));
   };
   const addRoom = () => {
-    const name = window.prompt('Nombre de la sala', 'Sala nueva');
+    const name = window.prompt('Nombre de la sala física', 'Sala nueva');
     if (!name?.trim()) return;
     const roundIdValue = activeRound || data.rounds[0]?.id || makeId('r');
-    const phases = resolvePhases(data.formatPhases, data.rooms);
     const timestamp = Date.now();
+    const baseSlug = makeSlug(name.trim());
+    let slug = baseSlug;
+    let suffix = 2;
+    while (data.physicalRooms.some((room) => room.slug === slug)) slug = baseSlug + '-' + suffix++;
+    const physical: PhysicalRoom = { id: makeId('physical'), slug, name: name.trim(), active: true, createdAt: timestamp, updatedAt: timestamp };
+    const round = data.rounds.find((item) => item.id === roundIdValue);
+    const preset = data.formats.find((item) => item.id === round?.defaultFormatId) ?? data.formats[0];
+    const phases = (preset?.phases?.length ? preset.phases : resolvePhases(data.formatPhases, data.rooms)).map((phase) => ({ ...phase }));
     const room: Room = {
-      id: makeId('s'),
-      name: name.trim(),
-      roundId: roundIdValue,
-      teamFavorId: '',
-      teamContraId: '',
-      judgeIds: [],
-      status: 'unassigned',
-      phases,
-      timer: { ...createTimer(phases), updatedAt: timestamp },
-      notes: '',
-      updatedAt: timestamp,
+      id: makeId('assignment'), name: physical.name, roundId: roundIdValue, physicalRoomId: physical.id,
+      formatId: '', teamFavorId: '', teamContraId: '', judgeIds: [], status: 'unassigned',
+      phases, timer: { ...createTimer(phases), updatedAt: timestamp }, notes: '', updatedAt: timestamp,
+    };
+    updateData((current) => ({ ...current, physicalRooms: [...current.physicalRooms, physical], rooms: [...current.rooms, room] }));
+  };
+  const assignExistingPhysicalRoom = () => {
+    const roundIdValue = activeRound || data.rounds[0]?.id;
+    if (!roundIdValue) { setServerError('Crea primero una ronda.'); return; }
+    const available = data.physicalRooms.filter((physical) => !data.rooms.some((room) => room.roundId === roundIdValue && room.physicalRoomId === physical.id));
+    if (!available.length) { setServerError('Todas las salas físicas ya tienen asignación en esta ronda.'); return; }
+    const promptText = available.map((room, index) => (index + 1) + '. ' + room.name + '  (/sala/' + room.slug + ')').join('\n');
+    const selection = window.prompt('Indica el número de la sala física que quieres asignar a ' + (data.rounds.find((round) => round.id === roundIdValue)?.name ?? 'esta ronda') + ':\n\n' + promptText);
+    if (!selection) return;
+    const index = Number(selection) - 1;
+    const physical = Number.isInteger(index) ? available[index] : undefined;
+    if (!physical) { setServerError('Selecciona un número válido de la lista.'); return; }
+    const timestamp = Date.now();
+    const round = data.rounds.find((item) => item.id === roundIdValue);
+    const preset = data.formats.find((item) => item.id === round?.defaultFormatId) ?? data.formats[0];
+    const phases = (preset?.phases?.length ? preset.phases : resolvePhases(data.formatPhases, data.rooms)).map((phase) => ({ ...phase }));
+    const room: Room = {
+      id: makeId('assignment'), name: physical.name, roundId: roundIdValue, physicalRoomId: physical.id,
+      formatId: '', teamFavorId: '', teamContraId: '', judgeIds: [], status: 'unassigned',
+      phases, timer: { ...createTimer(phases), updatedAt: timestamp }, notes: '', updatedAt: timestamp,
     };
     updateData((current) => ({ ...current, rooms: [...current.rooms, room] }));
+    setServerError('');
   };
   const updateRoom = (id: string, patch: Partial<Room>) => {
     const currentRoom = data.rooms.find((room) => room.id === id);
@@ -409,21 +417,31 @@ export default function App() {
       (patch.roundId !== undefined && patch.roundId !== currentRoom.roundId) ||
       (patch.judgeIds !== undefined && JSON.stringify(patch.judgeIds) !== JSON.stringify(currentRoom.judgeIds));
     if (assignmentsChanged && (currentRoom.timer.status === 'running' || currentRoom.timer.status === 'paused') &&
-      !window.confirm('Esta sala tiene un cronómetro iniciado o pausado. Cambiar la asignación puede afectar al debate. ¿Confirmas el cambio?')) return;
-    updateData((current) => ({ ...current, rooms: current.rooms.map((room) => room.id === id ? withRoomStatus({ ...room, ...patch }, current.minimumJudgesPerRoom ?? 1) : room) }));
+      !window.confirm('Esta asignación tiene un cronómetro iniciado o pausado. Cambiarla puede afectar al debate. ¿Confirmas el cambio?')) return;
+    updateData((current) => {
+      let rooms = current.rooms.map((room) => room.id === id ? withRoomStatus({ ...room, ...patch }, current.minimumJudgesPerRoom ?? 1) : room);
+      let physicalRooms = current.physicalRooms;
+      if (patch.name !== undefined) {
+        const newName = patch.name.trim();
+        physicalRooms = current.physicalRooms.map((physical) => physical.id === currentRoom.physicalRoomId
+          ? { ...physical, name: newName || physical.name, updatedAt: Date.now() } : physical);
+        rooms = rooms.map((room) => room.physicalRoomId === currentRoom.physicalRoomId ? { ...room, name: newName || room.name } : room);
+      }
+      return { ...current, physicalRooms, rooms };
+    });
   };
   const addRound = () => {
     const name = window.prompt('Nombre de la ronda', 'Ronda ' + (data.rounds.length + 1));
     if (!name?.trim()) return;
-    const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false };
+    const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false, defaultFormatId: data.formats[0]?.id ?? '' };
     updateData((current) => ({ ...current, rounds: [...current.rounds, newRound] }));
     setSelectedRound(newRound.id);
   };
 
   const removeRoom = (room: Room) => {
     const active = room.timer.status === 'running' || room.timer.status === 'paused';
-    const detail = active ? ' El cronómetro está iniciado o pausado; también se eliminará esta sala y su enlace de control.' : '';
-    if (!window.confirm('¿Eliminar la sala "' + room.name + '"? Se perderán sus asignaciones y su configuración.' + detail)) return;
+    const detail = active ? ' El cronómetro está iniciado o pausado.' : '';
+    if (!window.confirm('¿Eliminar la asignación de "' + room.name + '" para esta ronda?' + detail + ' El enlace permanente de la sala física seguirá existiendo y podrá reutilizarse en otras rondas.')) return;
     updateData((current) => ({ ...current, rooms: current.rooms.filter((item) => item.id !== room.id) }));
   };
   const removeSelectedRound = () => {
@@ -431,6 +449,10 @@ export default function App() {
     if (!round) return;
     if (data.rounds.length <= 1) {
       setServerError('El torneo debe conservar al menos una ronda.');
+      return;
+    }
+    if (round.id === data.activeRoundId) {
+      setServerError('No puedes eliminar la ronda activa. Activa otra ronda primero para conservar una activación coherente.');
       return;
     }
     const affectedRooms = data.rooms.filter((room) => room.roundId === round.id);
