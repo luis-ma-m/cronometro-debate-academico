@@ -246,25 +246,49 @@ function publicRoomFromTournament_(roomId, tournament) {
 }
 
 function validateAssignments_(t) {
-  const teamIds = new Set(t.teams.map(function (item) { return item.id; }));
-  const judgeIds = new Set(t.judges.map(function (item) { return item.id; }));
+  const rounds = new Set((t.rounds || []).map(function (item) { return str_(item.id); }));
+  const teamIds = new Set((t.teams || []).map(function (item) { return str_(item.id); }));
+  const judgeIds = new Set((t.judges || []).map(function (item) { return str_(item.id); }));
   const teamBookings = {};
   const judgeBookings = {};
-  t.rooms.forEach(function (room) {
+  (t.rooms || []).forEach(function (room) {
+    if (!rounds.has(str_(room.roundId))) throw apiError_('INVALID_ASSIGNMENT', 'La sala ' + str_(room.name) + ' tiene una ronda inexistente.');
     if (room.teamFavorId && room.teamFavorId === room.teamContraId) throw apiError_('INVALID_ASSIGNMENT', 'Un equipo no puede debatir contra sí mismo.');
     [room.teamFavorId, room.teamContraId].filter(Boolean).forEach(function (id) {
-      if (!teamIds.has(id)) throw apiError_('INVALID_ASSIGNMENT', 'Una sala contiene un equipo inexistente.');
+      if (!teamIds.has(str_(id))) throw apiError_('INVALID_ASSIGNMENT', 'Una sala contiene un equipo inexistente.');
       const key = room.roundId + ':' + id;
       if (teamBookings[key]) throw apiError_('TEAM_DOUBLE_BOOKED', 'Un equipo está asignado a dos salas de la misma ronda.');
       teamBookings[key] = true;
     });
+    const localJudges = {};
     (room.judgeIds || []).forEach(function (id) {
-      if (!judgeIds.has(id)) throw apiError_('INVALID_ASSIGNMENT', 'Una sala contiene un juez inexistente.');
+      if (!judgeIds.has(str_(id))) throw apiError_('INVALID_ASSIGNMENT', 'Una sala contiene un juez inexistente.');
+      if (localJudges[id]) throw apiError_('INVALID_ASSIGNMENT', 'Un juez aparece más de una vez en la misma sala.');
+      localJudges[id] = true;
       const key = room.roundId + ':' + id;
       if (judgeBookings[key]) throw apiError_('JUDGE_DOUBLE_BOOKED', 'Un juez está asignado a dos salas de la misma ronda.');
       judgeBookings[key] = true;
     });
-    if (!Array.isArray(room.phases) || !room.phases.length) throw apiError_('INVALID_PHASES', 'Cada sala debe tener al menos una fase de debate.');
+    validatePhases_(room.phases);
+  });
+}
+
+function validatePhases_(phases) {
+  if (!Array.isArray(phases) || phases.length === 0) throw apiError_('INVALID_PHASES', 'El formato debe incluir al menos una intervención.');
+  const seen = {};
+  phases.forEach(function (phase, index) {
+    if (!phase || !str_(phase.id) || !str_(phase.name).trim() || !str_(phase.speaker).trim()) {
+      throw apiError_('INVALID_PHASES', 'La intervención ' + (index + 1) + ' necesita identificador, nombre e interviniente.');
+    }
+    if (seen[str_(phase.id)]) throw apiError_('INVALID_PHASES', 'Hay identificadores de intervención duplicados.');
+    seen[str_(phase.id)] = true;
+    if (phase.side !== 'favor' && phase.side !== 'contra') throw apiError_('INVALID_PHASES', 'Cada intervención debe asociarse a A favor o En contra.');
+    const duration = Number(phase.durationSeconds);
+    if (!Number.isFinite(duration) || duration < 1 || duration > 7200) throw apiError_('INVALID_PHASES', 'La duración debe estar entre 1 y 7200 segundos.');
+    const thresholds = phase.warningThresholdsSeconds;
+    if (thresholds !== undefined && (!Array.isArray(thresholds) || thresholds.some(function (item) { return !Number.isFinite(Number(item)) || Number(item) < 0; }))) {
+      throw apiError_('INVALID_PHASES', 'Los umbrales de aviso deben contener segundos válidos.');
+    }
   });
 }
 
@@ -342,18 +366,18 @@ function setupSheets_() {
 
 function defaultPhases_() {
   return [
-    { id: 'f1', name: 'Introducción', side: 'favor', speaker: 'Orador/a 1', durationSeconds: 240 },
-    { id: 'c1', name: 'Introducción', side: 'contra', speaker: 'Orador/a 1', durationSeconds: 240 },
-    { id: 'f2', name: 'Refutación 1', side: 'favor', speaker: 'Orador/a 2', durationSeconds: 240 },
-    { id: 'c2', name: 'Refutación 1', side: 'contra', speaker: 'Orador/a 2', durationSeconds: 240 },
-    { id: 'f3', name: 'Refutación 2', side: 'favor', speaker: 'Orador/a 3', durationSeconds: 240 },
-    { id: 'c3', name: 'Refutación 2', side: 'contra', speaker: 'Orador/a 3', durationSeconds: 240 },
-    { id: 'f4', name: 'Refutación 3', side: 'favor', speaker: 'Orador/a 4', durationSeconds: 240 },
-    { id: 'c4', name: 'Refutación 3', side: 'contra', speaker: 'Orador/a 4', durationSeconds: 240 },
-    { id: 'f5', name: 'Conclusión', side: 'favor', speaker: 'Orador/a 5', durationSeconds: 180 },
-    { id: 'c5', name: 'Conclusión', side: 'contra', speaker: 'Orador/a 5', durationSeconds: 180 },
-    { id: 'f6', name: 'Cierre', side: 'favor', speaker: 'Orador/a 6', durationSeconds: 180 },
-    { id: 'c6', name: 'Cierre', side: 'contra', speaker: 'Orador/a 6', durationSeconds: 180 }
+    { id: 'ledu-01', name: 'Exposición inicial', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-02', name: 'Examen cruzado', side: 'contra', speaker: 'En contra pregunta a A favor', durationSeconds: 120, type: 'cross-examination', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-03', name: 'Exposición inicial', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-04', name: 'Examen cruzado', side: 'favor', speaker: 'A favor pregunta a En contra', durationSeconds: 120, type: 'cross-examination', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-05', name: 'Refutación 1', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-06', name: 'Refutación 1', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-07', name: 'Refutación 2', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-08', name: 'Refutación 2', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-09', name: 'Refutación cruzada', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 90, type: 'cross-rebuttal', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-10', name: 'Refutación cruzada', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 90, type: 'cross-rebuttal', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-11', name: 'Conclusión', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 180, type: 'conclusion', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-12', name: 'Conclusión', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'conclusion', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true }
   ];
 }
 
