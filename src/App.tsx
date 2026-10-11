@@ -779,20 +779,40 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
   const pct = phase ? Math.max(0, Math.min(100, left / phase.durationSeconds * 100)) : 0;
   const ended = room?.timer.status === 'finished';
   const timedOut = room?.timer.status === 'running' && left <= 0;
-  const fullyAssigned = Boolean(snapshot?.teamFavor && snapshot.teamContra && snapshot.judges.length >= (snapshot.minimumJudgesPerRoom ?? 1) && room?.phases.length);
+  const fullyAssigned = Boolean(snapshot?.hasAssignment && snapshot.teamFavor && snapshot.teamContra &&
+    snapshot.judges.length >= (snapshot.minimumJudgesPerRoom ?? 1) && room?.phases.length);
+  const [transitionUntil, setTransitionUntil] = useState(0);
+  const lastActivationRevision = useRef<number | null>(null);
+  const transitioning = transitionUntil > now;
+  const transitionSeconds = Math.max(0, Math.ceil((transitionUntil - now) / 1000));
   const lastLeft = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!snapshot) return;
+    const remainingMs = Math.max(0, snapshot.activatedAt + 20_000 - (now + serverOffsetMs));
+    if (lastActivationRevision.current === null) {
+      lastActivationRevision.current = snapshot.activationRevision;
+      if (remainingMs > 0) setTransitionUntil(Date.now() + remainingMs);
+      return;
+    }
+    if (snapshot.activationRevision !== lastActivationRevision.current) {
+      lastActivationRevision.current = snapshot.activationRevision;
+      setTransitionUntil(remainingMs > 0 ? Date.now() + remainingMs : 0);
+      lastLeft.current = null;
+    }
+  }, [snapshot?.activationRevision, snapshot?.activatedAt, serverOffsetMs]);
+
+  useEffect(() => {
     const previous = lastLeft.current;
-    if (soundEnabled && room?.timer.status === 'running' && previous !== null && left < previous) {
+    if (!transitioning && soundEnabled && room?.timer.status === 'running' && previous !== null && left < previous) {
       const thresholds = phase?.warningThresholdsSeconds ?? [30, 10];
       if (thresholds.some((threshold) => previous > threshold && left <= threshold) || (previous > 0 && left <= 0)) playTone();
     }
     lastLeft.current = left;
-  }, [left, soundEnabled, room?.timer.status, phase?.id, phase?.warningThresholdsSeconds]);
+  }, [left, soundEnabled, room?.timer.status, phase?.id, phase?.warningThresholdsSeconds, transitioning]);
 
   const runAction = (action: TimerAction, confirmation?: string) => {
-    if (!controllerEnabled || !fullyAssigned) return;
+    if (!controllerEnabled || !fullyAssigned || transitioning) return;
     if (confirmation && !window.confirm(confirmation)) return;
     onAction(action);
   };
@@ -805,11 +825,23 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
         <button className="button secondary sound-toggle" onClick={onToggleSound} aria-pressed={soundEnabled}><>{soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}{soundEnabled ? 'Avisos sonoros activados' : 'Activar sonido'}</></button>
       </div>
     </header>
-    {!snapshot ? <section className="timer-empty"><Monitor size={36} /><h1>Sala no disponible</h1><p>{error || 'La sala no existe o aún no se ha configurado.'}</p><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Reintentar</button></section> :
-    <>
+    {!snapshot ? <section className="timer-empty"><Monitor size={36} /><h1>Sala no disponible</h1><p>{error || 'La sala física no existe o aún no se ha configurado.'}</p><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Reintentar</button></section>
+    : !snapshot.hasAssignment ? <section className="timer-empty no-room-assignment"><Monitor size={42} /><p className="eyebrow">{snapshot.tournamentName} · {snapshot.roundName}</p><h1>Sala sin asignación en esta ronda</h1><p>{snapshot.physicalRoomName} conserva su enlace permanente. El panel de organización aún no ha asignado un debate a esta sala para la ronda activa.</p><span className="permanent-room-slug">/sala/{snapshot.roomSlug}</span><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Actualizar estado</button></section>
+    : transitioning ? <section className="round-transition" aria-live="polite">
+        <span className="eyebrow">RONDA ACTIVADA</span>
+        <div className="transition-orbit"><Monitor size={38} /></div>
+        <h1>Nueva ronda activada</h1>
+        <p className="transition-round-name">{snapshot.roundName}</p>
+        <p className="transition-room-name">{snapshot.physicalRoomName}</p>
+        <div className="transition-team-grid"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
+        <div className="transition-judges"><Gavel size={18} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
+        <div className="transition-countdown"><b>{transitionSeconds}</b><span>segundos para comenzar</span></div>
+        <p className="transition-help">El cronómetro está preparado y no descontará tiempo hasta que termine este aviso.</p>
+      </section>
+    : <>
       <section className="timer-heading">
         <p>{snapshot.tournamentName} <span>·</span> {snapshot.roundName}</p>
-        <h1>{room?.name}</h1>
+        <h1>{snapshot.physicalRoomName}</h1>
         <div className="team-versus"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
         <div className="judge-line"><Gavel size={16} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
       </section>
@@ -818,7 +850,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
         <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''} · {phase?.side === 'favor' ? 'A favor' : phase?.side === 'contra' ? 'En contra' : ''}</b></div>
         <div className={'timer-digits ' + ((left <= 30 || timedOut) && room?.timer.status === 'running' ? 'urgent' : '')}>{formatTime(phase?.allowOvertimeDisplay === false && left < 0 ? 0 : left)}</div>
         <div className="timer-track"><div style={{ width: pct + '%' }} /></div>
-        {!fullyAssigned && <div className="notice warning-notice timer-assignment-warning"><CircleHelp size={16} /><span>Para iniciar el debate, asigna los dos equipos, al menos {snapshot?.minimumJudgesPerRoom ?? 1} juez(es) y un formato válido desde el panel.</span></div>}
+        {!fullyAssigned && <div className="notice warning-notice timer-assignment-warning"><CircleHelp size={16} /><span>Para iniciar el debate, asigna los dos equipos, al menos {snapshot.minimumJudgesPerRoom ?? 1} juez(es) y un formato válido desde el panel.</span></div>}
         <div className="timer-controls">
           {room?.timer.status === 'running'
             ? <button className="button primary big" onClick={() => runAction('pause')} disabled={!controllerEnabled}><Pause size={19} /> Pausar</button>
@@ -828,7 +860,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
           <button className="button ghost big" onClick={() => runAction('reset', '¿Reiniciar únicamente esta intervención?')} disabled={!controllerEnabled || !phase}><RotateCcw size={17} /> Reiniciar turno</button>
           <button className="button ghost big" onClick={() => runAction('finish', '¿Dar por finalizado el debate?')} disabled={!controllerEnabled || ended}><Check size={17} /> Finalizar</button>
         </div>
-        <p className="timer-note"><ShieldCheck size={15} /> {controllerEnabled ? 'Este enlace puede controlar únicamente el cronómetro de esta sala.' : 'Modo de solo lectura. Para controlar el reloj, abre la sala desde el panel de organización.'} {lastSyncedAt ? 'Última sincronización: ' + new Date(lastSyncedAt).toLocaleTimeString('es-ES') : 'Esperando la primera sincronización.'}</p>
+        <p className="timer-note"><ShieldCheck size={15} /> {controllerEnabled ? 'Este enlace permanente puede controlar el cronómetro de la sala activa.' : 'Modo de solo lectura. Para controlar el reloj, abre la sala desde el panel de organización.'} {lastSyncedAt ? 'Última sincronización: ' + new Date(lastSyncedAt).toLocaleTimeString('es-ES') : 'Esperando la primera sincronización.'}</p>
       </section>
       <section className="phase-list"><div className="panel-title"><div><h3>Orden de intervenciones</h3><p>Secuencia y tiempos configurados para este debate</p></div><span>{room?.phases.length ?? 0} intervenciones</span></div>{room?.phases.map((item, index) => <div key={item.id} className={'phase-row ' + (index === room.timer.phaseIndex ? 'current' : index < room.timer.phaseIndex ? 'passed' : '')}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.speaker} · {item.side === 'favor' ? 'A favor' : 'En contra'}</small></div><strong>{formatTime(item.durationSeconds)}</strong>{index === room.timer.phaseIndex && <span className="current-dot" />}</div>)}</section>
     </>}
@@ -836,7 +868,6 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
     <footer className="footer timer-footer"><span>LEDU Control</span><button className="text-button" onClick={onRetry}><RefreshCw size={14} /> Actualizar estado</button></footer>
   </main>;
 }
-
 let audioContext: AudioContext | null = null;
 function playTone() {
   try {
