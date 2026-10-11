@@ -1,6 +1,6 @@
 import { createHash, createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
-import type { Phase, Room, TimerState, Tournament } from "../src/domain";
-import type { TimerAction } from "../src/timer";
+import type { Phase, Room, TimerState, Tournament } from "../src/domain.js";
+import type { TimerAction } from "../src/timer.js";
 import {
   ApiError,
   DEFAULT_SPREADSHEET_ID,
