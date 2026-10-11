@@ -18,7 +18,11 @@ https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plce
 4. Comparte la hoja anterior con el valor client_email que aparece dentro del JSON y dale permiso de editor. La hoja debe seguir siendo privada; no habilites el acceso público.
 5. No subas el JSON a GitHub ni lo compartas por el chat. Solo debe estar guardado como variable privada en Vercel.
 
-La API conserva el esquema existente: Config, Rondas, Equipos, Jueces, Salas, Cronometros y Registro. Si falta únicamente la pestaña Registro, la API la crea con los encabezados correctos. Si falta una pestaña principal o los encabezados no coinciden, la API se detiene sin sobrescribir datos existentes.
+El esquema v2 utiliza las pestañas `Config`, `Rondas`, `Equipos`, `Jueces`, `Salas`, `Cronometros`, `Registro`, `SalasFisicas` y `Formatos`. `SalasFisicas` conserva la identidad y el slug permanente de cada sala; `Salas` registra las asignaciones por ronda; `Formatos` contiene presets versionados.
+
+**Migración destructiva del esquema v2:** en la primera petición al backend en el entorno `Production`, si `Config` no contiene `schemaVersion=2`, la API crea las pestañas que falten, reinicializa el contenido de las pestañas de datos y crea una ronda inicial y el preset LEDU. Se perderán deliberadamente las rondas, equipos, jueces, salas, cronómetros, instituciones e historial anteriores. No conserva ni convierte los datos del esquema previo; esa decisión se tomó para evitar asignaciones ambiguas durante el cambio al modelo de salas permanentes.
+
+La migración solo se ejecuta cuando `VERCEL_ENV=production`. Un despliegue `Preview` contra la misma hoja compartida recibe `SCHEMA_MIGRATION_PRODUCTION_ONLY` y no borra los datos existentes. Después de que Production haya completado la migración, los previews pueden leer el esquema v2. Si se va a reutilizar la hoja para otro torneo, exporta antes cualquier información que quieras conservar.
 
 ## 2. Preparar coordinación en Upstash Redis
 
@@ -64,14 +68,15 @@ Después de guardar las variables, vuelve a desplegar Vercel para asegurarte de 
 
 Las peticiones de escritura usan POST a /api con JSON de la forma { "action": "nombreAccion", "payload": { ... } }. Se mantiene el contrato que usa el frontend: login, logout, getTournament, getPublicRoom, getRoomControllerToken, saveTournament y updateRoomTimer.
 
-La API valida la sesión en el servidor, limita intentos fallidos de acceso, excluye notas internas de la respuesta pública, valida asignaciones y formato, compara las revisiones y serializa saveTournament y updateRoomTimer mediante bloqueo distribuido. La escritura de las tablas afectadas y el evento de cronómetro se agrupan en una petición batchUpdate de Google Sheets.
+La API valida la sesión en el servidor, limita intentos fallidos de acceso, excluye notas internas de la respuesta pública, valida las asignaciones por ronda y sus formatos, compara las revisiones y serializa las escrituras mediante bloqueo distribuido. Las acciones de activación de ronda muestran un resumen de los debates pendientes, registran si se fuerza el cambio, reinician los cronómetros de las asignaciones entrantes y anuncian la nueva ronda en las pantallas públicas durante 20 segundos. Las URLs públicas usan el slug estable de la sala física, no el ID de una asignación específica. La escritura de las tablas afectadas y los eventos se agrupan en una petición batchUpdate de Google Sheets.
 
 ## Diagnóstico
 
 - NOT_CONFIGURED: falta alguna de las cuatro variables privadas, o GOOGLE_SERVICE_ACCOUNT_JSON no contiene un JSON válido con client_email y private_key. El mensaje indica la configuración que falta sin mostrar sus valores.
 - GOOGLE_AUTH_FAILED: comprueba que el JSON de cuenta de servicio es válido y que la clave no se ha revocado.
 - SHEETS_PERMISSION_DENIED: comparte el documento con el correo client_email de la cuenta de servicio y dale permiso de editor.
-- SCHEMA_MISMATCH: revisa las pestañas y los encabezados sin eliminarlos ni reordenarlos manualmente.
+- SCHEMA_MISMATCH: revisa las pestañas y los encabezados sin reordenarlos manualmente.
+- SCHEMA_MIGRATION_PRODUCTION_ONLY: la hoja aún requiere la migración destructiva del esquema v2; no se permite ejecutarla desde Preview. Una vez confirmada la transición, deja que la primera petición en Production la complete.
 - COORDINATION_UNAVAILABLE: verifica que Redis responde y que el REST URL y token están bien configurados.
 - UNAUTHORIZED: vuelve a iniciar sesión o genera un enlace de control nuevo.
 - REVISION_CONFLICT: actualiza los datos desde el servidor y vuelve a guardar o aplicar la transición.
