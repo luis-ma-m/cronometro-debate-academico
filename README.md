@@ -53,7 +53,7 @@ Las pestañas de datos son Config, Rondas, Equipos, Jueces, Salas, Cronometros y
 
 - Mantén la hoja privada y compártela como editora únicamente con el correo de la cuenta de servicio.
 - Configura una contraseña fuerte en ADMIN_PASSWORD; el placeholder de demo no es adecuado para producción.
-- Configura SESSION_SECRET y las variables privadas de Redis y Google en los entornos Vercel necesarios. No publiques claves en GitHub ni las pongas en variables VITE_*.
+- Configura únicamente ADMIN_PASSWORD, GOOGLE_SERVICE_ACCOUNT_JSON, UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN como variables privadas de Vercel. No publiques claves en GitHub ni las pongas en variables VITE_*.
 - Las operaciones de escritura se serializan mediante un bloqueo distribuido y se verifican con revisiones para evitar sobrescrituras obsoletas.
 - Los enlaces de control son secretos por sala. Cualquier persona que obtenga el enlace completo puede controlar el cronómetro hasta que se regenere.
 - El preset LEDU es una referencia editable; confirma el reglamento y las bases del torneo real.
