@@ -110,6 +110,7 @@ function readTournament_() {
     tournamentName: str_(configValue_(config, 'tournamentName')) || 'Torneo LEDU',
     rounds: rounds, teams: teams, judges: judges, rooms: rooms,
     formatPhases: parseJson_(configValue_(config, 'formatPhases'), defaultPhases_()),
+    minimumJudgesPerRoom: Math.max(1, num_(configValue_(config, 'minimumJudgesPerRoom')) || 1),
     revision: num_(configValue_(config, 'revision')) || 1,
     updatedAt: num_(configValue_(config, 'updatedAt')) || Date.now(),
     serverTime: Date.now()
@@ -130,7 +131,7 @@ function getPublicRoom_(roomId) {
   }).filter(Boolean);
   return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '',
     room: publicRoomData_(room), teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '',
-    judges: judges, serverTime: Date.now() };
+    judges: judges, minimumJudgesPerRoom: tournament.minimumJudgesPerRoom, serverTime: Date.now() };
 }
 
 function publicRoomData_(room) {
@@ -273,7 +274,7 @@ function publicRoomFromTournament_(roomId, tournament) {
   const favor = tournament.teams.find(function (t) { return t.id === room.teamFavorId; });
   const contra = tournament.teams.find(function (t) { return t.id === room.teamContraId; });
   const judges = room.judgeIds.map(function (id) { const item = tournament.judges.find(function (j) { return j.id === id; }); return item ? item.name : ''; }).filter(Boolean);
-  return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '', room: publicRoomData_(room), teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '', judges: judges, serverTime: Date.now() };
+  return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '', room: publicRoomData_(room), teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '', judges: judges, minimumJudgesPerRoom: tournament.minimumJudgesPerRoom, serverTime: Date.now() };
 }
 
 function validateAssignments_(t) {
@@ -361,6 +362,7 @@ function setupSheets_() {
     ]);
   }
   if (!configValue_(readObjects_('Config'), 'formatPhases')) setConfig_('formatPhases', JSON.stringify(defaultPhases_()));
+  if (!configValue_(readObjects_('Config'), 'minimumJudgesPerRoom')) setConfig_('minimumJudgesPerRoom', '1');
 
   // Bootstrap a usable first round and empty rooms only on a brand-new sheet.
   if (readObjects_('Rondas').length === 0) {
