@@ -40,5 +40,5 @@ export const saveTournament = (token: string, expectedRevision: number, tourname
 export const getPublicRoom = (roomId: string) => apiCall<PublicRoom>('getPublicRoom', { roomId });
 export const getRoomControllerToken = (token: string, roomId: string, rotate = false) =>
   apiCall<{ token: string }>('getRoomControllerToken', { token, roomId, rotate });
-export const updateTimer = (roomId: string, action: TimerAction, expectedRevision: number, controllerToken?: string) =>
-  apiCall<PublicRoom>('updateRoomTimer', { roomId, action, expectedRevision, controllerToken });
+export const updateTimer = (roomId: string, action: TimerAction, expectedRevision: number, controlKey?: string) =>
+  apiCall<PublicRoom>('updateRoomTimer', { roomId, action, expectedRevision, controlKey });
