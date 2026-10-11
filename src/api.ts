@@ -34,6 +34,7 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
 }
 
 export const login = (password: string) => apiCall<{ token: string; expiresAt: number }>('login', { password });
+export const logout = (token: string) => apiCall<{ loggedOut: boolean }>('logout', { token });
 export const getTournament = (token: string) => apiCall<Tournament>('getTournament', { token });
 export const saveTournament = (token: string, expectedRevision: number, tournament: Tournament) =>
   apiCall<Tournament>('saveTournament', { token, expectedRevision, tournament });
