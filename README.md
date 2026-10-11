@@ -7,7 +7,10 @@ Aplicación web para coordinar un torneo de debate académico LEDU desde un pane
 - Panel de organización con acceso por contraseña y sesión temporal.
 - Resumen de salas con estados, ronda activa, incidencias y hora de última sincronización.
 - Gestión de equipos y jueces: alta, edición de nombre e institución y activación/desactivación sin borrar el historial.
-- Creación, renombrado y activación de rondas; creación y edición de salas y asignaciones de equipos y varios jueces.
+- Rondas dinámicas con activación confirmada: si hay debates sin finalizar, el panel enumera sala, equipos, fase, estado y tiempo restante antes de permitir forzar el cambio.
+- Salas físicas con URL pública permanente; cada ronda guarda una asignación independiente de equipos, jueces y estado de cronómetro.
+- Presets de formato editables desde Configuración, seleccionables como formato predeterminado de ronda y con excepción por sala.
+- Aviso visual de 20 segundos en las pantallas públicas tras activar una ronda, con los equipos y jueces recién asignados.
 - Validación de equipos y jueces duplicados en una misma ronda; validación de rondas, IDs y secuencias.
 - Editor del formato del debate: nombre de la intervención, tipo, postura, interviniente, duración, avisos, exceso de tiempo, orden, alta y baja de intervenciones.
 - Preset LEDU general editable con 12 intervenciones y duración teórica de 41 minutos. Comprueba siempre el reglamento de la edición concreta antes del torneo.
@@ -47,7 +50,7 @@ La hoja configurada para el proyecto es:
 
 https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI/edit
 
-Las pestañas de datos son Config, Rondas, Equipos, Jueces, Salas, Cronometros y Registro. La API puede crear Registro si no existe; no modifica silenciosamente encabezados incorrectos ni crea datos de torneo artificiales.
+El esquema v2 usa Config, Rondas, Equipos, Jueces, Salas, SalasFisicas, Formatos, Cronometros y Registro. En el primer acceso a Production con una hoja que no tenga `schemaVersion=2`, la API reinicializa los datos de torneo y crea una ronda y el preset LEDU. **Esta migración es destructiva y no conserva el torneo anterior.** Los previews no pueden ejecutarla para evitar que un despliegue de prueba borre la hoja de producción compartida. Consulta docs/DEPLOYMENT.md antes del despliegue.
 
 ## Seguridad y límites
 
