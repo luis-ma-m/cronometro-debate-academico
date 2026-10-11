@@ -344,7 +344,7 @@ function tournamentFromData(data: SheetData): Tournament {
     if (name && !institutionMap.has(key)) institutionMap.set(key, name);
   }
   const institutions = [...institutionMap.values()].sort((a, b) => a.localeCompare(b, "es"));
-  const canonicalInstitutions = new Map(institutions.map((name) => [name.toLocaleLowerCase("es-ES"), name]));
+  const canonicalInstitutions = new Map(institutions.map((name) => [name.toLocaleLowerCase("es-ES"), name] as const));
   teams.forEach((team) => { team.institution = canonicalInstitutions.get(team.institution.trim().toLocaleLowerCase("es-ES")) ?? team.institution; });
   judges.forEach((judge) => { judge.institution = canonicalInstitutions.get(judge.institution.trim().toLocaleLowerCase("es-ES")) ?? judge.institution; });
   const minimumJudges = Math.max(1, num(configValue(config, "minimumJudgesPerRoom")) || 1);
