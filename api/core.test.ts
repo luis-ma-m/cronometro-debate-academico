@@ -123,6 +123,7 @@ describe("Vercel API core", () => {
   it("rejects duplicate judge assignment across simultaneous rooms", () => {
     const tournament = makeTournament();
     tournament.teams.push({ id: "t3", name: "Equipo C", institution: "", active: true });
+    tournament.physicalRooms.push({ id: "physical-a2", slug: "sala-a2", name: "Sala A2", active: true, createdAt: 1, updatedAt: 1 });
     tournament.rooms.push({
       ...tournament.rooms[0],
       id: "a2",
