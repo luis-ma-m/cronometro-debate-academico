@@ -94,23 +94,26 @@ function readTournament_() {
   const judges = readObjects_('Jueces').map(function (j) {
     return { id: str_(j.id), name: str_(j.name), institution: str_(j.institution), active: bool_(j.active) };
   });
+  const minimumJudgesPerRoom = Math.max(1, num_(configValue_(config, 'minimumJudgesPerRoom')) || 1);
   const timers = {};
   readObjects_('Cronometros').forEach(function (t) { timers[str_(t.roomId)] = timerFromRow_(t); });
   const rooms = readObjects_('Salas').map(function (r) {
     const phases = parseJson_(r.phases, []);
     const timer = timers[str_(r.id)] || initialTimer_(phases);
-    return {
+    const room = {
       id: str_(r.id), name: str_(r.name), roundId: str_(r.roundId),
       teamFavorId: str_(r.teamFavorId), teamContraId: str_(r.teamContraId),
       judgeIds: parseJson_(r.judgeIds, []), status: str_(r.status) || 'unassigned',
       phases: phases, timer: timer, notes: str_(r.notes), updatedAt: num_(r.updatedAt)
     };
+    room.status = deriveRoomStatus_(room, minimumJudgesPerRoom);
+    return room;
   });
   return {
     tournamentName: str_(configValue_(config, 'tournamentName')) || 'Torneo LEDU',
     rounds: rounds, teams: teams, judges: judges, rooms: rooms,
     formatPhases: parseJson_(configValue_(config, 'formatPhases'), defaultPhases_()),
-    minimumJudgesPerRoom: Math.max(1, num_(configValue_(config, 'minimumJudgesPerRoom')) || 1),
+    minimumJudgesPerRoom: minimumJudgesPerRoom,
     revision: num_(configValue_(config, 'revision')) || 1,
     updatedAt: num_(configValue_(config, 'updatedAt')) || Date.now(),
     serverTime: Date.now()
@@ -195,27 +198,16 @@ function saveTournament_(p) {
     writeObjects_('Equipos', input.teams.map(function (t) { return { id: t.id, name: t.name, institution: t.institution, active: t.active }; }));
     writeObjects_('Jueces', input.judges.map(function (j) { return { id: j.id, name: j.name, institution: j.institution, active: j.active }; }));
     writeObjects_('Salas', input.rooms.map(function (r) {
+      const timer = plannedTimerForRoom_(r, persistedTimerRows, resetTimers, formatPhases);
+      const currentRoom = Object.assign({}, r, { timer: timer });
       return { id: r.id, name: r.name, roundId: r.roundId, teamFavorId: r.teamFavorId || '',
         teamContraId: r.teamContraId || '', judgeIds: JSON.stringify(r.judgeIds || []),
-        status: deriveRoomStatus_(r, minimumJudgesPerRoom), phases: JSON.stringify(r.phases || []), notes: r.notes || '', updatedAt: Date.now() };
+        status: deriveRoomStatus_(currentRoom, minimumJudgesPerRoom), phases: JSON.stringify(r.phases || formatPhases), notes: r.notes || '', updatedAt: Date.now() };
     }));
     // Keep stored live timers for existing rooms; the management browser may
     // hold an older timer snapshot from its last poll.
-    const storedTimers = {};
-    persistedTimerRows.forEach(function (timerRow) {
-      storedTimers[str_(timerRow.roomId)] = timerFromRow_(timerRow);
-    });
     writeObjects_('Cronometros', input.rooms.map(function (r) {
-      const previous = storedTimers[str_(r.id)];
-      let t = previous || initialTimer_(r.phases || formatPhases);
-      if (resetTimers) {
-        t = initialTimer_(r.phases || formatPhases);
-        t.revision = previous ? previous.revision + 1 : 0;
-      }
-      if (r.phases && t.phaseIndex >= r.phases.length) {
-        t = initialTimer_(r.phases);
-        t.revision = previous ? previous.revision + 1 : t.revision;
-      }
+      const t = plannedTimerForRoom_(r, persistedTimerRows, resetTimers, formatPhases);
       return { roomId: r.id, status: t.status, phaseIndex: t.phaseIndex, remainingSeconds: t.remainingSeconds,
         startedAt: t.startedAt || '', lastResumedAt: t.lastResumedAt || '', revision: t.revision || 0, updatedAt: t.updatedAt || Date.now() };
     }));
@@ -466,6 +458,18 @@ function upsertById_(name, key, id, obj) {
 }
 function configValue_(rows, key) { const item = rows.find(function (row) { return row.key === key; }); return item ? item.value : ''; }
 function setConfig_(key, value) { upsertById_('Config', 'key', key, { key: key, value: value }); }
+function plannedTimerForRoom_(room, persistedRows, resetTimers, fallbackPhases) {
+  const stored = (persistedRows || []).find(function (row) { return str_(row.roomId) === str_(room.id); });
+  const previous = stored ? timerFromRow_(stored) : null;
+  const phases = room.phases && room.phases.length ? room.phases : fallbackPhases;
+  let timer = previous || initialTimer_(phases || []);
+  if (resetTimers || (phases && timer.phaseIndex >= phases.length)) {
+    timer = initialTimer_(phases || []);
+    timer.revision = previous ? previous.revision + 1 : timer.revision;
+  }
+  return timer;
+}
+
 function deriveRoomStatus_(room, configuredMinimumJudges) {
   if (room.timer && room.timer.status === 'running') return 'running';
   if (room.timer && room.timer.status === 'paused') return 'paused';
