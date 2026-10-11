@@ -276,7 +276,8 @@ export default function App() {
       setServerError('');
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se ha podido controlar el cronómetro.');
-      if (error instanceof Error && 'code' in error && (error as Error & { code?: string }).code === 'REVISION_CONFLICT') await reloadRoom();
+      const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : undefined;
+      if (errorCode && ['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION'].includes(errorCode)) await reloadRoom();
     }
   };
 
@@ -626,10 +627,6 @@ export default function App() {
   const requestRoundActivation = async (roundId: string) => {
     setServerError('');
     try {
-      if (hasUnsavedRef.current) {
-        const saved = await persist();
-        if (!saved) return;
-      }
       let preview: RoundActivationPreview;
       if (apiConfigured) {
         if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
@@ -672,12 +669,46 @@ export default function App() {
     setActivatingRound(true);
     setServerError('');
     try {
+      // Do not persist local edits until the organizer confirms activation. If
+      // they exist, save them now, then refresh the pending-debate preview before
+      // taking the irreversible action.
+      if (hasUnsavedRef.current) {
+        const savedEdits = await persist(data);
+        if (!savedEdits) return;
+      }
+
+      let effectivePreview = preview;
+      let effectiveForce = force;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        const refreshedPreview = await getRoundActivationPreview(session.token, preview.targetRoundId);
+        const signature = (value: RoundActivationPreview) => JSON.stringify({
+          activeRoundId: value.activeRoundId,
+          targetRoundId: value.targetRoundId,
+          activationRevision: value.activationRevision,
+          pending: value.pending.map((item) => [item.assignmentId, item.teamFavor, item.teamContra, item.phaseName, item.status]),
+        });
+        const previewChanged = signature(refreshedPreview) !== signature(preview);
+        setActivationPreview(refreshedPreview);
+        if (refreshedPreview.alreadyActive) {
+          setActivationPreview(null);
+          setServerError('Esa ronda ya está activa.');
+          return;
+        }
+        if (previewChanged) {
+          setServerError('El estado de la ronda ha cambiado. Revisa la vista actualizada y confirma de nuevo.');
+          return;
+        }
+        effectivePreview = refreshedPreview;
+        effectiveForce = refreshedPreview.pending.length > 0;
+      }
+
       let saved: Tournament;
       if (apiConfigured) {
         if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
-        saved = await apiActivateRound(session.token, preview.targetRoundId, force);
+        saved = await apiActivateRound(session.token, effectivePreview.targetRoundId, effectiveForce);
       } else {
-        const target = data.rounds.find((round) => round.id === preview.targetRoundId);
+        const target = data.rounds.find((round) => round.id === effectivePreview.targetRoundId);
         if (!target) throw new Error('No se encuentra la ronda seleccionada.');
         const now = Date.now();
         const rooms = data.rooms.map((room) => {
@@ -703,7 +734,7 @@ export default function App() {
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
       setFormatDirty(false);
-      setSelectedRound(preview.targetRoundId);
+      setSelectedRound(effectivePreview.targetRoundId);
       setActivationPreview(null);
       setLastSyncedAt(Date.now());
       setConnected(true);
@@ -744,6 +775,7 @@ export default function App() {
           <div className="activation-dialog-top"><span className="eyebrow">CONFIRMACIÓN DE CAMBIO DE RONDA</span><button className="icon-button" onClick={() => setActivationPreview(null)} aria-label="Cerrar aviso" disabled={activatingRound}><X size={17} /></button></div>
           <h2 id="activate-round-title">Activar {activationPreview.targetRoundName}</h2>
           <p>Ronda actual: <b>{activationPreview.activeRoundName}</b>. La ronda entrante reiniciará los cronómetros de sus asignaciones según el formato efectivo.</p>
+          {hasUnsavedChanges && <div className="notice warning-notice"><CircleHelp size={17} /><span>Hay cambios sin guardar. Cancelar no los guardará; al confirmar se guardarán y se volverá a comprobar el estado de los debates pendientes.</span></div>}
           {activationPreview.pending.length > 0 ? <>
             <div className="notice warning-notice activation-warning"><CircleHelp size={18} /><span><b>{activationPreview.pending.length} debate(s) sin finalizar.</b> Si continúas, los cronómetros de la ronda saliente se congelarán y quedará registro de estos estados.</span></div>
             <div className="pending-debates-list">{activationPreview.pending.map((pending) => <article key={pending.assignmentId} className="pending-debate-item">
@@ -833,7 +865,9 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
     }
     if (snapshot.activationRevision !== lastActivationRevision.current) {
       lastActivationRevision.current = snapshot.activationRevision;
-      setTransitionUntil(remainingMs > 0 ? Date.now() + remainingMs : 0);
+      // A screen that detects a new activation gets the full announcement window,
+      // even if its next poll arrives later than the global activatedAt timestamp.
+      setTransitionUntil(Date.now() + 20_000);
       lastLeft.current = null;
     }
   }, [snapshot?.activationRevision, snapshot?.activatedAt, serverOffsetMs]);
@@ -862,18 +896,20 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
       </div>
     </header>
     {!snapshot ? <section className="timer-empty"><Monitor size={36} /><h1>Sala no disponible</h1><p>{error || 'La sala física no existe o aún no se ha configurado.'}</p><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Reintentar</button></section>
-    : !snapshot.hasAssignment ? <section className="timer-empty no-room-assignment"><Monitor size={42} /><p className="eyebrow">{snapshot.tournamentName} · {snapshot.roundName}</p><h1>Sala sin asignación en esta ronda</h1><p>{snapshot.physicalRoomName} conserva su enlace permanente. El panel de organización aún no ha asignado un debate a esta sala para la ronda activa.</p><span className="permanent-room-slug">/sala/{snapshot.roomSlug}</span><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Actualizar estado</button></section>
     : transitioning ? <section className="round-transition" aria-live="polite">
         <span className="eyebrow">RONDA ACTIVADA</span>
         <div className="transition-orbit"><Monitor size={38} /></div>
         <h1>Nueva ronda activada</h1>
         <p className="transition-round-name">{snapshot.roundName}</p>
         <p className="transition-room-name">{snapshot.physicalRoomName}</p>
-        <div className="transition-team-grid"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
-        <div className="transition-judges"><Gavel size={18} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
+        {snapshot.hasAssignment ? <>
+          <div className="transition-team-grid"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
+          <div className="transition-judges"><Gavel size={18} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
+        </> : <div className="transition-no-assignment"><h2>Sala sin asignación en esta ronda</h2><p>Esta sala conserva su enlace permanente, pero aún no tiene un debate asignado.</p></div>}
         <div className="transition-countdown"><b>{transitionSeconds}</b><span>segundos para comenzar</span></div>
         <p className="transition-help">El cronómetro está preparado y no descontará tiempo hasta que termine este aviso.</p>
       </section>
+    : !snapshot.hasAssignment ? <section className="timer-empty no-room-assignment"><Monitor size={42} /><p className="eyebrow">{snapshot.tournamentName} · {snapshot.roundName}</p><h1>Sala sin asignación en esta ronda</h1><p>{snapshot.physicalRoomName} conserva su enlace permanente. El panel de organización aún no ha asignado un debate a esta sala para la ronda activa.</p><span className="permanent-room-slug">/sala/{snapshot.roomSlug}</span><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Actualizar estado</button></section>
     : <>
       <section className="timer-heading">
         <p>{snapshot.tournamentName} <span>·</span> {snapshot.roundName}</p>
