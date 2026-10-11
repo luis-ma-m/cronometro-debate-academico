@@ -284,6 +284,13 @@ async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
     if (configRows.some((row) => str(row.key) === "schemaVersion" && str(row.value) === "2")) {
       return spreadsheetMetadata(true);
     }
+    if (env("VERCEL_ENV") !== "production") {
+      throw new ApiError(
+        "SCHEMA_MIGRATION_PRODUCTION_ONLY",
+        "La migración al esquema de salas permanentes elimina los datos de torneo existentes y solo se ejecuta en Production. Google Sheets no se ha reinicializado.",
+        503,
+      );
+    }
     const metadata = await spreadsheetMetadata(true);
     const requests: unknown[] = [];
     const now = Date.now();
