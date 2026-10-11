@@ -127,6 +127,7 @@ describe("Vercel API core", () => {
     tournament.rooms.push({
       ...tournament.rooms[0],
       id: "a2",
+      physicalRoomId: "physical-a2",
       name: "Sala A2",
       teamFavorId: "t3",
       teamContraId: "",
