@@ -57,6 +57,14 @@ describe('LEDU timer state machine', () => {
     expect(reset.remainingSeconds).toBe(300);
   });
 
+  it('allows the current phase to be reset after a debate was finished', () => {
+    const finished = { ...createTimer(LEDU_PHASES), phaseIndex: 5, status: 'finished' as const, remainingSeconds: 0 };
+    const reset = transitionTimer(finished, LEDU_PHASES, 'reset', 7000);
+    expect(reset.status).toBe('idle');
+    expect(reset.phaseIndex).toBe(5);
+    expect(reset.remainingSeconds).toBe(300);
+  });
+
   it('moves forward, backward and finishes safely at sequence boundaries', () => {
     const next = transitionTimer(createTimer(), LEDU_PHASES, 'next', 5000);
     expect(next.phaseIndex).toBe(1);
