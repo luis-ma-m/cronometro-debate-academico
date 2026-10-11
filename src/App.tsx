@@ -48,7 +48,6 @@ export default function App() {
         const fresh = await getTournament(session.token);
         const format = fresh.formatPhases?.length ? fresh.formatPhases : LEDU_PHASES;
         const roomFormatMismatch = fresh.rooms.some((room) => JSON.stringify(room.phases) !== JSON.stringify(format));
-        const hasLiveTimer = fresh.rooms.some((room) => room.timer.status === 'running' || room.timer.status === 'paused');
         setRoomFormatMismatch(roomFormatMismatch);
         setData((current) => {
           if (!hasUnsavedRef.current) return fresh;
