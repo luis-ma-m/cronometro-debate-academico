@@ -27,9 +27,25 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
     throw new ApiError('No hay conexión con el backend. Comprueba internet y vuelve a intentarlo.', 'NETWORK_ERROR');
   }
   if (!response.ok) {
+    let raw = '';
     let detail: { error?: { message?: string; code?: string } } = {};
-    try { detail = await response.json() as typeof detail; } catch { /* Use HTTP status below. */ }
-    throw new ApiError(detail.error?.message ?? ('El backend respondió HTTP ' + response.status), detail.error?.code ?? 'HTTP_ERROR');
+    try {
+      raw = await response.text();
+      detail = JSON.parse(raw) as typeof detail;
+    } catch { /* Vercel can return a non-JSON platform error before the handler runs. */ }
+
+    const requestId = response.headers.get('x-vercel-id');
+    if (response.status >= 500 && (!detail.error || detail.error.code === 'INTERNAL_ERROR')) {
+      const reference = requestId ? ' Referencia para localizarlo en Vercel: ' + requestId + '.' : '';
+      throw new ApiError(
+        'La función de Vercel ha fallado internamente (HTTP ' + response.status + '). Revisa Vercel → Logs → Runtime Logs. No se ha podido confirmar la operación.' + reference,
+        'VERCEL_RUNTIME_ERROR',
+      );
+    }
+    throw new ApiError(
+      detail.error?.message ?? ('El backend respondió HTTP ' + response.status),
+      detail.error?.code ?? 'HTTP_ERROR',
+    );
   }
   let result: { ok: boolean; data?: T; error?: { message?: string; code?: string } };
   try { result = await response.json() as typeof result; }
