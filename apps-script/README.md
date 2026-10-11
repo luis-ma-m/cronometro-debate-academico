@@ -4,37 +4,39 @@ Este directorio contiene el backend que conecta la interfaz React con la hoja de
 
 ## Hoja vinculada
 
-El ID por defecto ya apunta a la hoja configurada para este proyecto:
+ID predeterminado: 1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI
 
-`1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI`
+No compartas públicamente la hoja. El script se ejecuta como la cuenta desplegadora y esa cuenta necesita permiso de edición.
 
-No hace falta compartir públicamente la hoja. El script se ejecuta como la cuenta que lo despliega y esa cuenta debe tener acceso de edición a la hoja.
+## Preparar y publicar
 
-## Preparar el proyecto
+1. Abre la hoja y entra en Extensiones → Apps Script.
+2. Reemplaza Code.gs por el archivo versionado en este directorio.
+3. Activa la visualización de appsscript.json en la configuración del proyecto y actualiza su contenido.
+4. Define ADMIN_PASSWORD en las propiedades del script con una contraseña fuerte. SPREADSHEET_ID es opcional.
+5. Guarda y ejecuta setupSheets desde el editor, o recarga la hoja y selecciona LEDU Control → Preparar hoja del torneo. Autoriza a Google si te lo solicita.
+6. Confirma las pestañas Config, Rondas, Equipos, Jueces, Salas, Cronometros y Registro.
+7. Publica o actualiza la implementación web con acceso a cualquier usuario anónimo para habilitar la lectura pública de los cronómetros. Debe ejecutarse como la cuenta que administra la hoja.
+8. Comprueba la URL /exec?action=health.
 
-1. Abre la hoja de cálculo de torneo en Google Sheets.
-2. Ve a **Extensiones → Apps Script** para crear un proyecto vinculado a esa hoja.
-3. Sustituye el contenido de `Code.gs` por el archivo de este directorio.
-4. En Configuración del proyecto, activa la visualización del archivo de manifiesto `appsscript.json` y reemplaza su contenido con el manifiesto versionado aquí.
-5. En **Configuración del proyecto → Propiedades del script**, añade `ADMIN_PASSWORD` con una contraseña fuerte. `SPREADSHEET_ID` es opcional porque el ID del torneo ya viene configurado.
-6. Guarda los archivos y vuelve a la hoja. Recarga la hoja y ejecuta **LEDU Control → Preparar hoja del torneo**. La primera vez se solicitarán permisos; aprueba el acceso a la hoja.
-7. Verifica que aparezcan las pestañas `Config`, `Rondas`, `Equipos`, `Jueces`, `Salas` y `Cronometros`. Se crea una Ronda 1 y cuatro salas vacías para que puedas empezar a asignar equipos y jueces. No se inventan participantes.
-8. En Apps Script, selecciona **Implementar → Nueva implementación → Aplicación web**. Ejecutar como: **Yo**. Acceso: **Cualquier usuario**, incluidos anónimos, para que los cronómetros públicos puedan consultar los datos.
-9. Publica y copia la URL terminada en `/exec`. Prueba `<URL>/exec?action=health`; debe responder con `ok: true` y el nombre de la hoja.
+La actualización del repositorio no publica el código de Apps Script automáticamente. Después de cambiar Code.gs, ve a Implementar → Gestionar implementaciones → Editar → Nueva versión → Implementar.
 
-## Conectar el frontend
+## Contrato de seguridad
 
-Al compilar el frontend React, define:
+- La contraseña de gestión reside en Script Properties. El navegador solo recibe una sesión temporal cuya validez comprueba el servidor en cada operación protegida.
+- Las páginas públicas solo reciben los datos operativos de la sala solicitada; no se devuelven notas de gestión ni datos privados de contacto.
+- La gestión genera una clave de control por sala mediante getRoomControllerToken tras autenticar la sesión. La clave se almacena en Script Properties y el backend la exige en cada transición del cronómetro.
+- La clave de control se transporta en el fragmento de URL, no en el query string. Compártela solo con el dispositivo que deba controlar la sala. Al regenerar el enlace, la clave previa deja de funcionar.
+- Cada transición comprueba la revisión esperada dentro de LockService y anexa un evento a Registro. Los cambios obsoletos se rechazan para no sobrescribir un estado más reciente.
+- Registro es append-only desde la aplicación. No guarda cada segundo, solo transiciones relevantes.
+- El formato global y sus tiempos se persisten en Config.formatPhases. Cambiar el formato mientras haya cronómetros en curso o pausados se rechaza; tras cambiar la secuencia, los cronómetros afectados se reinician al primer turno.
+- El preset LEDU es editable y debe verificarse contra las bases oficiales del torneo real.
 
-```bash
-VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
-```
+## Diagnóstico
 
-No uses la URL del editor ni la URL de prueba `/dev`; debe ser la URL de despliegue `/exec`. Al cambiar esta variable, vuelve a ejecutar el build y publica el frontend.
-
-## Seguridad
-
-- No compartas públicamente la hoja.
-- No uses `contraseña` como credencial real; se reserva para la demo local.
-- La web app debe ejecutarse como propietario/desplegador para poder leer y escribir en la hoja sin pedir permisos a cada participante.
-- El acceso anónimo es necesario para lectura pública de salas. En la versión actual, el endpoint de acciones del cronómetro también acepta solicitudes anónimas; la limitación de controles a la pantalla de sala es de interfaz, no una vinculación criptográfica exclusiva a un dispositivo. No uses la web app en producción con esa limitación si necesitas impedir manipulación por clientes externos.
+- NOT_CONFIGURED: configura ADMIN_PASSWORD.
+- SPREADSHEET_ACCESS: comprueba el ID y el acceso de la cuenta desplegadora.
+- NOT_INITIALIZED o SCHEMA_MISMATCH: abre la hoja, verifica las pestañas y ejecuta Preparar hoja del torneo sin alterar manualmente los encabezados.
+- REVISION_CONFLICT: actualiza el estado y vuelve a aplicar la acción.
+- UNAUTHORIZED al controlar una sala: abre la sala desde el panel. Si un enlace antiguo dejó de funcionar, genera uno nuevo.
+- Si la interfaz muestra un error CORS o una respuesta que no es JSON, prueba el endpoint health y después el flujo POST desde el navegador que se usará en el torneo. Apps Script ContentService puede redirigir la respuesta.

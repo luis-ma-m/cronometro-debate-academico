@@ -1,64 +1,64 @@
 # Despliegue de LEDU Control
 
-## Hoja de Google Sheets de este torneo
+## Hoja del torneo
 
-La aplicación está preparada para trabajar con esta hoja:
+La aplicación usa esta hoja de cálculo privada:
 
 https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI/edit
 
-El ID está configurado como valor por defecto en `apps-script/Code.gs`. No hace falta definir `SPREADSHEET_ID` en propiedades del script, salvo que quieras apuntar a otra hoja. La hoja debe permanecer privada; el Apps Script se ejecuta como la cuenta que despliega y esa cuenta debe tener acceso de edición.
+El ID está configurado como predeterminado en apps-script/Code.gs. No publiques la hoja. La cuenta que despliega Apps Script debe tener acceso de edición.
 
-## 1. Crear el proyecto de Apps Script vinculado a la hoja
+## 1. Actualizar el backend de Apps Script
 
-1. Abre la hoja indicada arriba.
-2. En Google Sheets, ve a **Extensiones → Apps Script**. Esto crea un proyecto vinculado a la hoja correcta.
-3. En el editor, reemplaza el código de `Code.gs` con el contenido de [apps-script/Code.gs](../apps-script/Code.gs).
-4. En **Configuración del proyecto**, activa la opción para mostrar el archivo de manifiesto `appsscript.json` y reemplaza su contenido con [apps-script/appsscript.json](../apps-script/appsscript.json).
-5. Ve a **Configuración del proyecto → Propiedades del script** y crea:
-   - `ADMIN_PASSWORD`: contraseña fuerte para el panel privado. No utilices el placeholder `contraseña`.
-   - `SPREADSHEET_ID`: opcional; si está vacío, el script usa automáticamente la hoja de este torneo.
-6. Guarda los archivos y vuelve a la hoja de cálculo. Recarga la página.
-7. En el menú **LEDU Control**, elige **Preparar hoja del torneo**. En la primera ejecución, acepta la autorización de Google para acceder a la hoja.
-8. Comprueba que aparecen las pestañas `Config`, `Rondas`, `Equipos`, `Jueces`, `Salas` y `Cronometros`. La inicialización crea una Ronda 1 y cuatro salas sin asignaciones. No crea equipos ni jueces ficticios. El proceso es seguro para volver a ejecutarlo: no borra los registros existentes.
+Los cambios en GitHub o Vercel no actualizan automáticamente el código del proyecto de Apps Script. Hay que publicar una nueva versión del backend cuando cambie apps-script/Code.gs.
 
-## 2. Publicar el backend
+1. Abre la hoja anterior y accede a Extensiones → Apps Script.
+2. Sustituye el contenido de Code.gs por el archivo apps-script/Code.gs del repositorio, incluyendo las funciones de validación, registro de eventos y autorización por sala.
+3. En Configuración del proyecto, habilita el manifiesto appsscript.json y comprueba que coincide con apps-script/appsscript.json.
+4. En Propiedades del script, verifica que ADMIN_PASSWORD contiene una contraseña fuerte. SPREADSHEET_ID es opcional si se utiliza la hoja predeterminada.
+5. Guarda y ejecuta la función setupSheets o vuelve a la hoja, recarga y selecciona LEDU Control → Preparar hoja del torneo. Autoriza el acceso cuando Google lo solicite.
+6. Comprueba que existen las pestañas Config, Rondas, Equipos, Jueces, Salas, Cronometros y Registro. La función prepara los encabezados que falten; no borra registros existentes.
+7. Selecciona Implementar → Gestionar implementaciones → Editar. Elige Nueva versión y pulsa Implementar. Mantén la URL de producción /exec si actualizas una implementación existente.
+8. Verifica que la URL terminada en /exec?action=health devuelve ok: true y el nombre de la hoja.
 
-1. En el editor de Apps Script, haz clic en **Implementar → Nueva implementación**.
-2. Selecciona el tipo **Aplicación web**.
-3. **Ejecutar como:** tú (la cuenta que administra la hoja).
-4. **Quién tiene acceso:** cualquier usuario, incluso anónimo. Es necesario para que las páginas públicas de las salas consulten los datos sin iniciar sesión; el acceso de gestión se valida con `ADMIN_PASSWORD`.
-5. Pulsa **Implementar**, completa cualquier paso de autorización y copia la URL que termina en `/exec`.
-6. Abre `<URL>/exec?action=health`. Debe responder con `ok: true` e identificar el servicio como `LEDU Control API`. Si aparece `SPREADSHEET_ACCESS`, verifica que el proyecto de Apps Script está vinculado a la hoja correcta y que la cuenta desplegadora tiene acceso.
+Importante: los cambios del backend que añaden la pestaña Registro y la clave de control por sala requieren desplegar la nueva versión de Apps Script antes de probar los controles nuevos del frontend.
 
-Si cambias el código más adelante, usa **Implementar → Gestionar implementaciones → Editar → Nueva versión → Implementar** para actualizar la implementación existente.
+## 2. Configurar el acceso y la hoja
 
-## 3. Conectar el frontend React
+- El script debe ejecutarse como la cuenta que lo despliega y el acceso web debe permitir visitantes anónimos, porque los cronómetros públicos tienen que poder leer su estado.
+- Las operaciones de gestión requieren una sesión temporal validada por Apps Script.
+- Los enlaces de control se generan desde el panel después de guardar la asignación de la sala. La clave se guarda como propiedad del script y se pasa en el fragmento del enlace (después de #), no como parámetro de consulta.
+- Si un enlace completo de control se expone, usa Regenerar enlace en la gestión. La regeneración invalida la clave anterior para esa sala.
 
-El Apps Script es el backend: no aloja el bundle de React. La interfaz se publica por separado en el alojamiento estático elegido.
+## 3. Configurar Vercel
 
-Define la variable al construir el frontend:
+En el proyecto Vercel, añade la variable de entorno:
 
-```bash
-VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
-npm run build
-```
+- Nombre: VITE_APPS_SCRIPT_URL
+- Valor: la URL de la implementación de Apps Script que termina en /exec
+- Entorno: Production. También puede añadirse a Preview y Development para probar esos despliegues.
 
-Copia el ID/URL real de tu implementación en lugar de `DEPLOYMENT_ID`, y publica el contenido de `dist/`. Configura fallback de rutas para que `/sala/a1` y `/gestion` sirvan `index.html`. No uses la URL del editor ni la URL `/dev`; debes utilizar la URL de producción `/exec`.
+Guarda la variable y ejecuta Redeploy para que Vite compile el bundle con el valor. Vite incorpora las variables VITE_ en el frontend compilado: esta URL es un endpoint público, no debe contener contraseñas ni claves privadas.
 
-## 4. Verificación de extremo a extremo
+Vercel debe servir index.html para las rutas de la SPA como /gestion y /sala/a1. Tras desplegar, prueba la URL de producción y abre una ruta de sala directamente en una pestaña nueva.
 
-- Inicia sesión en el panel con la contraseña configurada.
-- Crea un equipo y un juez; guarda y comprueba que las filas aparecen en Google Sheets.
-- Asigna los participantes a una sala y abre su enlace público.
-- Inicia el cronómetro en el dispositivo de sala y comprueba que el estado se actualiza en el panel y en una segunda pantalla dentro del intervalo configurado.
-- Verifica que el panel de gestión no tiene controles para iniciar o pausar cronómetros.
-- Confirma que asignar un equipo o juez a dos salas de la misma ronda produce un error.
+## 4. Verificación funcional previa al torneo
 
-## Seguridad y limitaciones conocidas
+1. Inicia sesión en gestión.
+2. Crea un equipo y un juez, guarda y comprueba las filas en Google Sheets.
+3. Asigna dos equipos y al menos un juez a una sala; guarda y abre el cronómetro desde esa tarjeta.
+4. Comprueba que la página abierta desde el panel tiene controles, mientras que abrir manualmente /sala/a1 sin enlace de control solo permite consultar.
+5. Inicia, pausa, reanuda, reinicia una intervención, vuelve a la anterior, avanza y finaliza. Comprueba la pestaña Registro.
+6. Abre dos salas a la vez y comprueba que una acción en una sala no cambia la otra. Intenta una escritura obsoleta y verifica que el backend exige refrescar.
+7. Recarga una sala con el reloj activo y compara el tiempo; pasa de cero y comprueba el exceso de tiempo y el aviso sonoro después de activarlo.
+8. Desconecta y recupera la red; confirma que la interfaz avisa cuando no puede confirmar la última sincronización.
+9. Intenta guardar equipos o jueces duplicados en una misma ronda y verifica que se bloquea el guardado.
+10. Prueba el formato LEDU en el navegador y pantalla que se utilizarán el día del evento.
 
-- No compartas públicamente la hoja de cálculo.
-- La contraseña viaja en el cuerpo de una petición HTTPS, nunca en la URL. La autenticación de administración se comprueba en Apps Script.
-- El manifiesto define la web app como `USER_DEPLOYING` y `ANYONE_ANONYMOUS`: Apps Script ejecuta las operaciones con permisos del desplegador, pero acepta visitantes anónimos. Son configuraciones válidas para una API con cronómetros públicos; consulta la documentación oficial de [Web Apps](https://developers.google.com/apps-script/guides/web) y del [manifiesto de Web App](https://developers.google.com/apps-script/manifest/web-app-api-executable).
-- En la versión actual, los controles solo se muestran en la interfaz de sala, pero el endpoint `updateRoomTimer` no está vinculado criptográficamente al dispositivo. Un cliente externo que conozca la URL del backend y el ID de sala podría invocarlo directamente. Para exigir exclusividad técnica, hace falta añadir un emparejamiento por sala antes de utilizarlo en competición.
-- El acceso desde React debe probarse en navegador real, ya que Apps Script `ContentService` puede redirigir a otra URL al servir el contenido. Si las políticas CORS bloquean la respuesta, coloca un proxy de backend del mismo origen delante de Apps Script.
-- El preset de intervenciones es una base editable y debe comprobarse con las bases oficiales de la edición del torneo antes de usarlo en competición.
+## Límites que deben mantenerse visibles
+
+- El preset de 12 turnos y 41 minutos es una referencia procedente de la especificación del proyecto. Confirma el reglamento y las bases del torneo concreto antes de competir.
+- La contraseña compartida ofrece seguridad básica, no gestión de identidad por usuario.
+- El dispositivo controlador se autoriza mediante un enlace secreto por sala. Cualquier persona que obtenga el enlace de control completo puede usarlo hasta que se regenere; comparte solo la URL pública si el destinatario no debe controlar el reloj.
+- Apps Script tiene cuotas y latencia. Simula el número de salas previsto en el torneo; el intervalo de consulta objetivo es de 10 segundos, no tiempo real garantizado.
+- Apps Script ContentService puede redirigir su respuesta. Comprueba las solicitudes POST desde el navegador real desplegado porque CORS y las redirecciones dependen del entorno.

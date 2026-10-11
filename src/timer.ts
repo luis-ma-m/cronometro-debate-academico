@@ -1,19 +1,21 @@
 import type { Phase, TimerState } from './domain';
 
 export const LEDU_PHASES: Phase[] = [
-  { id: 'f1', name: 'Introducción', side: 'favor', speaker: 'Orador/a 1', durationSeconds: 240 },
-  { id: 'c1', name: 'Introducción', side: 'contra', speaker: 'Orador/a 1', durationSeconds: 240 },
-  { id: 'f2', name: 'Refutación 1', side: 'favor', speaker: 'Orador/a 2', durationSeconds: 240 },
-  { id: 'c2', name: 'Refutación 1', side: 'contra', speaker: 'Orador/a 2', durationSeconds: 240 },
-  { id: 'f3', name: 'Refutación 2', side: 'favor', speaker: 'Orador/a 3', durationSeconds: 240 },
-  { id: 'c3', name: 'Refutación 2', side: 'contra', speaker: 'Orador/a 3', durationSeconds: 240 },
-  { id: 'f4', name: 'Refutación 3', side: 'favor', speaker: 'Orador/a 4', durationSeconds: 240 },
-  { id: 'c4', name: 'Refutación 3', side: 'contra', speaker: 'Orador/a 4', durationSeconds: 240 },
-  { id: 'f5', name: 'Conclusión', side: 'favor', speaker: 'Orador/a 5', durationSeconds: 180 },
-  { id: 'c5', name: 'Conclusión', side: 'contra', speaker: 'Orador/a 5', durationSeconds: 180 },
-  { id: 'f6', name: 'Cierre', side: 'favor', speaker: 'Orador/a 6', durationSeconds: 180 },
-  { id: 'c6', name: 'Cierre', side: 'contra', speaker: 'Orador/a 6', durationSeconds: 180 },
+  { id: 'ledu-01', name: 'Exposición inicial', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-02', name: 'Examen cruzado', side: 'contra', speaker: 'En contra pregunta a A favor', durationSeconds: 120, type: 'cross-examination', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-03', name: 'Exposición inicial', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-04', name: 'Examen cruzado', side: 'favor', speaker: 'A favor pregunta a En contra', durationSeconds: 120, type: 'cross-examination', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-05', name: 'Refutación 1', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-06', name: 'Refutación 1', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-07', name: 'Refutación 2', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-08', name: 'Refutación 2', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-09', name: 'Refutación cruzada', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 90, type: 'cross-rebuttal', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-10', name: 'Refutación cruzada', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 90, type: 'cross-rebuttal', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-11', name: 'Conclusión', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 180, type: 'conclusion', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+  { id: 'ledu-12', name: 'Conclusión', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'conclusion', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
 ];
+
+export type TimerAction = 'start' | 'pause' | 'reset' | 'next' | 'previous' | 'finish';
 
 export const createTimer = (phases: Phase[] = LEDU_PHASES): TimerState => ({
   status: 'idle',
@@ -25,37 +27,87 @@ export const createTimer = (phases: Phase[] = LEDU_PHASES): TimerState => ({
   updatedAt: Date.now(),
 });
 
+/** Derives time from timestamps, so background-tab throttling never accumulates clock drift. */
 export function secondsLeft(timer: TimerState, now = Date.now()): number {
-  if (timer.status !== 'running' || timer.lastResumedAt === null) return Math.max(0, timer.remainingSeconds);
-  return Math.max(0, timer.remainingSeconds - Math.floor((now - timer.lastResumedAt) / 1000));
+  if (timer.status !== 'running' || timer.lastResumedAt === null) return timer.remainingSeconds;
+  return timer.remainingSeconds - Math.floor((now - timer.lastResumedAt) / 1000);
 }
 
 export function formatTime(seconds: number): string {
-  const safe = Math.max(0, Math.floor(seconds));
-  return String(Math.floor(safe / 60)).padStart(2, '0') + ':' + String(safe % 60).padStart(2, '0');
+  const safe = Math.floor(Math.abs(seconds));
+  const time = String(Math.floor(safe / 60)).padStart(2, '0') + ':' + String(safe % 60).padStart(2, '0');
+  return seconds < 0 ? '+' + time : time;
 }
 
-export function transitionTimer(timer: TimerState, phases: Phase[], action: 'start' | 'pause' | 'reset' | 'next', now = Date.now()): TimerState {
+export function transitionTimer(timer: TimerState, phases: Phase[], action: TimerAction, now = Date.now()): TimerState {
   const phase = phases[timer.phaseIndex];
-  if (action === 'reset') return { ...createTimer(phases), updatedAt: now, revision: timer.revision + 1 };
+  if (action === 'finish') {
+    if (timer.status === 'finished') return timer;
+    return { ...timer, status: 'finished', remainingSeconds: 0, lastResumedAt: null, updatedAt: now, revision: timer.revision + 1 };
+  }
+  if (action === 'reset') {
+    if (!phase) return timer;
+    return { ...timer, status: 'idle', remainingSeconds: phase.durationSeconds, startedAt: null, lastResumedAt: null, updatedAt: now, revision: timer.revision + 1 };
+  }
   if (action === 'start') {
     if (timer.status === 'running' || timer.status === 'finished' || !phase) return timer;
-    const remaining = timer.status === 'paused' ? secondsLeft(timer, now) : (timer.remainingSeconds || phase.durationSeconds);
-    return { ...timer, status: 'running', remainingSeconds: remaining, startedAt: timer.startedAt ?? now, lastResumedAt: now, updatedAt: now, revision: timer.revision + 1 };
+    return { ...timer, status: 'running', startedAt: timer.startedAt ?? now, lastResumedAt: now, updatedAt: now, revision: timer.revision + 1 };
   }
   if (action === 'pause') {
     if (timer.status !== 'running') return timer;
     return { ...timer, status: 'paused', remainingSeconds: secondsLeft(timer, now), lastResumedAt: null, updatedAt: now, revision: timer.revision + 1 };
   }
-  const nextIndex = timer.phaseIndex + 1;
-  if (nextIndex >= phases.length) return { ...timer, status: 'finished', remainingSeconds: 0, lastResumedAt: null, updatedAt: now, revision: timer.revision + 1 };
-  return { ...timer, status: 'idle', phaseIndex: nextIndex, remainingSeconds: phases[nextIndex].durationSeconds, startedAt: null, lastResumedAt: null, updatedAt: now, revision: timer.revision + 1 };
+  const nextIndex = action === 'previous' ? timer.phaseIndex - 1 : timer.phaseIndex + 1;
+  if (action === 'previous' && nextIndex < 0) return timer;
+  if (nextIndex >= phases.length) {
+    return { ...timer, status: 'finished', remainingSeconds: 0, lastResumedAt: null, updatedAt: now, revision: timer.revision + 1 };
+  }
+  const nextPhase = phases[nextIndex];
+  return { ...timer, status: 'idle', phaseIndex: nextIndex, remainingSeconds: nextPhase.durationSeconds, startedAt: null, lastResumedAt: null, updatedAt: now, revision: timer.revision + 1 };
 }
 
-export function withRoomStatus<T extends { status: string; timer: TimerState; teamFavorId: string; teamContraId: string; judgeIds: string[] }>(room: T): T {
+export function withRoomStatus<T extends { status: string; timer: TimerState; teamFavorId: string; teamContraId: string; judgeIds: string[] }>(room: T, minimumJudgesPerRoom = 1): T {
   const status = room.timer.status === 'running' ? 'running'
     : room.timer.status === 'paused' ? 'paused'
     : room.timer.status === 'finished' ? 'finished'
-    : room.teamFavorId && room.teamContraId && room.judgeIds.length ? 'ready' : 'unassigned';
+    : room.teamFavorId && room.teamContraId && room.judgeIds.length >= minimumJudgesPerRoom ? 'ready' : 'unassigned';
   return { ...room, status };
+}
+
+export function validateAssignments(tournament: { rounds: { id: string; name: string }[]; teams: { id: string; name: string }[]; judges: { id: string; name: string }[]; rooms: { id: string; name: string; roundId: string; teamFavorId: string; teamContraId: string; judgeIds: string[]; phases: Phase[] }[] }): string[] {
+  const errors: string[] = [];
+  const roundIds = new Set(tournament.rounds.map((round) => round.id));
+  const teamIds = new Map(tournament.teams.map((team) => [team.id, team.name]));
+  const judgeIds = new Map(tournament.judges.map((judge) => [judge.id, judge.name]));
+  const teamBookings = new Map<string, string>();
+  const judgeBookings = new Map<string, string>();
+  for (const room of tournament.rooms) {
+    if (!roundIds.has(room.roundId)) errors.push(`${room.name}: no tiene una ronda válida.`);
+    if (room.teamFavorId && room.teamFavorId === room.teamContraId) errors.push(`${room.name}: un equipo no puede debatir contra sí mismo.`);
+    for (const id of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
+      if (!teamIds.has(id)) errors.push(`${room.name}: contiene un equipo inexistente.`);
+      const key = room.roundId + ':' + id;
+      const other = teamBookings.get(key);
+      if (other) errors.push(`${teamIds.get(id) ?? id} está asignado a ${other} y ${room.name} en la misma ronda.`);
+      else teamBookings.set(key, room.name);
+    }
+    const seenJudges = new Set<string>();
+    for (const id of room.judgeIds ?? []) {
+      if (!judgeIds.has(id)) errors.push(`${room.name}: contiene un juez inexistente.`);
+      if (seenJudges.has(id)) errors.push(`${room.name}: un juez aparece más de una vez en la misma sala.`);
+      seenJudges.add(id);
+      const key = room.roundId + ':' + id;
+      const other = judgeBookings.get(key);
+      if (other && other !== room.name) errors.push(`${judgeIds.get(id) ?? id} está asignado a ${other} y ${room.name} en la misma ronda.`);
+      else judgeBookings.set(key, room.name);
+    }
+    if (!Array.isArray(room.phases) || !room.phases.length) errors.push(`${room.name}: el formato no tiene intervenciones.`);
+    else for (const phase of room.phases) {
+      if (!phase.name.trim() || !phase.speaker.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds < 1) {
+        errors.push(`${room.name}: revisa el nombre, el interviniente y la duración de cada intervención.`);
+        break;
+      }
+    }
+  }
+  return [...new Set(errors)];
 }

@@ -13,9 +13,11 @@ const SHEETS = {
   Equipos: ['id', 'name', 'institution', 'active'],
   Jueces: ['id', 'name', 'institution', 'active'],
   Salas: ['id', 'name', 'roundId', 'teamFavorId', 'teamContraId', 'judgeIds', 'status', 'phases', 'notes', 'updatedAt'],
-  Cronometros: ['roomId', 'status', 'phaseIndex', 'remainingSeconds', 'startedAt', 'lastResumedAt', 'revision', 'updatedAt']
+  Cronometros: ['roomId', 'status', 'phaseIndex', 'remainingSeconds', 'startedAt', 'lastResumedAt', 'revision', 'updatedAt'],
+  Registro: ['event_id', 'timestamp_utc', 'room_round_id', 'round_id', 'room_id', 'phase_index', 'event_type', 'elapsed_seconds', 'details']
 };
-const SESSION_TTL_SECONDS = 8 * 60 * 60;
+// Apps Script CacheService caps per-entry TTL at 21,600 seconds (6 hours).
+const SESSION_TTL_SECONDS = 6 * 60 * 60;
 
 function doGet(e) {
   const action = String(e && e.parameter && e.parameter.action || '');
@@ -52,8 +54,10 @@ function doPost(e) {
 function dispatch_(action, p) {
   switch (action) {
     case 'login': return login_(p);
+    case 'logout': return logout_(p);
     case 'getTournament': requireSession_(p.token); return readTournament_();
     case 'getPublicRoom': return getPublicRoom_(String(p.roomId || ''));
+    case 'getRoomControllerToken': return getRoomControllerToken_(p);
     case 'saveTournament': requireSession_(p.token); return saveTournament_(p);
     case 'updateRoomTimer': return updateRoomTimer_(p);
     default: throw apiError_('UNKNOWN_ACTION', 'Acción no reconocida.');
@@ -67,6 +71,11 @@ function login_(p) {
   const token = Utilities.getUuid() + Utilities.getUuid();
   CacheService.getScriptCache().put('session:' + token, '1', SESSION_TTL_SECONDS);
   return { token: token, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 };
+}
+
+function logout_(p) {
+  if (p && p.token) CacheService.getScriptCache().remove('session:' + String(p.token));
+  return { loggedOut: true };
 }
 
 function requireSession_(token) {
@@ -86,30 +95,36 @@ function readTournament_() {
   const judges = readObjects_('Jueces').map(function (j) {
     return { id: str_(j.id), name: str_(j.name), institution: str_(j.institution), active: bool_(j.active) };
   });
+  const minimumJudgesPerRoom = Math.max(1, num_(configValue_(config, 'minimumJudgesPerRoom')) || 1);
   const timers = {};
   readObjects_('Cronometros').forEach(function (t) { timers[str_(t.roomId)] = timerFromRow_(t); });
   const rooms = readObjects_('Salas').map(function (r) {
     const phases = parseJson_(r.phases, []);
     const timer = timers[str_(r.id)] || initialTimer_(phases);
-    return {
+    const room = {
       id: str_(r.id), name: str_(r.name), roundId: str_(r.roundId),
       teamFavorId: str_(r.teamFavorId), teamContraId: str_(r.teamContraId),
       judgeIds: parseJson_(r.judgeIds, []), status: str_(r.status) || 'unassigned',
       phases: phases, timer: timer, notes: str_(r.notes), updatedAt: num_(r.updatedAt)
     };
+    room.status = deriveRoomStatus_(room, minimumJudgesPerRoom);
+    return room;
   });
   return {
     tournamentName: str_(configValue_(config, 'tournamentName')) || 'Torneo LEDU',
     rounds: rounds, teams: teams, judges: judges, rooms: rooms,
+    formatPhases: parseJson_(configValue_(config, 'formatPhases'), defaultPhases_()),
+    minimumJudgesPerRoom: minimumJudgesPerRoom,
     revision: num_(configValue_(config, 'revision')) || 1,
-    updatedAt: num_(configValue_(config, 'updatedAt')) || Date.now()
+    updatedAt: num_(configValue_(config, 'updatedAt')) || Date.now(),
+    serverTime: Date.now()
   };
 }
 
 function getPublicRoom_(roomId) {
   if (!roomId) throw apiError_('INVALID_ROOM', 'Falta el identificador de sala.');
   const tournament = readTournament_();
-  const room = tournament.rooms.find(function (r) { return r.id === roomId; });
+  const room = tournament.rooms.find(function (r) { return r.id.toLowerCase() === roomId.toLowerCase(); });
   if (!room) throw apiError_('ROOM_NOT_FOUND', 'No se encuentra esa sala.');
   const round = tournament.rounds.find(function (r) { return r.id === room.roundId; });
   const favor = tournament.teams.find(function (t) { return t.id === room.teamFavorId; });
@@ -118,11 +133,35 @@ function getPublicRoom_(roomId) {
     const judge = tournament.judges.find(function (j) { return j.id === id; });
     return judge ? judge.name : '';
   }).filter(Boolean);
-  return {
-    tournamentName: tournament.tournamentName, roundName: round ? round.name : '',
-    room: room, teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '',
-    judges: judges, serverTime: Date.now()
-  };
+  return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '',
+    room: publicRoomData_(room), teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '',
+    judges: judges, minimumJudgesPerRoom: tournament.minimumJudgesPerRoom, serverTime: Date.now() };
+}
+
+function publicRoomData_(room) {
+  return { id: room.id, name: room.name, roundId: room.roundId, teamFavorId: room.teamFavorId,
+    teamContraId: room.teamContraId, judgeIds: room.judgeIds, status: room.status,
+    phases: room.phases, timer: room.timer, updatedAt: room.updatedAt };
+}
+
+function getRoomControllerToken_(p) {
+  requireSession_(p.token);
+  const roomId = str_(p.roomId);
+  if (!roomId) throw apiError_('INVALID_ROOM', 'Falta el identificador de sala.');
+  const row = readObjects_('Salas').find(function (item) { return str_(item.id).toLowerCase() === roomId.toLowerCase(); });
+  if (!row) throw apiError_('ROOM_NOT_FOUND', 'Guarda primero los cambios de esa sala.');
+  const key = roomControlPropertyKey_(str_(row.id));
+  const properties = PropertiesService.getScriptProperties();
+  let token = properties.getProperty(key);
+  if (!token || p.rotate === true || String(p.rotate).toLowerCase() === 'true') {
+    token = Utilities.getUuid() + Utilities.getUuid();
+    properties.setProperty(key, token);
+  }
+  return { token: token };
+}
+
+function roomControlPropertyKey_(roomId) {
+  return 'ROOM_CONTROL_TOKEN_' + String(roomId).replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 function saveTournament_(p) {
@@ -134,32 +173,49 @@ function saveTournament_(p) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const currentRevision = num_(configValue_(readObjects_('Config'), 'revision')) || 1;
+    const configRows = readObjects_('Config');
+    const currentRevision = num_(configValue_(configRows, 'revision')) || 1;
     if (num_(p.expectedRevision) !== currentRevision) {
       throw apiError_('REVISION_CONFLICT', 'El torneo cambió en otro dispositivo. Actualiza los datos antes de guardar.');
     }
     validateAssignments_(input);
+    const formatPhases = Array.isArray(input.formatPhases) && input.formatPhases.length ? input.formatPhases : (input.rooms[0] && input.rooms[0].phases || defaultPhases_());
+    validatePhases_(formatPhases);
+    const minimumJudgesPerRoom = Number(input.minimumJudgesPerRoom === undefined ? 1 : input.minimumJudgesPerRoom);
+    if (!Number.isInteger(minimumJudgesPerRoom) || minimumJudgesPerRoom < 1 || minimumJudgesPerRoom > 25) throw apiError_('INVALID_CONFIGURATION', 'El mínimo de jueces por sala debe ser un número entre 1 y 25.');
+    const previousFormat = parseJson_(configValue_(configRows, 'formatPhases'), defaultPhases_());
+    const formatChanged = JSON.stringify(previousFormat) !== JSON.stringify(formatPhases);
+    const previousRoomRows = readObjects_('Salas');
+    const roomPhasesChanged = input.rooms.some(function (room) {
+      const oldRoom = previousRoomRows.find(function (row) { return str_(row.id) === str_(room.id); });
+      return oldRoom && JSON.stringify(parseJson_(oldRoom.phases, [])) !== JSON.stringify(room.phases || []);
+    });
+    const resetTimers = formatChanged || roomPhasesChanged;
+    const persistedTimerRows = readObjects_('Cronometros');
+    if (resetTimers && persistedTimerRows.some(function (row) { return row.status === 'running' || row.status === 'paused'; })) {
+      throw apiError_('ACTIVE_TIMERS', 'No se puede cambiar el formato mientras haya cronómetros en curso o pausados. Detén los debates y vuelve a guardar.');
+    }
     writeObjects_('Rondas', input.rounds.map(function (r) { return { id: r.id, number: r.number, name: r.name, active: r.active }; }));
     writeObjects_('Equipos', input.teams.map(function (t) { return { id: t.id, name: t.name, institution: t.institution, active: t.active }; }));
     writeObjects_('Jueces', input.judges.map(function (j) { return { id: j.id, name: j.name, institution: j.institution, active: j.active }; }));
     writeObjects_('Salas', input.rooms.map(function (r) {
+      const timer = plannedTimerForRoom_(r, persistedTimerRows, resetTimers, formatPhases);
+      const currentRoom = Object.assign({}, r, { timer: timer });
       return { id: r.id, name: r.name, roundId: r.roundId, teamFavorId: r.teamFavorId || '',
         teamContraId: r.teamContraId || '', judgeIds: JSON.stringify(r.judgeIds || []),
-        status: deriveRoomStatus_(r), phases: JSON.stringify(r.phases || []), notes: r.notes || '', updatedAt: Date.now() };
+        status: deriveRoomStatus_(currentRoom, minimumJudgesPerRoom), phases: JSON.stringify(r.phases || formatPhases), notes: r.notes || '', updatedAt: Date.now() };
     }));
     // Keep stored live timers for existing rooms; the management browser may
     // hold an older timer snapshot from its last poll.
-    const storedTimers = {};
-    readObjects_('Cronometros').forEach(function (timerRow) {
-      storedTimers[str_(timerRow.roomId)] = timerFromRow_(timerRow);
-    });
     writeObjects_('Cronometros', input.rooms.map(function (r) {
-      const t = storedTimers[str_(r.id)] || initialTimer_(r.phases || []);
+      const t = plannedTimerForRoom_(r, persistedTimerRows, resetTimers, formatPhases);
       return { roomId: r.id, status: t.status, phaseIndex: t.phaseIndex, remainingSeconds: t.remainingSeconds,
         startedAt: t.startedAt || '', lastResumedAt: t.lastResumedAt || '', revision: t.revision || 0, updatedAt: t.updatedAt || Date.now() };
     }));
     const nextRevision = currentRevision + 1;
     setConfig_('tournamentName', input.tournamentName || 'Torneo LEDU');
+    setConfig_('formatPhases', JSON.stringify(formatPhases));
+    setConfig_('minimumJudgesPerRoom', String(minimumJudgesPerRoom));
     setConfig_('revision', String(nextRevision));
     setConfig_('updatedAt', String(Date.now()));
     SpreadsheetApp.flush();
@@ -170,31 +226,46 @@ function saveTournament_(p) {
 function updateRoomTimer_(p) {
   const roomId = String(p.roomId || '');
   const action = String(p.action || '');
-  if (['start', 'pause', 'reset', 'next'].indexOf(action) < 0) throw apiError_('INVALID_ACTION', 'Acción de cronómetro no válida.');
+  if (['start', 'pause', 'reset', 'next', 'previous', 'finish'].indexOf(action) < 0) throw apiError_('INVALID_ACTION', 'Acción de cronómetro no válida.');
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const rooms = readObjects_('Salas');
-    const row = rooms.find(function (r) { return String(r.id) === roomId; });
+    const row = readObjects_('Salas').find(function (r) { return String(r.id).toLowerCase() === roomId.toLowerCase(); });
     if (!row) throw apiError_('ROOM_NOT_FOUND', 'No se encuentra esa sala.');
-    const timerRows = readObjects_('Cronometros');
-    const stored = timerRows.find(function (t) { return String(t.roomId) === roomId; });
+    const canonicalId = String(row.id);
+    const expectedKey = PropertiesService.getScriptProperties().getProperty(roomControlPropertyKey_(canonicalId));
+    if (!expectedKey || !p.controlKey || !constantTimeEquals_(String(p.controlKey), expectedKey)) throw apiError_('UNAUTHORIZED', 'Abre esta sala desde el panel de organización para controlar el cronómetro.');
     const phases = parseJson_(row.phases, []);
-    const timer = stored ? timerFromRow_(stored) : initialTimer_(phases);
-    if (p.expectedRevision !== undefined && num_(p.expectedRevision) !== timer.revision) {
-      throw apiError_('REVISION_CONFLICT', 'El cronómetro recibió otra acción. Actualiza el estado.');
+    if (action === 'start') {
+      const minimumJudges = Math.max(1, num_(configValue_(readObjects_('Config'), 'minimumJudgesPerRoom')) || 1);
+      if (!str_(row.teamFavorId) || !str_(row.teamContraId) || str_(row.teamFavorId) === str_(row.teamContraId) || parseJson_(row.judgeIds, []).length < minimumJudges) {
+        throw apiError_('INVALID_ASSIGNMENT', 'Asigna dos equipos distintos y al menos ' + minimumJudges + ' juez(es) antes de iniciar.');
+      }
     }
-    const next = transitionTimer_(timer, phases, action, Date.now());
-    upsertById_('Cronometros', 'roomId', roomId, {
-      roomId: roomId, status: next.status, phaseIndex: next.phaseIndex,
-      remainingSeconds: next.remainingSeconds, startedAt: next.startedAt || '',
-      lastResumedAt: next.lastResumedAt || '', revision: next.revision, updatedAt: next.updatedAt
-    });
-    upsertById_('Salas', 'id', roomId, Object.assign({}, row, { status: deriveRoomStatus_(Object.assign({}, row, { timer: next })), updatedAt: Date.now() }));
+    if (action === 'start') validatePhases_(phases);
+    const stored = readObjects_('Cronometros').find(function (t) { return String(t.roomId) === canonicalId; });
+    const timer = stored ? timerFromRow_(stored) : initialTimer_(phases);
+    if (p.expectedRevision === undefined || num_(p.expectedRevision) !== timer.revision) throw apiError_('REVISION_CONFLICT', 'El cronómetro cambió en otro dispositivo. Actualiza el estado.');
+    const oldIndex = timer.phaseIndex;
+    const oldStatus = timer.status;
+    const oldRemaining = remaining_(timer, Date.now());
+    const timestamp = Date.now();
+    const next = transitionTimer_(timer, phases, action, timestamp);
+    if (next.revision === timer.revision) return publicRoomFromTournament_(canonicalId, readTournament_());
+    upsertById_('Cronometros', 'roomId', canonicalId, { roomId: canonicalId, status: next.status, phaseIndex: next.phaseIndex, remainingSeconds: next.remainingSeconds, startedAt: next.startedAt || '', lastResumedAt: next.lastResumedAt || '', revision: next.revision, updatedAt: next.updatedAt });
+    upsertById_('Salas', 'id', canonicalId, Object.assign({}, row, { status: deriveRoomStatus_(Object.assign({}, row, { timer: next })), updatedAt: timestamp }));
+    appendTimerEvent_(row, next, action, oldIndex, oldStatus, oldRemaining, timestamp);
     SpreadsheetApp.flush();
-    // Intentionally call the non-locking read function while the script lock is held.
-    return publicRoomFromTournament_(roomId, readTournament_());
+    return publicRoomFromTournament_(canonicalId, readTournament_());
   } finally { lock.releaseLock(); }
+}
+
+function appendTimerEvent_(roomRow, next, action, phaseIndex, previousStatus, remainingBefore, timestamp) {
+  const phases = parseJson_(roomRow.phases, []);
+  const phase = phases[phaseIndex] || {};
+  const types = { start: previousStatus === 'paused' ? 'resumed' : 'started', pause: 'paused', reset: 'reset', next: next.status === 'finished' ? 'finished' : 'phase_advanced', previous: 'phase_rewound', finish: 'finished' };
+  const elapsed = Math.max(0, num_(phase.durationSeconds) - remainingBefore);
+  sheet_('Registro').appendRow([Utilities.getUuid(), new Date(timestamp).toISOString(), str_(roomRow.id), str_(roomRow.roundId), str_(roomRow.id), phaseIndex, types[action] || action, Math.round(elapsed), JSON.stringify({ action: action, fromStatus: previousStatus, toStatus: next.status, revision: next.revision })]);
 }
 
 function publicRoomFromTournament_(roomId, tournament) {
@@ -204,29 +275,53 @@ function publicRoomFromTournament_(roomId, tournament) {
   const favor = tournament.teams.find(function (t) { return t.id === room.teamFavorId; });
   const contra = tournament.teams.find(function (t) { return t.id === room.teamContraId; });
   const judges = room.judgeIds.map(function (id) { const item = tournament.judges.find(function (j) { return j.id === id; }); return item ? item.name : ''; }).filter(Boolean);
-  return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '', room: room, teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '', judges: judges, serverTime: Date.now() };
+  return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '', room: publicRoomData_(room), teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '', judges: judges, minimumJudgesPerRoom: tournament.minimumJudgesPerRoom, serverTime: Date.now() };
 }
 
 function validateAssignments_(t) {
-  const teamIds = new Set(t.teams.map(function (item) { return item.id; }));
-  const judgeIds = new Set(t.judges.map(function (item) { return item.id; }));
+  const rounds = new Set((t.rounds || []).map(function (item) { return str_(item.id); }));
+  const teamIds = new Set((t.teams || []).map(function (item) { return str_(item.id); }));
+  const judgeIds = new Set((t.judges || []).map(function (item) { return str_(item.id); }));
   const teamBookings = {};
   const judgeBookings = {};
-  t.rooms.forEach(function (room) {
+  (t.rooms || []).forEach(function (room) {
+    if (!rounds.has(str_(room.roundId))) throw apiError_('INVALID_ASSIGNMENT', 'La sala ' + str_(room.name) + ' tiene una ronda inexistente.');
     if (room.teamFavorId && room.teamFavorId === room.teamContraId) throw apiError_('INVALID_ASSIGNMENT', 'Un equipo no puede debatir contra sí mismo.');
     [room.teamFavorId, room.teamContraId].filter(Boolean).forEach(function (id) {
-      if (!teamIds.has(id)) throw apiError_('INVALID_ASSIGNMENT', 'Una sala contiene un equipo inexistente.');
+      if (!teamIds.has(str_(id))) throw apiError_('INVALID_ASSIGNMENT', 'Una sala contiene un equipo inexistente.');
       const key = room.roundId + ':' + id;
       if (teamBookings[key]) throw apiError_('TEAM_DOUBLE_BOOKED', 'Un equipo está asignado a dos salas de la misma ronda.');
       teamBookings[key] = true;
     });
+    const localJudges = {};
     (room.judgeIds || []).forEach(function (id) {
-      if (!judgeIds.has(id)) throw apiError_('INVALID_ASSIGNMENT', 'Una sala contiene un juez inexistente.');
+      if (!judgeIds.has(str_(id))) throw apiError_('INVALID_ASSIGNMENT', 'Una sala contiene un juez inexistente.');
+      if (localJudges[id]) throw apiError_('INVALID_ASSIGNMENT', 'Un juez aparece más de una vez en la misma sala.');
+      localJudges[id] = true;
       const key = room.roundId + ':' + id;
       if (judgeBookings[key]) throw apiError_('JUDGE_DOUBLE_BOOKED', 'Un juez está asignado a dos salas de la misma ronda.');
       judgeBookings[key] = true;
     });
-    if (!Array.isArray(room.phases) || !room.phases.length) throw apiError_('INVALID_PHASES', 'Cada sala debe tener al menos una fase de debate.');
+    validatePhases_(room.phases);
+  });
+}
+
+function validatePhases_(phases) {
+  if (!Array.isArray(phases) || phases.length === 0) throw apiError_('INVALID_PHASES', 'El formato debe incluir al menos una intervención.');
+  const seen = {};
+  phases.forEach(function (phase, index) {
+    if (!phase || !str_(phase.id) || !str_(phase.name).trim() || !str_(phase.speaker).trim()) {
+      throw apiError_('INVALID_PHASES', 'La intervención ' + (index + 1) + ' necesita identificador, nombre e interviniente.');
+    }
+    if (seen[str_(phase.id)]) throw apiError_('INVALID_PHASES', 'Hay identificadores de intervención duplicados.');
+    seen[str_(phase.id)] = true;
+    if (phase.side !== 'favor' && phase.side !== 'contra') throw apiError_('INVALID_PHASES', 'Cada intervención debe asociarse a A favor o En contra.');
+    const duration = Number(phase.durationSeconds);
+    if (!Number.isFinite(duration) || duration < 1 || duration > 7200) throw apiError_('INVALID_PHASES', 'La duración debe estar entre 1 y 7200 segundos.');
+    const thresholds = phase.warningThresholdsSeconds;
+    if (thresholds !== undefined && (!Array.isArray(thresholds) || thresholds.some(function (item) { return !Number.isFinite(Number(item)) || Number(item) < 0; }))) {
+      throw apiError_('INVALID_PHASES', 'Los umbrales de aviso deben contener segundos válidos.');
+    }
   });
 }
 
@@ -267,6 +362,8 @@ function setupSheets_() {
       { key: 'updatedAt', value: String(Date.now()) }
     ]);
   }
+  if (!configValue_(readObjects_('Config'), 'formatPhases')) setConfig_('formatPhases', JSON.stringify(defaultPhases_()));
+  if (!configValue_(readObjects_('Config'), 'minimumJudgesPerRoom')) setConfig_('minimumJudgesPerRoom', '1');
 
   // Bootstrap a usable first round and empty rooms only on a brand-new sheet.
   if (readObjects_('Rondas').length === 0) {
@@ -303,18 +400,18 @@ function setupSheets_() {
 
 function defaultPhases_() {
   return [
-    { id: 'f1', name: 'Introducción', side: 'favor', speaker: 'Orador/a 1', durationSeconds: 240 },
-    { id: 'c1', name: 'Introducción', side: 'contra', speaker: 'Orador/a 1', durationSeconds: 240 },
-    { id: 'f2', name: 'Refutación 1', side: 'favor', speaker: 'Orador/a 2', durationSeconds: 240 },
-    { id: 'c2', name: 'Refutación 1', side: 'contra', speaker: 'Orador/a 2', durationSeconds: 240 },
-    { id: 'f3', name: 'Refutación 2', side: 'favor', speaker: 'Orador/a 3', durationSeconds: 240 },
-    { id: 'c3', name: 'Refutación 2', side: 'contra', speaker: 'Orador/a 3', durationSeconds: 240 },
-    { id: 'f4', name: 'Refutación 3', side: 'favor', speaker: 'Orador/a 4', durationSeconds: 240 },
-    { id: 'c4', name: 'Refutación 3', side: 'contra', speaker: 'Orador/a 4', durationSeconds: 240 },
-    { id: 'f5', name: 'Conclusión', side: 'favor', speaker: 'Orador/a 5', durationSeconds: 180 },
-    { id: 'c5', name: 'Conclusión', side: 'contra', speaker: 'Orador/a 5', durationSeconds: 180 },
-    { id: 'f6', name: 'Cierre', side: 'favor', speaker: 'Orador/a 6', durationSeconds: 180 },
-    { id: 'c6', name: 'Cierre', side: 'contra', speaker: 'Orador/a 6', durationSeconds: 180 }
+    { id: 'ledu-01', name: 'Exposición inicial', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-02', name: 'Examen cruzado', side: 'contra', speaker: 'En contra pregunta a A favor', durationSeconds: 120, type: 'cross-examination', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-03', name: 'Exposición inicial', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-04', name: 'Examen cruzado', side: 'favor', speaker: 'A favor pregunta a En contra', durationSeconds: 120, type: 'cross-examination', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-05', name: 'Refutación 1', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-06', name: 'Refutación 1', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-07', name: 'Refutación 2', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-08', name: 'Refutación 2', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 300, type: 'rebuttal', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-09', name: 'Refutación cruzada', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 90, type: 'cross-rebuttal', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-10', name: 'Refutación cruzada', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 90, type: 'cross-rebuttal', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-11', name: 'Conclusión', side: 'contra', speaker: 'Equipo en contra', durationSeconds: 180, type: 'conclusion', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
+    { id: 'ledu-12', name: 'Conclusión', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'conclusion', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true }
   ];
 }
 
@@ -362,11 +459,25 @@ function upsertById_(name, key, id, obj) {
 }
 function configValue_(rows, key) { const item = rows.find(function (row) { return row.key === key; }); return item ? item.value : ''; }
 function setConfig_(key, value) { upsertById_('Config', 'key', key, { key: key, value: value }); }
-function deriveRoomStatus_(room) {
+function plannedTimerForRoom_(room, persistedRows, resetTimers, fallbackPhases) {
+  const stored = (persistedRows || []).find(function (row) { return str_(row.roomId) === str_(room.id); });
+  const previous = stored ? timerFromRow_(stored) : null;
+  const phases = room.phases && room.phases.length ? room.phases : fallbackPhases;
+  let timer = previous || initialTimer_(phases || []);
+  if (resetTimers || (phases && timer.phaseIndex >= phases.length)) {
+    timer = initialTimer_(phases || []);
+    timer.revision = previous ? previous.revision + 1 : timer.revision;
+  }
+  return timer;
+}
+
+function deriveRoomStatus_(room, configuredMinimumJudges) {
   if (room.timer && room.timer.status === 'running') return 'running';
   if (room.timer && room.timer.status === 'paused') return 'paused';
   if (room.timer && room.timer.status === 'finished') return 'finished';
-  return room.teamFavorId && room.teamContraId && (room.judgeIds || []).length ? 'ready' : 'unassigned';
+  const current = configValue_(readObjects_('Config'), 'minimumJudgesPerRoom');
+  const minimum = configuredMinimumJudges === undefined ? Math.max(1, num_(current) || 1) : configuredMinimumJudges;
+  return room.teamFavorId && room.teamContraId && (room.judgeIds || []).length >= minimum ? 'ready' : 'unassigned';
 }
 function timerFromRow_(row) {
   return { status: str_(row.status) || 'idle', phaseIndex: num_(row.phaseIndex), remainingSeconds: num_(row.remainingSeconds),
@@ -378,30 +489,34 @@ function initialTimer_(phases) {
     startedAt: null, lastResumedAt: null, revision: 0, updatedAt: Date.now() };
 }
 function remaining_(timer, now) {
-  if (timer.status !== 'running' || timer.lastResumedAt === null) return Math.max(0, timer.remainingSeconds);
-  return Math.max(0, timer.remainingSeconds - Math.floor((now - timer.lastResumedAt) / 1000));
+  if (timer.status !== 'running' || timer.lastResumedAt === null) return num_(timer.remainingSeconds);
+  return num_(timer.remainingSeconds) - Math.floor((now - timer.lastResumedAt) / 1000);
 }
 function transitionTimer_(timer, phases, action, now) {
   const phase = phases[timer.phaseIndex];
+  if (action === 'finish') {
+    if (timer.status === 'finished') return timer;
+    return Object.assign({}, timer, { status: 'finished', remainingSeconds: 0, lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
+  }
   if (action === 'reset') {
-    const fresh = initialTimer_(phases);
-    fresh.updatedAt = now;
-    fresh.revision = timer.revision + 1;
-    return fresh;
+    if (!phase) return timer;
+    return Object.assign({}, timer, { status: 'idle', remainingSeconds: num_(phase.durationSeconds), startedAt: null, lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
   }
   if (action === 'start') {
     if (timer.status === 'running' || timer.status === 'finished' || !phase) return timer;
-    const rest = timer.status === 'paused' ? remaining_(timer, now) : (timer.remainingSeconds || num_(phase.durationSeconds));
-    return Object.assign({}, timer, { status: 'running', remainingSeconds: rest, startedAt: timer.startedAt || now, lastResumedAt: now, revision: timer.revision + 1, updatedAt: now });
+    return Object.assign({}, timer, { status: 'running', startedAt: timer.startedAt || now, lastResumedAt: now, revision: timer.revision + 1, updatedAt: now });
   }
   if (action === 'pause') {
     if (timer.status !== 'running') return timer;
     return Object.assign({}, timer, { status: 'paused', remainingSeconds: remaining_(timer, now), lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
   }
-  const index = timer.phaseIndex + 1;
+  if (timer.status === 'finished') return timer;
+  const index = action === 'previous' ? timer.phaseIndex - 1 : timer.phaseIndex + 1;
+  if (index < 0) return timer;
   if (index >= phases.length) return Object.assign({}, timer, { status: 'finished', remainingSeconds: 0, lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
   return Object.assign({}, timer, { status: 'idle', phaseIndex: index, remainingSeconds: num_(phases[index].durationSeconds), startedAt: null, lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
 }
+
 function constantTimeEquals_(a, b) {
   if (a.length !== b.length) return false;
   let result = 0;
