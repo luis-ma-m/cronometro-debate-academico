@@ -236,6 +236,15 @@ async function ensureSchema(): Promise<SpreadsheetMetadata> {
   let metadata = await spreadsheetMetadata();
   const initialTitles = new Set((metadata.sheets || []).map((item) => item.properties.title));
   const missing = SHEET_NAMES.filter((name) => !initialTitles.has(name));
+  // Preview deployments can share the Production spreadsheet credentials.
+  // Never let schema repair create tabs there before the destructive migration guard runs.
+  if (missing.length && env("VERCEL_ENV") !== "production") {
+    throw new ApiError(
+      "SCHEMA_MIGRATION_PRODUCTION_ONLY",
+      "Faltan pestañas del esquema y solo se pueden crear o migrar desde Production. Google Sheets no se ha modificado.",
+      503,
+    );
+  }
   if (missing.length) {
     return withLock("ledu:lock:schema", async () => {
       metadata = await spreadsheetMetadata(true);
