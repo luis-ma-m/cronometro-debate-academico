@@ -333,6 +333,9 @@ export function publicRoomPayload(tournament: Tournament, roomSlug: string): Pub
     notes: "",
     updatedAt: now,
   };
+  // An assignment row is pre-created for every physical room in many rounds.
+  // It is only a public debate assignment when someone has actually been allocated.
+  const hasAssignment = Boolean(assignment && (assignment.teamFavorId || assignment.teamContraId || assignment.judgeIds.length > 0));
   const favor = tournament.teams.find((item) => item.id === room.teamFavorId);
   const contra = tournament.teams.find((item) => item.id === room.teamContraId);
   const judges = room.judgeIds.map((id) => tournament.judges.find((item) => item.id === id)?.name ?? "").filter(Boolean);
@@ -340,7 +343,7 @@ export function publicRoomPayload(tournament: Tournament, roomSlug: string): Pub
     tournamentName: tournament.tournamentName,
     roundName: round?.name ?? "Sin ronda activa",
     room: publicRoomData(room) as Room,
-    hasAssignment: Boolean(assignment),
+    hasAssignment,
     physicalRoomId: physical.id,
     roomSlug: physical.slug,
     physicalRoomName: physical.name,
