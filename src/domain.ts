@@ -48,6 +48,7 @@ export interface Tournament {
   judges: Judge[];
   rooms: Room[];
   formatPhases?: Phase[];
+  minimumJudgesPerRoom?: number;
   revision: number;
   updatedAt: number;
   serverTime?: number;
@@ -60,5 +61,6 @@ export interface PublicRoom {
   teamFavor: string;
   teamContra: string;
   judges: string[];
+  minimumJudgesPerRoom?: number;
   serverTime: number;
 }
