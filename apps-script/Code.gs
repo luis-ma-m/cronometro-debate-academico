@@ -111,7 +111,8 @@ function readTournament_() {
     rounds: rounds, teams: teams, judges: judges, rooms: rooms,
     formatPhases: parseJson_(configValue_(config, 'formatPhases'), defaultPhases_()),
     revision: num_(configValue_(config, 'revision')) || 1,
-    updatedAt: num_(configValue_(config, 'updatedAt')) || Date.now()
+    updatedAt: num_(configValue_(config, 'updatedAt')) || Date.now(),
+    serverTime: Date.now()
   };
 }
 
