@@ -629,6 +629,15 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
       Cronometros: finalRooms.map((room) => rowObjectForTimer(room.id, room.timer)),
     };
     await writeTables(data, replacements);
+
+    // Revoke room-control links for rooms removed by the organizer. If that
+    // room ID is later reused, an old link must not regain control.
+    const nextRoomIds = new Set(tournament.rooms.map((room) => room.id));
+    const removedRoomIds = oldRoomRows.map((row) => str(row.id)).filter((id) => id && !nextRoomIds.has(id));
+    await Promise.all(removedRoomIds.map((id) =>
+      redisCommand(["DEL", "ledu:room-control:" + sha256(id)]).catch(() => undefined)
+    ));
+
     return tournamentFromData(await loadSheetData(true));
   });
 }
@@ -771,11 +780,12 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const payload = body.payload && typeof body.payload === "object" && !Array.isArray(body.payload)
       ? body.payload
       : {};
-    if (action !== "login" && action !== "logout" && action !== "getRoomControllerToken") {
-      await ensureSchema();
-    } else if (action === "getRoomControllerToken") {
+    if (["saveTournament", "updateRoomTimer", "getRoomControllerToken"].includes(action)) {
+      // These handlers call loadSheetData(true) while they hold any write lock,
+      // so prepare/validate the schema before entering them.
       await ensureSchema();
     }
+    // Read endpoints validate the schema in loadSheetData() itself.
     const result = await dispatch(action, payload, req);
     res.status(200).json({ ok: true, data: result });
   } catch (error) {
