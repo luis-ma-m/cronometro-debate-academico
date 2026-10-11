@@ -1,27 +1,239 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
+import { useCallback, useEffect, useState } from 'react';
+import type { FormEvent } from 'react';
+import { Activity, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ShieldCheck, Users, X } from 'lucide-react';
+import type { Judge, PublicRoom, Room, Round, Team, Tournament } from './domain';
+import { apiConfigured, getPublicRoom, getTournament, login, saveTournament, updateTimer } from './api';
+import { readDemo, writeDemo } from './demo';
+import { formatTime, secondsLeft, transitionTimer, withRoomStatus } from './timer';
 
-const queryClient = new QueryClient();
+const SESSION_KEY = 'ledu-admin-session';
+const POLL_MS = 8000;
+type View = 'overview' | 'rooms' | 'teams' | 'judges';
 
-const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
-);
+function getSession(): { token: string; expiresAt: number } | null {
+  try {
+    const session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null') as { token?: string; expiresAt?: number } | null;
+    return session?.token && (session.expiresAt ?? 0) > Date.now() ? { token: session.token, expiresAt: session.expiresAt ?? 0 } : null;
+  } catch { return null; }
+}
 
-export default App;
+function makeId(prefix: string): string { return prefix + Math.random().toString(36).slice(2, 9); }
+
+export default function App() {
+  const roomId = window.location.pathname.match(/^\/sala\/([^/]+)/)?.[1] ?? '';
+  const [data, setData] = useState<Tournament>(readDemo);
+  const [session, setSession] = useState(getSession);
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [serverError, setServerError] = useState('');
+  const [view, setView] = useState<View>('overview');
+  const [selectedRound, setSelectedRound] = useState('');
+  const [now, setNow] = useState(Date.now());
+  const [snapshot, setSnapshot] = useState<PublicRoom | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const reloadAdmin = useCallback(async () => {
+    if (apiConfigured && session) {
+      try {
+        const fresh = await getTournament(session.token);
+        setData(fresh);
+        setServerError('');
+      } catch (error) { setServerError(error instanceof Error ? error.message : 'No se ha podido cargar el torneo.'); }
+    } else if (!apiConfigured) setData(readDemo());
+  }, [session]);
+
+  const reloadRoom = useCallback(async () => {
+    if (!roomId) return;
+    if (apiConfigured) {
+      try { setSnapshot(await getPublicRoom(roomId)); setServerError(''); }
+      catch (error) { setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.'); }
+    } else {
+      const fresh = readDemo();
+      setData(fresh);
+      const room = fresh.rooms.find((item) => item.id === roomId || item.name.toLowerCase() === roomId.toLowerCase());
+      if (!room) { setSnapshot(null); return; }
+      const round = fresh.rounds.find((item) => item.id === room.roundId);
+      setSnapshot({
+        tournamentName: fresh.tournamentName, roundName: round?.name ?? '',
+        room, teamFavor: fresh.teams.find((item) => item.id === room.teamFavorId)?.name ?? '',
+        teamContra: fresh.teams.find((item) => item.id === room.teamContraId)?.name ?? '',
+        judges: room.judgeIds.map((id) => fresh.judges.find((item) => item.id === id)?.name ?? '').filter(Boolean),
+        serverTime: Date.now(),
+      });
+      setServerError('');
+    }
+  }, [roomId]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 200);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (roomId) {
+      void reloadRoom();
+      const id = window.setInterval(() => void reloadRoom(), POLL_MS);
+      return () => window.clearInterval(id);
+    }
+    if (session) {
+      void reloadAdmin();
+      const id = window.setInterval(() => void reloadAdmin(), POLL_MS);
+      return () => window.clearInterval(id);
+    }
+  }, [roomId, session, reloadAdmin, reloadRoom]);
+
+  useEffect(() => {
+    if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
+  }, [data.rounds, selectedRound]);
+
+  const updateData = (updater: (current: Tournament) => Tournament) => setData((current) => ({ ...updater(current), updatedAt: Date.now() }));
+  const persist = async () => {
+    setSaving(true);
+    try {
+      if (apiConfigured) {
+        if (!session) throw new Error('Inicia sesión antes de guardar.');
+        const saved = await saveTournament(session.token, data.revision, data);
+        setData(saved);
+      } else {
+        const copy = { ...data, revision: data.revision + 1, updatedAt: Date.now() };
+        writeDemo(copy);
+        setData(copy);
+      }
+      setServerError('');
+    } catch (error) { setServerError(error instanceof Error ? error.message : 'No se han podido guardar los cambios.'); }
+    finally { setSaving(false); }
+  };
+
+  const submitLogin = async (event: FormEvent) => {
+    event.preventDefault();
+    setLoginError('');
+    try {
+      const result = apiConfigured ? await login(password) : password === 'contraseña' ? { token: 'demo-session', expiresAt: Date.now() + 8 * 60 * 60 * 1000 } : null;
+      if (!result) throw new Error('Contraseña incorrecta.');
+      localStorage.setItem(SESSION_KEY, JSON.stringify(result));
+      setSession(result);
+      setPassword('');
+    } catch (error) { setLoginError(error instanceof Error ? error.message : 'No se ha podido iniciar sesión.'); }
+  };
+
+  const logout = () => {
+    localStorage.removeItem(SESSION_KEY);
+    setSession(null);
+    setView('overview');
+  };
+
+  const timerAction = async (action: 'start' | 'pause' | 'reset' | 'next') => {
+    if (!snapshot) return;
+    try {
+      if (apiConfigured) {
+        const updated = await updateTimer(snapshot.room.id, action, snapshot.room.timer.revision);
+        setSnapshot(updated);
+      } else {
+        const current = readDemo();
+        const room = current.rooms.find((item) => item.id === snapshot.room.id);
+        if (!room) return;
+        const changed = withRoomStatus({ ...room, timer: transitionTimer(room.timer, room.phases, action) });
+        const next = { ...current, rooms: current.rooms.map((item) => item.id === room.id ? changed : item), revision: current.revision + 1, updatedAt: Date.now() };
+        writeDemo(next);
+        setData(next);
+        await reloadRoom();
+      }
+      setServerError('');
+    } catch (error) { setServerError(error instanceof Error ? error.message : 'No se ha podido controlar el cronómetro.'); }
+  };
+
+  if (roomId) return <RoomScreen snapshot={snapshot} now={now} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} />;
+
+  if (!session) {
+    return <div className="login-shell">
+      <aside className="login-hero"><div className="brand"><span className="brand-mark">L</span><span>LEDU <b>Control</b></span></div><p className="eyebrow">OPERACIONES DEL TORNEO</p><h1>Un torneo.<br />Todas las salas.<br /><em>Una sola visión.</em></h1><p className="hero-copy">Organiza equipos, coordina al panel de jueces y sigue el estado de cada debate desde un único lugar.</p><div className="hero-tags"><span><ShieldCheck size={15} /> Gestión privada</span><span><Activity size={15} /> Actualización automática</span></div></aside>
+      <main className="login-side"><form className="login-card" onSubmit={submitLogin}><span className="eyebrow">PANEL DE ORGANIZACIÓN</span><h2>Acceso al torneo</h2><p>Introduce la contraseña para gestionar rondas, equipos, jueces y salas.</p><label htmlFor="password">Contraseña</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Introduce la contraseña" required /><button className="button primary full" type="submit">Entrar al panel <ArrowRight size={17} /></button>{loginError && <p className="error">{loginError}</p>}<p className="security-note"><ShieldCheck size={15} /> {apiConfigured ? 'Autenticación validada por el backend.' : 'Modo de demostración: contraseña' + ' contraseña'}.</p><p className="subtle">Los cronómetros de sala se abren por enlace y no requieren iniciar sesión.</p></form></main>
+    </div>;
+  }
+
+  const activeRound = selectedRound || data.rounds[0]?.id || '';
+  const rooms = data.rooms.filter((room) => room.roundId === activeRound);
+  const counts = { total: rooms.length, running: rooms.filter((room) => room.timer.status === 'running').length, ready: rooms.filter((room) => room.status === 'ready').length, unassigned: rooms.filter((room) => room.status === 'unassigned').length, finished: rooms.filter((room) => room.timer.status === 'finished').length };
+
+  const addTeam = () => {
+    const name = window.prompt('Nombre del equipo');
+    if (!name?.trim()) return;
+    const team: Team = { id: makeId('t'), name: name.trim(), institution: '', active: true };
+    updateData((current) => ({ ...current, teams: [...current.teams, team] }));
+  };
+  const addJudge = () => {
+    const name = window.prompt('Nombre del juez/a');
+    if (!name?.trim()) return;
+    const judge: Judge = { id: makeId('j'), name: name.trim(), institution: '', active: true };
+    updateData((current) => ({ ...current, judges: [...current.judges, judge] }));
+  };
+  const addRoom = () => {
+    const name = window.prompt('Nombre de la sala', 'Sala nueva');
+    if (!name?.trim()) return;
+    const roundIdValue = activeRound || data.rounds[0]?.id || makeId('r');
+    const room: Room = { id: makeId('s'), name: name.trim(), roundId: roundIdValue, teamFavorId: '', teamContraId: '', judgeIds: [], status: 'unassigned', phases: data.rooms[0]?.phases ?? [], timer: data.rooms[0]?.timer ? { ...data.rooms[0].timer, status: 'idle', phaseIndex: 0, remainingSeconds: data.rooms[0].phases[0]?.durationSeconds ?? 240, startedAt: null, lastResumedAt: null, revision: 0 } : { status: 'idle', phaseIndex: 0, remainingSeconds: 240, startedAt: null, lastResumedAt: null, revision: 0, updatedAt: Date.now() }, notes: '', updatedAt: Date.now() };
+    updateData((current) => ({ ...current, rooms: [...current.rooms, room] }));
+  };
+  const updateRoom = (id: string, patch: Partial<Room>) => updateData((current) => ({ ...current, rooms: current.rooms.map((room) => room.id === id ? withRoomStatus({ ...room, ...patch }) : room) }));
+  const addRound = () => {
+    const name = window.prompt('Nombre de la ronda', 'Ronda ' + (data.rounds.length + 1));
+    if (!name?.trim()) return;
+    const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false };
+    updateData((current) => ({ ...current, rounds: [...current.rounds, newRound] }));
+    setSelectedRound(newRound.id);
+  };
+
+  return <div className="app-shell">
+    <aside className="sidebar"><div className="brand"><span className="brand-mark">L</span><span>LEDU <b>Control</b></span></div><div className="sidebar-section">TORNEO</div><nav>
+      <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => setView('overview')} />
+      <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => setView('rooms')} />
+      <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
+      <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
+    </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Google Sheets conectado' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
+    <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i /> Actualización cada 8 s</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : 'Guardar cambios'}</button></div></header>
+      {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
+      {view === 'overview' && <><div className="page-heading"><div><p className="eyebrow">VISTA OPERATIVA</p><h2>Estado del torneo</h2><p className="muted">Seguimiento de debates, asignaciones y cronómetros.</p></div><div className="round-badge"><BookOpen size={17} /><span>Ronda activa: <b>{data.rounds.find((round) => round.active)?.name ?? 'Sin ronda activa'}</b></span></div></div>
+      <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
+      <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} onOpen={() => window.open('/sala/' + encodeURIComponent(room.id), '_blank', 'noopener,noreferrer')} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
+
+      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros.</p></div><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala</button></div><div className="managed-rooms">{rooms.map((room) => <section className="panel room-editor" key={room.id}><div className="panel-title"><div><h3>{room.name}</h3><p className="muted">Enlace público: /sala/{room.id}</p></div><button className="icon-button" title="Abrir cronómetro" onClick={() => window.open('/sala/' + encodeURIComponent(room.id), '_blank', 'noopener,noreferrer')}><ExternalLink size={16} /></button></div><div className="assign-grid"><label>Equipo a favor<select value={room.teamFavorId} onChange={(event) => updateRoom(room.id, { teamFavorId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label><label>Equipo en contra<select value={room.teamContraId} onChange={(event) => updateRoom(room.id, { teamContraId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}</select></label></div><div className="judges-select"><b>Jueces asignados</b><div className="check-grid">{data.judges.map((judge) => <label key={judge.id} className="check-item"><input type="checkbox" checked={room.judgeIds.includes(judge.id)} onChange={(event) => updateRoom(room.id, { judgeIds: event.target.checked ? [...room.judgeIds, judge.id] : room.judgeIds.filter((id) => id !== judge.id) })} />{judge.name}</label>)}</div></div><div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => window.open('/sala/' + encodeURIComponent(room.id), '_blank', 'noopener,noreferrer')}>Abrir cronómetro <ChevronRight size={15} /></button></div></section>)}</div>{rooms.length === 0 && <Empty text="Añade una sala a esta ronda para comenzar." />}</>}
+
+      {view === 'teams' && <><div className="page-heading"><div><p className="eyebrow">PARTICIPANTES</p><h2>Equipos</h2><p className="muted">Listado de equipos disponibles para enfrentamientos.</p></div><button className="button primary" onClick={addTeam}><Plus size={16} /> Añadir equipo</button></div><section className="panel table-panel"><table><thead><tr><th>Equipo</th><th>Institución</th><th>Estado</th></tr></thead><tbody>{data.teams.map((team) => <tr key={team.id}><td><input className="table-input" aria-label="Nombre del equipo" value={team.name} onChange={(event) => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, name: event.target.value } : item) }))} /></td><td><input className="table-input" aria-label="Institución del equipo" value={team.institution} onChange={(event) => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, institution: event.target.value } : item) }))} /></td><td><button className={'state-pill ' + (team.active ? 'ready' : 'unassigned')} onClick={() => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, active: !item.active } : item) }))}>{team.active ? 'Activo' : 'Inactivo'}</button></td></tr>)}</tbody></table></section></>}
+
+      {view === 'judges' && <><div className="page-heading"><div><p className="eyebrow">PANEL DE JUECES</p><h2>Jueces</h2><p className="muted">Un debate puede incluir varios jueces. Evita duplicar una asignación dentro de la misma ronda.</p></div><button className="button primary" onClick={addJudge}><Plus size={16} /> Añadir juez</button></div><section className="panel table-panel"><table><thead><tr><th>Juez/a</th><th>Institución</th><th>Estado</th></tr></thead><tbody>{data.judges.map((judge) => <tr key={judge.id}><td><input className="table-input" aria-label="Nombre del juez" value={judge.name} onChange={(event) => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, name: event.target.value } : item) }))} /></td><td><input className="table-input" aria-label="Institución del juez" value={judge.institution} onChange={(event) => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, institution: event.target.value } : item) }))} /></td><td><button className={'state-pill ' + (judge.active ? 'ready' : 'unassigned')} onClick={() => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, active: !item.active } : item) }))}>{judge.active ? 'Activo' : 'Inactivo'}</button></td></tr>)}</tbody></table></section></>}
+
+      <footer className="footer"><span>LEDU Control · Herramienta de organización</span><span>Datos sincronizados cada 8 segundos · {apiConfigured ? 'Google Sheets' : 'Demo local'}</span></footer>
+    </main>
+  </div>;
+}
+
+function NavButton({ icon, label, selected, onClick }: { icon: React.ReactNode; label: string; selected: boolean; onClick: () => void }) {
+  return <button className={'nav-button ' + (selected ? 'selected' : '')} onClick={onClick}>{icon}<span>{label}</span><ChevronRight size={15} /></button>;
+}
+function Stat({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
+  return <div className="stat-card"><span className="stat-icon">{icon}</span><div><span>{label}</span><b>{value}</b></div></div>;
+}
+function Empty({ text }: { text: string }) { return <div className="empty"><Monitor size={24} /><p>{text}</p></div>; }
+
+function RoomRow({ room, data, onOpen }: { room: Room; data: Tournament; onOpen: () => void }) {
+  const favor = data.teams.find((team) => team.id === room.teamFavorId)?.name || 'Equipo pendiente';
+  const contra = data.teams.find((team) => team.id === room.teamContraId)?.name || 'Equipo pendiente';
+  const judges = room.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name).filter(Boolean);
+  const title = room.timer.status === 'running' ? 'En curso' : room.timer.status === 'paused' ? 'Pausada' : room.timer.status === 'finished' ? 'Finalizada' : room.status === 'ready' ? 'Preparada' : 'Pendiente';
+  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer))}</strong>}<ChevronRight size={17} /></div></button>;
+}
+
+function RoomScreen({ snapshot, now, error, onAction, onRetry }: { snapshot: PublicRoom | null; now: number; error: string; onAction: (action: 'start' | 'pause' | 'reset' | 'next') => void; onRetry: () => void }) {
+  const room = snapshot?.room;
+  const phase = room?.phases[room.timer.phaseIndex];
+  const left = room ? secondsLeft(room.timer, now) : 0;
+  const pct = phase ? Math.max(0, Math.min(100, left / phase.durationSeconds * 100)) : 0;
+  const ended = room?.timer.status === 'finished';
+  return <main className="timer-shell"><header className="timer-top"><a href="/gestion" className="brand"><span className="brand-mark">L</span><span>LEDU <b>Control</b></span></a><span className="public-pill"><i /> CRONÓMETRO DE SALA</span></header>
+    {!snapshot ? <section className="timer-empty"><Monitor size={36} /><h1>Sala no disponible</h1><p>{error || 'La sala no existe o aún no se ha configurado.'}</p><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Reintentar</button></section> :
+    <><section className="timer-heading"><p>{snapshot.tournamentName} <span>·</span> {snapshot.roundName}</p><h1>{room?.name}</h1><div className="team-versus"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div><div className="judge-line"><Gavel size={16} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div></section>
+    <section className="timer-card"><div className="timer-status"><span className={'state-pill ' + (room?.timer.status || '')}>{ended ? 'Debate finalizado' : room?.timer.status === 'running' ? 'Intervención en curso' : room?.timer.status === 'paused' ? 'Cronómetro pausado' : 'Preparado para comenzar'}</span><span>INTERVENCIÓN {(room?.timer.phaseIndex ?? 0) + 1} / {room?.phases.length ?? 0}</span></div><div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''} · {phase?.side === 'favor' ? 'A favor' : phase?.side === 'contra' ? 'En contra' : ''}</b></div><div className={'timer-digits ' + (left <= 30 && room?.timer.status === 'running' ? 'urgent' : '')}>{formatTime(left)}</div><div className="timer-track"><div style={{ width: pct + '%' }} /></div><div className="timer-controls">{room?.timer.status === 'running' ? <button className="button primary big" onClick={() => onAction('pause')}><Pause size={19} /> Pausar</button> : <button className="button primary big" onClick={() => onAction('start')} disabled={ended}><Play size={19} /> {room?.timer.status === 'paused' ? 'Reanudar' : 'Iniciar intervención'}</button>}<button className="button secondary big" onClick={() => onAction('next')} disabled={ended}><ArrowRight size={18} /> Siguiente</button><button className="button ghost big" onClick={() => { if (window.confirm('¿Reiniciar el debate desde la primera intervención?')) onAction('reset'); }}><RotateCcw size={17} /> Reiniciar</button></div><p className="timer-note"><ShieldCheck size={15} /> El cronómetro se controla desde este dispositivo de sala. Los datos de torneo se actualizan automáticamente.</p></section>
+    <section className="phase-list"><div className="panel-title"><div><h3>Orden de intervenciones</h3><p>Fases configuradas para este debate</p></div><span>{room?.phases.length ?? 0} intervenciones</span></div>{room?.phases.map((item, index) => <div key={item.id} className={'phase-row ' + (index === room.timer.phaseIndex ? 'current' : index < room.timer.phaseIndex ? 'passed' : '')}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.speaker} · {item.side === 'favor' ? 'A favor' : 'En contra'}</small></div><strong>{formatTime(item.durationSeconds)}</strong>{index === room.timer.phaseIndex && <span className="current-dot" />}</div>)}</section></>}
+    {error && <p className="error timer-error">{error}</p>}<footer className="footer timer-footer"><span>LEDU Control</span><button className="text-button" onClick={onRetry}><RefreshCw size={14} /> Actualizar estado</button></footer>
+  </main>;
+}
