@@ -27,6 +27,7 @@ export const demoTournament: Tournament = {
   ],
   rooms: [room('a1', 'Sala A1', 't1', 't2', ['j1', 'j2']), room('a2', 'Sala A2', 't3', 't4', ['j3', 'j4']), room('a3', 'Sala A3', 't5', 't6', ['j5']), room('a4', 'Sala A4', '', '', [])],
   formatPhases: LEDU_PHASES.map((phase) => ({ ...phase })),
+  minimumJudgesPerRoom: 1,
   revision: 1,
   updatedAt: now,
 };
