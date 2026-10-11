@@ -243,7 +243,12 @@ function updateRoomTimer_(p) {
     const expectedKey = PropertiesService.getScriptProperties().getProperty(roomControlPropertyKey_(canonicalId));
     if (!expectedKey || !p.controlKey || !constantTimeEquals_(String(p.controlKey), expectedKey)) throw apiError_('UNAUTHORIZED', 'Abre esta sala desde el panel de organización para controlar el cronómetro.');
     const phases = parseJson_(row.phases, []);
-    if (action === 'start' && (!str_(row.teamFavorId) || !str_(row.teamContraId) || str_(row.teamFavorId) === str_(row.teamContraId) || !parseJson_(row.judgeIds, []).length)) throw apiError_('INVALID_ASSIGNMENT', 'Asigna dos equipos distintos y al menos un juez antes de iniciar.');
+    if (action === 'start') {
+      const minimumJudges = Math.max(1, num_(configValue_(readObjects_('Config'), 'minimumJudgesPerRoom')) || 1);
+      if (!str_(row.teamFavorId) || !str_(row.teamContraId) || str_(row.teamFavorId) === str_(row.teamContraId) || parseJson_(row.judgeIds, []).length < minimumJudges) {
+        throw apiError_('INVALID_ASSIGNMENT', 'Asigna dos equipos distintos y al menos ' + minimumJudges + ' juez(es) antes de iniciar.');
+      }
+    }
     if (action === 'start') validatePhases_(phases);
     const stored = readObjects_('Cronometros').find(function (t) { return String(t.roomId) === canonicalId; });
     const timer = stored ? timerFromRow_(stored) : initialTimer_(phases);
@@ -461,11 +466,13 @@ function upsertById_(name, key, id, obj) {
 }
 function configValue_(rows, key) { const item = rows.find(function (row) { return row.key === key; }); return item ? item.value : ''; }
 function setConfig_(key, value) { upsertById_('Config', 'key', key, { key: key, value: value }); }
-function deriveRoomStatus_(room) {
+function deriveRoomStatus_(room, configuredMinimumJudges) {
   if (room.timer && room.timer.status === 'running') return 'running';
   if (room.timer && room.timer.status === 'paused') return 'paused';
   if (room.timer && room.timer.status === 'finished') return 'finished';
-  return room.teamFavorId && room.teamContraId && (room.judgeIds || []).length ? 'ready' : 'unassigned';
+  const current = configValue_(readObjects_('Config'), 'minimumJudgesPerRoom');
+  const minimum = configuredMinimumJudges === undefined ? Math.max(1, num_(current) || 1) : configuredMinimumJudges;
+  return room.teamFavorId && room.teamContraId && (room.judgeIds || []).length >= minimum ? 'ready' : 'unassigned';
 }
 function timerFromRow_(row) {
   return { status: str_(row.status) || 'idle', phaseIndex: num_(row.phaseIndex), remainingSeconds: num_(row.remainingSeconds),
