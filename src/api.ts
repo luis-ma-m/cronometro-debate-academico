@@ -1,7 +1,8 @@
 import type { PublicRoom, Tournament } from './domain';
 import type { TimerAction } from './timer';
 
-const API_URL = (import.meta.env.VITE_APPS_SCRIPT_URL as string | undefined)?.trim() ?? '';
+const EXPLICIT_API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? '';
+const API_URL = EXPLICIT_API_URL || (import.meta.env.PROD ? '/api' : '');
 export const apiConfigured = API_URL.length > 0;
 
 export class ApiError extends Error {
@@ -12,23 +13,27 @@ export class ApiError extends Error {
 }
 
 export async function apiCall<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
-  if (!API_URL) throw new ApiError('No se ha configurado VITE_APPS_SCRIPT_URL.', 'NOT_CONFIGURED');
+  if (!API_URL) throw new ApiError('No hay API remota en este entorno. La aplicación está en modo de demostración local.', 'NOT_CONFIGURED');
   let response: Response;
   try {
     response = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, payload }),
       cache: 'no-store',
-      redirect: 'follow',
+      credentials: 'same-origin',
     });
   } catch {
     throw new ApiError('No hay conexión con el backend. Comprueba internet y vuelve a intentarlo.', 'NETWORK_ERROR');
   }
-  if (!response.ok) throw new ApiError('El backend respondió HTTP ' + response.status, 'HTTP_ERROR');
+  if (!response.ok) {
+    let detail: { error?: { message?: string; code?: string } } = {};
+    try { detail = await response.json() as typeof detail; } catch { /* Use HTTP status below. */ }
+    throw new ApiError(detail.error?.message ?? ('El backend respondió HTTP ' + response.status), detail.error?.code ?? 'HTTP_ERROR');
+  }
   let result: { ok: boolean; data?: T; error?: { message?: string; code?: string } };
   try { result = await response.json() as typeof result; }
-  catch { throw new ApiError('El backend no devolvió JSON válido. Comprueba CORS y la URL de Apps Script.', 'INVALID_RESPONSE'); }
+  catch { throw new ApiError('El backend no devolvió JSON válido. Comprueba la configuración de la API de Vercel.', 'INVALID_RESPONSE'); }
   if (!result.ok || result.data === undefined) throw new ApiError(result.error?.message ?? 'Error del backend.', result.error?.code);
   return result.data;
 }

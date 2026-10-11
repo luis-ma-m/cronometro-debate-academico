@@ -1,0 +1,810 @@
+import { createHash, createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
+import type { Phase, Room, TimerState, Tournament } from "../src/domain";
+import type { TimerAction } from "../src/timer";
+import {
+  ApiError,
+  DEFAULT_SPREADSHEET_ID,
+  SESSION_TTL_SECONDS,
+  SHEET_HEADERS,
+  bool,
+  defaultPhases,
+  deriveRoomStatus,
+  initialTimer,
+  num,
+  objectsFromRows,
+  parseJson,
+  publicRoomPayload,
+  remainingSeconds,
+  str,
+  timerFromRow,
+  transitionTimer,
+  validatePhases,
+  validateTournamentInput,
+  type SheetName,
+  type SheetRow,
+} from "./core";
+
+type RequestLike = {
+  method?: string;
+  body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
+  query?: Record<string, string | string[] | undefined>;
+  socket?: { remoteAddress?: string };
+};
+type ResponseLike = {
+  status(code: number): ResponseLike;
+  setHeader(name: string, value: string): void;
+  json(body: unknown): void;
+  end(): void;
+};
+
+type MetadataSheet = { properties: { sheetId: number; title: string; gridProperties?: { rowCount?: number; columnCount?: number } } };
+type SpreadsheetMetadata = { spreadsheetId: string; properties?: { title?: string }; sheets?: MetadataSheet[] };
+type SheetData = {
+  metadata: SpreadsheetMetadata;
+  raw: Record<SheetName, unknown[][]>;
+  rows: Record<SheetName, SheetRow[]>;
+};
+
+const SHEET_NAMES = Object.keys(SHEET_HEADERS) as SheetName[];
+const WRITE_LOCK = "ledu:lock:spreadsheet";
+const LOCK_TTL_MS = 30000;
+const LOCK_WAIT_MS = 6000;
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets/";
+const REDIS_RELEASE_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+
+let cachedGoogleToken: { token: string; expiresAt: number } | null = null;
+let cachedSpreadsheetMetadata: { spreadsheetId: string; metadata: SpreadsheetMetadata; expiresAt: number } | null = null;
+const METADATA_CACHE_MS = 60_000;
+
+function env(name: string): string {
+  return (process.env[name] || "").trim();
+}
+
+function requiredEnvironment(): string[] {
+  const names = [
+    "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+    "GOOGLE_PRIVATE_KEY",
+    "ADMIN_PASSWORD",
+    "SESSION_SECRET",
+    "UPSTASH_REDIS_REST_URL",
+    "UPSTASH_REDIS_REST_TOKEN",
+  ];
+  return names.filter((name) => !env(name));
+}
+
+function ensureConfigured(): void {
+  const missing = requiredEnvironment();
+  if (missing.length) {
+    throw new ApiError(
+      "NOT_CONFIGURED",
+      "La API de Vercel aún no está configurada. Faltan variables privadas: " + missing.join(", ") + ". Consulta docs/DEPLOYMENT.md.",
+      503,
+    );
+  }
+  if (env("SESSION_SECRET").length < 32) {
+    throw new ApiError("NOT_CONFIGURED", "SESSION_SECRET debe tener al menos 32 caracteres aleatorios.", 503);
+  }
+  if (env("ADMIN_PASSWORD").length > 1024) {
+    throw new ApiError("NOT_CONFIGURED", "ADMIN_PASSWORD no puede superar 1024 caracteres.", 503);
+  }
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function safeEquals(left: string, right: string): boolean {
+  const key = env("SESSION_SECRET");
+  const leftDigest = createHmac("sha256", key).update(left).digest();
+  const rightDigest = createHmac("sha256", key).update(right).digest();
+  return timingSafeEqual(leftDigest, rightDigest);
+}
+
+function base64Url(value: string | Buffer): string {
+  return Buffer.from(value).toString("base64url");
+}
+
+async function googleAccessToken(): Promise<string> {
+  if (cachedGoogleToken && cachedGoogleToken.expiresAt > Date.now() + 60000) return cachedGoogleToken.token;
+  const email = env("GOOGLE_SERVICE_ACCOUNT_EMAIL");
+  const privateKey = env("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n");
+  if (!email || !privateKey) throw new ApiError("NOT_CONFIGURED", "Faltan las credenciales privadas de Google en Vercel.", 503);
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = base64Url(JSON.stringify({
+    iss: email,
+    scope: "https://www.googleapis.com/auth/spreadsheets",
+    aud: TOKEN_URL,
+    iat: nowSeconds,
+    exp: nowSeconds + 3600,
+  }));
+  const signingInput = header + "." + claims;
+  const signer = createSign("RSA-SHA256");
+  signer.update(signingInput);
+  signer.end();
+  const assertion = signingInput + "." + signer.sign(privateKey).toString("base64url");
+
+  let response: Response;
+  try {
+    response = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        assertion,
+      }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(7000),
+    });
+  } catch {
+    throw new ApiError("GOOGLE_AUTH_UNAVAILABLE", "No se ha podido conectar con la autenticación de Google.", 503);
+  }
+  const result = await response.json().catch(() => ({})) as { access_token?: string; expires_in?: number };
+  if (!response.ok || !result.access_token) {
+    throw new ApiError("GOOGLE_AUTH_FAILED", "Google ha rechazado la cuenta de servicio. Comprueba la clave privada y los permisos del proyecto de Google Cloud.", 503);
+  }
+  cachedGoogleToken = {
+    token: result.access_token,
+    expiresAt: Date.now() + Math.max(60, Number(result.expires_in || 3600)) * 1000,
+  };
+  return result.access_token;
+}
+
+function spreadsheetId(): string {
+  return env("GOOGLE_SHEETS_SPREADSHEET_ID") || DEFAULT_SPREADSHEET_ID;
+}
+
+async function sheetsRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = await googleAccessToken();
+  let response: Response;
+  try {
+    response = await fetch(SHEETS_API + encodeURIComponent(spreadsheetId()) + path, {
+      ...init,
+      headers: {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json",
+        ...(init.headers || {}),
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    throw new ApiError("SHEETS_UNAVAILABLE", "No se ha podido conectar con Google Sheets. Comprueba el servicio y vuelve a intentarlo.", 503);
+  }
+  const body = await response.json().catch(() => ({})) as { error?: { message?: string }; [key: string]: unknown };
+  if (!response.ok) {
+    const status = response.status === 403 || response.status === 404 ? 503 : response.status;
+    const code = response.status === 403 ? "SHEETS_PERMISSION_DENIED" : response.status === 404 ? "SHEET_NOT_FOUND" : "SHEETS_ERROR";
+    const message = response.status === 403
+      ? "La cuenta de servicio no tiene permiso para editar la hoja. Comparte la hoja con su correo y dale permiso de editor."
+      : response.status === 404
+        ? "No se encuentra la hoja configurada. Comprueba GOOGLE_SHEETS_SPREADSHEET_ID."
+        : "Google Sheets ha rechazado la operación. Comprueba la configuración de la hoja.";
+    throw new ApiError(code, message, status);
+  }
+  return body as T;
+}
+
+async function spreadsheetMetadata(forceRefresh = false): Promise<SpreadsheetMetadata> {
+  const id = spreadsheetId();
+  if (!forceRefresh && cachedSpreadsheetMetadata &&
+      cachedSpreadsheetMetadata.spreadsheetId === id &&
+      cachedSpreadsheetMetadata.expiresAt > Date.now()) {
+    return cachedSpreadsheetMetadata.metadata;
+  }
+  const fields = "spreadsheetId,properties(title),sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))";
+  const metadata = await sheetsRequest<SpreadsheetMetadata>("?fields=" + encodeURIComponent(fields));
+  cachedSpreadsheetMetadata = { spreadsheetId: id, metadata, expiresAt: Date.now() + METADATA_CACHE_MS };
+  return metadata;
+}
+
+function cellData(value: unknown): { userEnteredValue?: { stringValue?: string; numberValue?: number; boolValue?: boolean } } {
+  if (value === "" || value === null || value === undefined) return {};
+  if (typeof value === "boolean") return { userEnteredValue: { boolValue: value } };
+  if (typeof value === "number" && Number.isFinite(value)) return { userEnteredValue: { numberValue: value } };
+  return { userEnteredValue: { stringValue: String(value) } };
+}
+
+async function batchUpdateSpreadsheet(requests: unknown[]): Promise<void> {
+  await sheetsRequest(":batchUpdate", {
+    method: "POST",
+    body: JSON.stringify({ requests }),
+  });
+}
+
+async function ensureSchema(): Promise<SpreadsheetMetadata> {
+  const initialMetadata = await spreadsheetMetadata();
+  const initialTitles = new Set((initialMetadata.sheets || []).map((item) => item.properties.title));
+  if (SHEET_NAMES.every((name) => initialTitles.has(name))) return initialMetadata;
+
+  return withLock("ledu:lock:schema", async () => {
+    let metadata = await spreadsheetMetadata(true);
+    const existing = new Set((metadata.sheets || []).map((item) => item.properties.title));
+    const missing = SHEET_NAMES.filter((name) => !existing.has(name));
+    if (!missing.length) return metadata;
+
+    let nextSheetId = Math.max(0, ...(metadata.sheets || []).map((item) => Number(item.properties.sheetId) || 0)) + 1;
+    const requests: unknown[] = [];
+    for (const name of missing) {
+      const sheetId = nextSheetId++;
+      requests.push({
+        addSheet: {
+          properties: {
+            sheetId,
+            title: name,
+            gridProperties: {
+              rowCount: 1000,
+              columnCount: (SHEET_HEADERS[name] as readonly string[]).length,
+            },
+          },
+        },
+      });
+      requests.push({
+        updateCells: {
+          start: { sheetId, rowIndex: 0, columnIndex: 0 },
+          rows: [{ values: (SHEET_HEADERS[name] as readonly string[]).map(cellData) }],
+          fields: "userEnteredValue",
+        },
+      });
+    }
+    await batchUpdateSpreadsheet(requests);
+    metadata = await spreadsheetMetadata(true);
+    return metadata;
+  });
+}
+
+async function loadSheetData(skipEnsure = false): Promise<SheetData> {
+  const metadata = skipEnsure ? await spreadsheetMetadata() : await ensureSchema();
+  const url = new URL(SHEETS_API + encodeURIComponent(spreadsheetId()) + "/values:batchGet");
+  url.searchParams.set("majorDimension", "ROWS");
+  url.searchParams.set("valueRenderOption", "UNFORMATTED_VALUE");
+  for (const name of SHEET_NAMES) url.searchParams.append("ranges", name + "!A:Z");
+
+  const token = await googleAccessToken();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: { Authorization: "Bearer " + token },
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    throw new ApiError("SHEETS_UNAVAILABLE", "No se ha podido leer Google Sheets. Comprueba la conexión e inténtalo de nuevo.", 503);
+  }
+  if (!response.ok) {
+    if (response.status === 403) throw new ApiError("SHEETS_PERMISSION_DENIED", "La cuenta de servicio no tiene permiso para leer la hoja. Comparte la hoja con su correo y dale permiso de editor.", 503);
+    throw new ApiError("SHEETS_ERROR", "No se han podido leer las pestañas del torneo.", 503);
+  }
+  const payload = await response.json() as { valueRanges?: { values?: unknown[][] }[] };
+  const raw = {} as Record<SheetName, unknown[][]>;
+  const rows = {} as Record<SheetName, SheetRow[]>;
+  SHEET_NAMES.forEach((name, index) => {
+    raw[name] = payload.valueRanges?.[index]?.values ?? [];
+    rows[name] = objectsFromRows(raw[name]);
+    const headers = (raw[name][0] || []).map((value) => String(value ?? ""));
+    const expected = SHEET_HEADERS[name] as readonly string[];
+    if (headers.length && expected.some((header, position) => headers[position] !== header)) {
+      throw new ApiError("SCHEMA_MISMATCH", "Los encabezados de la pestaña " + name + " no coinciden con el esquema esperado. No se ha escrito ningún dato.", 503);
+    }
+    if (!headers.length) throw new ApiError("SCHEMA_MISMATCH", "La pestaña " + name + " no tiene encabezados. Revisa docs/DEPLOYMENT.md.", 503);
+  });
+  return { metadata, raw, rows };
+}
+
+function configValue(configRows: SheetRow[], key: string): string {
+  const item = configRows.find((row) => str(row.key) === key);
+  return item ? str(item.value) : "";
+}
+
+function timerRowMap(rows: SheetRow[]): Map<string, TimerState> {
+  const result = new Map<string, TimerState>();
+  for (const row of rows) result.set(str(row.roomId), timerFromRow(row));
+  return result;
+}
+
+function tournamentFromData(data: SheetData): Tournament {
+  const config = data.rows.Config;
+  const rounds = data.rows.Rondas.map((row) => ({
+    id: str(row.id), number: num(row.number), name: str(row.name), active: bool(row.active),
+  }));
+  const teams = data.rows.Equipos.map((row) => ({
+    id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
+  }));
+  const judges = data.rows.Jueces.map((row) => ({
+    id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
+  }));
+  const minimumJudges = Math.max(1, num(configValue(config, "minimumJudgesPerRoom")) || 1);
+  const timers = timerRowMap(data.rows.Cronometros);
+  const rooms = data.rows.Salas.map((row) => {
+    const phases = parseJson<Phase[]>(row.phases, []);
+    const timer = timers.get(str(row.id)) || initialTimer(phases);
+    const room: Room = {
+      id: str(row.id),
+      name: str(row.name),
+      roundId: str(row.roundId),
+      teamFavorId: str(row.teamFavorId),
+      teamContraId: str(row.teamContraId),
+      judgeIds: parseJson<string[]>(row.judgeIds, []),
+      status: "unassigned",
+      phases,
+      timer,
+      notes: str(row.notes),
+      updatedAt: num(row.updatedAt),
+    };
+    room.status = deriveRoomStatus(room, minimumJudges);
+    return room;
+  });
+  return {
+    tournamentName: str(configValue(config, "tournamentName")) || "Torneo LEDU",
+    rounds,
+    teams,
+    judges,
+    rooms,
+    formatPhases: parseJson<Phase[]>(configValue(config, "formatPhases"), defaultPhases()),
+    minimumJudgesPerRoom: minimumJudges,
+    revision: num(configValue(config, "revision")) || 1,
+    updatedAt: num(configValue(config, "updatedAt")) || Date.now(),
+    serverTime: Date.now(),
+  };
+}
+
+function rowObjectForRoom(room: Room, minimumJudges: number, timestamp: number): SheetRow {
+  return {
+    id: room.id,
+    name: room.name,
+    roundId: room.roundId,
+    teamFavorId: room.teamFavorId || "",
+    teamContraId: room.teamContraId || "",
+    judgeIds: JSON.stringify(room.judgeIds || []),
+    status: deriveRoomStatus(room, minimumJudges),
+    phases: JSON.stringify(room.phases || []),
+    notes: room.notes || "",
+    updatedAt: timestamp,
+  };
+}
+
+function rowObjectForTimer(roomId: string, timer: TimerState): SheetRow {
+  return {
+    roomId,
+    status: timer.status,
+    phaseIndex: timer.phaseIndex,
+    remainingSeconds: timer.remainingSeconds,
+    startedAt: timer.startedAt ?? "",
+    lastResumedAt: timer.lastResumedAt ?? "",
+    revision: timer.revision,
+    updatedAt: timer.updatedAt || Date.now(),
+  };
+}
+
+function setConfig(rows: SheetRow[], key: string, value: string): void {
+  const existing = rows.find((row) => str(row.key) === key);
+  if (existing) existing.value = value;
+  else rows.push({ key, value });
+}
+
+function sheetIdByName(metadata: SpreadsheetMetadata, name: SheetName): number {
+  const sheet = (metadata.sheets || []).find((item) => item.properties.title === name);
+  if (!sheet) throw new ApiError("SCHEMA_MISMATCH", "Falta la pestaña " + name + ".", 503);
+  return sheet.properties.sheetId;
+}
+
+function updateCellsRequest(
+  sheetId: number,
+  headers: readonly string[],
+  objects: SheetRow[],
+  oldDataRows: number,
+  gridRows: number,
+  gridColumns: number,
+): unknown[] {
+  const rowCount = Math.max(oldDataRows, objects.length);
+  const requests: unknown[] = [];
+  if (rowCount + 1 > gridRows) {
+    requests.push({ appendDimension: { sheetId, dimension: "ROWS", length: rowCount + 1 - gridRows } });
+  }
+  if (headers.length > gridColumns) {
+    requests.push({ appendDimension: { sheetId, dimension: "COLUMNS", length: headers.length - gridColumns } });
+  }
+  if (!rowCount) return requests;
+  const rows = Array.from({ length: rowCount }, (_, index) => ({
+    values: headers.map((header) => cellData(objects[index]?.[header])),
+  }));
+  requests.push({
+    updateCells: {
+      range: { sheetId, startRowIndex: 1, endRowIndex: rowCount + 1, startColumnIndex: 0, endColumnIndex: headers.length },
+      rows,
+      fields: "userEnteredValue",
+    },
+  });
+  return requests;
+}
+
+async function writeTables(data: SheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[]): Promise<void> {
+  const requests: unknown[] = [];
+  for (const name of SHEET_NAMES) {
+    const objects = replacements[name];
+    if (!objects) continue;
+    const grid = (data.metadata.sheets || []).find((item) => item.properties.title === name)?.properties.gridProperties;
+    const existingDataRows = Math.max(0, (data.raw[name]?.length || 1) - 1);
+    requests.push(...updateCellsRequest(
+      sheetIdByName(data.metadata, name),
+      SHEET_HEADERS[name],
+      objects,
+      existingDataRows,
+      Number(grid?.rowCount || 1000),
+      Number(grid?.columnCount || SHEET_HEADERS[name].length),
+    ));
+  }
+  if (appendEvent) {
+    requests.push({
+      appendCells: {
+        sheetId: sheetIdByName(data.metadata, "Registro"),
+        rows: [{ values: appendEvent.map(cellData) }],
+        fields: "userEnteredValue",
+      },
+    });
+  }
+  if (requests.length) await batchUpdateSpreadsheet(requests);
+}
+
+async function redisCommand(command: Array<string | number>): Promise<unknown> {
+  const url = env("UPSTASH_REDIS_REST_URL");
+  const token = env("UPSTASH_REDIS_REST_TOKEN");
+  if (!url || !token) throw new ApiError("NOT_CONFIGURED", "Faltan las credenciales privadas de Redis compartido en Vercel.", 503);
+  let response: Response;
+  try {
+    response = await fetch(url.replace(/\/+$/, ""), {
+      method: "POST",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+      body: JSON.stringify(command.map(String)),
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch {
+    throw new ApiError("COORDINATION_UNAVAILABLE", "El servicio de coordinación de Vercel no responde. No se ha modificado el torneo.", 503);
+  }
+  const payload = await response.json().catch(() => ({})) as { result?: unknown; error?: string };
+  if (!response.ok || payload.error) {
+    throw new ApiError("COORDINATION_UNAVAILABLE", "Redis ha rechazado la operación de coordinación. Comprueba la conexión de Vercel.", 503);
+  }
+  return payload.result;
+}
+
+async function withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
+  const lockToken = randomBytes(24).toString("hex");
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  while (Date.now() < deadline) {
+    const acquired = await redisCommand(["SET", name, lockToken, "NX", "PX", LOCK_TTL_MS]);
+    if (acquired === "OK") {
+      try {
+        return await operation();
+      } finally {
+        await redisCommand(["EVAL", REDIS_RELEASE_SCRIPT, 1, name, lockToken]).catch(() => undefined);
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150 + Math.floor(Math.random() * 100)));
+  }
+  throw new ApiError("WRITE_BUSY", "El torneo está recibiendo otra operación. Espera un instante y vuelve a intentarlo.", 409);
+}
+
+async function createSession(password: string, ip: string): Promise<{ token: string; expiresAt: number }> {
+  if (!env("ADMIN_PASSWORD")) throw new ApiError("NOT_CONFIGURED", "Configura ADMIN_PASSWORD en las variables privadas de Vercel.", 503);
+  if (password.length > 1024) throw new ApiError("INVALID_PAYLOAD", "La contraseña es demasiado larga.");
+  const count = num(await redisCommand(["GET", "ledu:login-failures:" + sha256(ip)]));
+  if (count >= 10) throw new ApiError("RATE_LIMITED", "Demasiados intentos de acceso. Espera 15 minutos antes de volver a intentarlo.", 429);
+  if (!safeEquals(password, env("ADMIN_PASSWORD"))) {
+    const failureKey = "ledu:login-failures:" + sha256(ip);
+    const failures = num(await redisCommand(["INCR", failureKey]));
+    if (failures === 1) await redisCommand(["EXPIRE", failureKey, 900]);
+    throw new ApiError("UNAUTHORIZED", "Contraseña incorrecta.", 401);
+  }
+  await redisCommand(["DEL", "ledu:login-failures:" + sha256(ip)]);
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1000;
+  await redisCommand(["SET", "ledu:session:" + sha256(token), JSON.stringify({ expiresAt }), "EX", SESSION_TTL_SECONDS]);
+  return { token, expiresAt };
+}
+
+async function requireSession(tokenValue: unknown): Promise<void> {
+  const token = str(tokenValue);
+  if (!token || token.length > 200) throw new ApiError("UNAUTHORIZED", "Sesión caducada o no válida. Vuelve a iniciar sesión.", 401);
+  const raw = await redisCommand(["GET", "ledu:session:" + sha256(token)]);
+  if (typeof raw !== "string") throw new ApiError("UNAUTHORIZED", "Sesión caducada o no válida. Vuelve a iniciar sesión.", 401);
+  try {
+    const session = JSON.parse(raw) as { expiresAt?: number };
+    if (!session.expiresAt || session.expiresAt <= Date.now()) throw new Error("expired");
+  } catch {
+    throw new ApiError("UNAUTHORIZED", "Sesión caducada o no válida. Vuelve a iniciar sesión.", 401);
+  }
+}
+
+async function roomControllerToken(p: Record<string, unknown>): Promise<{ token: string }> {
+  await requireSession(p.token);
+  return withLock(WRITE_LOCK, async () => {
+    const tournament = tournamentFromData(await loadSheetData(true));
+    const room = tournament.rooms.find((item) => item.id.toLowerCase() === str(p.roomId).toLowerCase());
+    if (!room) throw new ApiError("ROOM_NOT_FOUND", "Guarda primero los cambios de esa sala.", 404);
+    const key = "ledu:room-control:" + sha256(room.id);
+    const current = await redisCommand(["GET", key]);
+    const rotate = p.rotate === true || String(p.rotate).toLowerCase() === "true";
+    if (typeof current === "string" && current && !rotate) return { token: current };
+    const token = randomBytes(32).toString("hex");
+    await redisCommand(["SET", key, token]);
+    return { token };
+  });
+}
+
+function requestIp(req: RequestLike): string {
+  const forwarded = req.headers?.["x-forwarded-for"];
+  const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  return (first || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+}
+
+function headerValue(req: RequestLike, name: string): string {
+  const value = req.headers?.[name.toLowerCase()];
+  return Array.isArray(value) ? value[0] || "" : value || "";
+}
+
+function parseRequestBody(body: unknown): { action?: string; payload?: Record<string, unknown> } {
+  if (typeof body === "string") {
+    try { return JSON.parse(body) as { action?: string; payload?: Record<string, unknown> }; }
+    catch { throw new ApiError("INVALID_JSON", "El cuerpo de la solicitud no es JSON válido."); }
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return {};
+  return body as { action?: string; payload?: Record<string, unknown> };
+}
+
+async function dispatch(action: string, payload: Record<string, unknown>, req: RequestLike): Promise<unknown> {
+  switch (action) {
+    case "login":
+      return createSession(str(payload.password), requestIp(req));
+    case "logout":
+      if (payload.token) await redisCommand(["DEL", "ledu:session:" + sha256(str(payload.token))]);
+      return { loggedOut: true };
+    case "getTournament":
+      await requireSession(payload.token);
+      return tournamentFromData(await loadSheetData());
+    case "getPublicRoom":
+      return publicRoomPayload(tournamentFromData(await loadSheetData()), str(payload.roomId));
+    case "getRoomControllerToken":
+      return roomControllerToken(payload);
+    case "saveTournament":
+      await requireSession(payload.token);
+      return saveTournament(payload);
+    case "updateRoomTimer":
+      return updateRoomTimer(payload);
+    default:
+      throw new ApiError("UNKNOWN_ACTION", "Acción no reconocida.");
+  }
+}
+
+async function saveTournament(payload: Record<string, unknown>): Promise<Tournament> {
+  return withLock(WRITE_LOCK, async () => {
+    const data = await loadSheetData(true);
+    const current = tournamentFromData(data);
+    if (num(payload.expectedRevision) !== current.revision) {
+      throw new ApiError("REVISION_CONFLICT", "El torneo cambió en otro dispositivo. Actualiza los datos antes de guardar.", 409);
+    }
+    const input = payload.tournament;
+    validateTournamentInput(input);
+    const tournament = input as Tournament;
+    const phases = Array.isArray(tournament.formatPhases) && tournament.formatPhases.length
+      ? tournament.formatPhases
+      : tournament.rooms[0]?.phases || defaultPhases();
+    validatePhases(phases);
+    const minimumJudges = Number(tournament.minimumJudgesPerRoom === undefined ? 1 : tournament.minimumJudgesPerRoom);
+    if (!Number.isInteger(minimumJudges) || minimumJudges < 1 || minimumJudges > 25) {
+      throw new ApiError("INVALID_CONFIGURATION", "El mínimo de jueces por sala debe estar entre 1 y 25.");
+    }
+
+    const previousConfig = data.rows.Config;
+    const previousFormat = parseJson<Phase[]>(configValue(previousConfig, "formatPhases"), defaultPhases());
+    const formatChanged = JSON.stringify(previousFormat) !== JSON.stringify(phases);
+    const oldRoomRows = data.rows.Salas;
+    const roomPhasesChanged = tournament.rooms.some((room) => {
+      const old = oldRoomRows.find((row) => str(row.id) === str(room.id));
+      return !!old && JSON.stringify(parseJson<Phase[]>(old.phases, [])) !== JSON.stringify(room.phases || []);
+    });
+    const resetTimers = formatChanged || roomPhasesChanged;
+    if (resetTimers && data.rows.Cronometros.some((row) => str(row.status) === "running" || str(row.status) === "paused")) {
+      throw new ApiError("ACTIVE_TIMERS", "No se puede cambiar el formato mientras haya cronómetros en curso o pausados. Detén los debates y vuelve a guardar.", 409);
+    }
+
+    const persistedTimers = timerRowMap(data.rows.Cronometros);
+    const now = Date.now();
+    const finalRooms: Room[] = tournament.rooms.map((room) => {
+      const roomPhases = room.phases?.length ? room.phases : phases;
+      const previous = persistedTimers.get(room.id);
+      let timer = previous || initialTimer(roomPhases);
+      if (resetTimers || timer.phaseIndex >= roomPhases.length) {
+        timer = { ...initialTimer(roomPhases), revision: previous ? previous.revision + 1 : 0, updatedAt: now };
+      }
+      const updated = { ...room, phases: roomPhases, timer, updatedAt: now };
+      updated.status = deriveRoomStatus(updated, minimumJudges);
+      return updated;
+    });
+
+    const configRows = data.rows.Config.map((row) => ({ ...row }));
+    const nextRevision = current.revision + 1;
+    setConfig(configRows, "tournamentName", tournament.tournamentName || "Torneo LEDU");
+    setConfig(configRows, "formatPhases", JSON.stringify(phases));
+    setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
+    setConfig(configRows, "revision", String(nextRevision));
+    setConfig(configRows, "updatedAt", String(now));
+
+    const replacements: Partial<Record<SheetName, SheetRow[]>> = {
+      Config: configRows,
+      Rondas: tournament.rounds.map((round) => ({ id: round.id, number: round.number, name: round.name, active: round.active })),
+      Equipos: tournament.teams.map((team) => ({ id: team.id, name: team.name, institution: team.institution, active: team.active })),
+      Jueces: tournament.judges.map((judge) => ({ id: judge.id, name: judge.name, institution: judge.institution, active: judge.active })),
+      Salas: finalRooms.map((room) => rowObjectForRoom(room, minimumJudges, now)),
+      Cronometros: finalRooms.map((room) => rowObjectForTimer(room.id, room.timer)),
+    };
+    await writeTables(data, replacements);
+
+    // Revoke room-control links for rooms removed by the organizer. If that
+    // room ID is later reused, an old link must not regain control.
+    const nextRoomIds = new Set(tournament.rooms.map((room) => room.id));
+    const removedRoomIds = oldRoomRows.map((row) => str(row.id)).filter((id) => id && !nextRoomIds.has(id));
+    await Promise.all(removedRoomIds.map((id) =>
+      redisCommand(["DEL", "ledu:room-control:" + sha256(id)]).catch(() => undefined)
+    ));
+
+    return tournamentFromData(await loadSheetData(true));
+  });
+}
+
+async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknown> {
+  const roomIdInput = str(payload.roomId);
+  const action = str(payload.action) as TimerAction;
+  if (!roomIdInput || !["start", "pause", "reset", "next", "previous", "finish"].includes(action)) {
+    throw new ApiError("INVALID_ACTION", "La acción de cronómetro o el identificador de sala no son válidos.");
+  }
+  return withLock(WRITE_LOCK, async () => {
+    const data = await loadSheetData(true);
+    const tournament = tournamentFromData(data);
+    const room = tournament.rooms.find((item) => item.id.toLowerCase() === roomIdInput.toLowerCase());
+    if (!room) throw new ApiError("ROOM_NOT_FOUND", "No se encuentra esa sala.", 404);
+
+    const controlKey = str(payload.controlKey);
+    const expectedToken = await redisCommand(["GET", "ledu:room-control:" + sha256(room.id)]);
+    if (!controlKey || typeof expectedToken !== "string" || !safeEquals(controlKey, expectedToken)) {
+      throw new ApiError("UNAUTHORIZED", "Abre esta sala desde el panel de organización para controlar el cronómetro.", 401);
+    }
+    if (payload.expectedRevision === undefined || num(payload.expectedRevision) !== room.timer.revision) {
+      throw new ApiError("REVISION_CONFLICT", "El cronómetro cambió en otro dispositivo. Actualiza el estado.", 409);
+    }
+    if (action === "start") {
+      if (!room.teamFavorId || !room.teamContraId || room.teamFavorId === room.teamContraId || room.judgeIds.length < (tournament.minimumJudgesPerRoom || 1)) {
+        throw new ApiError("INVALID_ASSIGNMENT", "Asigna dos equipos distintos y al menos " + (tournament.minimumJudgesPerRoom || 1) + " juez(es) antes de iniciar.");
+      }
+      validatePhases(room.phases);
+    }
+
+    const timestamp = Date.now();
+    const beforeStatus = room.timer.status;
+    const beforeRemaining = remainingSeconds(room.timer, timestamp);
+    const previousIndex = room.timer.phaseIndex;
+    const nextTimer = transitionTimer(room.timer, room.phases, action, timestamp);
+    if (nextTimer.revision === room.timer.revision) return publicRoomPayload(tournament, room.id);
+    const updatedRoom: Room = {
+      ...room,
+      timer: nextTimer,
+      status: deriveRoomStatus({ ...room, timer: nextTimer }, tournament.minimumJudgesPerRoom || 1),
+      updatedAt: timestamp,
+    };
+    const rooms = tournament.rooms.map((item) => item.id === room.id ? updatedRoom : item);
+    const timers = data.rows.Cronometros.map((row) => ({ ...row }));
+    const existingTimerIndex = timers.findIndex((row) => str(row.roomId) === room.id);
+    const timerRow = rowObjectForTimer(room.id, nextTimer);
+    if (existingTimerIndex < 0) timers.push(timerRow);
+    else timers[existingTimerIndex] = timerRow;
+    const roomRows = data.rows.Salas.map((row) => ({ ...row }));
+    const existingRoomIndex = roomRows.findIndex((row) => str(row.id) === room.id);
+    const newRoomRow = rowObjectForRoom(updatedRoom, tournament.minimumJudgesPerRoom || 1, timestamp);
+    if (existingRoomIndex < 0) throw new ApiError("SCHEMA_MISMATCH", "La sala no tiene una fila persistida.", 503);
+    roomRows[existingRoomIndex] = newRoomRow;
+
+    const phase = room.phases[previousIndex];
+    const eventNames: Record<TimerAction, string> = {
+      start: beforeStatus === "paused" ? "resumed" : "started",
+      pause: "paused",
+      reset: "reset",
+      next: nextTimer.status === "finished" ? "finished" : "phase_advanced",
+      previous: "phase_rewound",
+      finish: "finished",
+    };
+    const elapsed = Math.max(0, num(phase?.durationSeconds) - beforeRemaining);
+    const event = [
+      randomBytes(16).toString("hex"),
+      new Date(timestamp).toISOString(),
+      room.id,
+      room.roundId,
+      room.id,
+      previousIndex,
+      eventNames[action],
+      Math.round(elapsed),
+      JSON.stringify({ action, fromStatus: beforeStatus, toStatus: nextTimer.status, revision: nextTimer.revision }),
+    ];
+    await writeTables(data, { Salas: roomRows, Cronometros: timers }, event);
+    return publicRoomPayload({ ...tournament, rooms }, room.id);
+  });
+}
+
+async function health(): Promise<unknown> {
+  ensureConfigured();
+  const data = await loadSheetData();
+  const ping = await redisCommand(["PING"]);
+  if (ping !== "PONG") throw new ApiError("COORDINATION_UNAVAILABLE", "No se ha podido verificar el servicio de coordinación.", 503);
+  return {
+    status: "ok",
+    service: "LEDU Tournament Desk API",
+    spreadsheet: data.metadata.properties?.title || "Google Sheets",
+    sheets: (data.metadata.sheets || []).map((sheet) => sheet.properties.title),
+    now: Date.now(),
+  };
+}
+
+function statusForError(error: unknown): number {
+  if (error instanceof ApiError) return error.status;
+  return 500;
+}
+
+function errorPayload(error: unknown): { ok: false; error: { code: string; message: string } } {
+  if (error instanceof ApiError) return { ok: false, error: { code: error.code, message: error.message } };
+  return { ok: false, error: { code: "INTERNAL_ERROR", message: "Se ha producido un error inesperado. No se ha podido confirmar la operación." } };
+}
+
+export default async function handler(req: RequestLike, res: ResponseLike): Promise<void> {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+
+  try {
+    if (req.method === "GET") {
+      const action = Array.isArray(req.query?.action) ? req.query?.action[0] : req.query?.action;
+      if (action !== "health") throw new ApiError("METHOD_NOT_ALLOWED", "Usa POST para operar con la API.", 405);
+      const result = await health();
+      res.status(200).json({ ok: true, data: result });
+      return;
+    }
+    if (req.method !== "POST") throw new ApiError("METHOD_NOT_ALLOWED", "Método HTTP no permitido.", 405);
+
+    const origin = headerValue(req, "origin");
+    const host = headerValue(req, "host");
+    if (origin && host) {
+      try {
+        if (new URL(origin).host !== host) throw new ApiError("ORIGIN_NOT_ALLOWED", "Origen no permitido.", 403);
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError("ORIGIN_NOT_ALLOWED", "Origen no permitido.", 403);
+      }
+    }
+
+    ensureConfigured();
+    const body = parseRequestBody(req.body);
+    const action = str(body.action);
+    const payload = body.payload && typeof body.payload === "object" && !Array.isArray(body.payload)
+      ? body.payload
+      : {};
+    if (["saveTournament", "updateRoomTimer", "getRoomControllerToken"].includes(action)) {
+      // These handlers call loadSheetData(true) while they hold any write lock,
+      // so prepare/validate the schema before entering them.
+      await ensureSchema();
+    }
+    // Read endpoints validate the schema in loadSheetData() itself.
+    const result = await dispatch(action, payload, req);
+    res.status(200).json({ ok: true, data: result });
+  } catch (error) {
+    if (!(error instanceof ApiError)) console.error("[ledu-api] Unexpected request failure", error);
+    const result = errorPayload(error);
+    res.status(statusForError(error)).json(result);
+  }
+}

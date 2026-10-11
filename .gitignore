@@ -6,3 +6,9 @@ dist/
 .DS_Store
 coverage/
 .vite/
+
+# Google service-account credentials and private keys
+*service-account*.json
+*credentials*.json
+*.pem
+*.key

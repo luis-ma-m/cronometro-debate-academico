@@ -1,6 +1,6 @@
 # LEDU Control — organización de torneos de debate
 
-Aplicación web para coordinar un torneo de debate académico LEDU desde un panel privado y abrir un cronómetro por sala. Google Sheets es la fuente persistente de datos; Google Apps Script sirve la API; Vercel aloja el frontend React.
+Aplicación web para coordinar un torneo de debate académico LEDU desde un panel privado y abrir un cronómetro por sala. **GitHub versiona el código, Vercel sirve la web y la API, Google Sheets conserva los datos del torneo y Upstash Redis coordina las operaciones concurrentes y las sesiones. No se utiliza Google Apps Script.**
 
 ## Funcionalidad
 
@@ -9,50 +9,52 @@ Aplicación web para coordinar un torneo de debate académico LEDU desde un pane
 - Gestión de equipos y jueces: alta, edición de nombre e institución y activación/desactivación sin borrar el historial.
 - Creación, renombrado y activación de rondas; creación y edición de salas y asignaciones de equipos y varios jueces.
 - Validación de equipos y jueces duplicados en una misma ronda; validación de rondas, IDs y secuencias.
-- Editor del formato del debate: nombre de la intervención, tipo, postura, interviniente, duración, umbrales de aviso, visualización de tiempo excedido, orden, alta y baja de intervenciones.
-- Preset inicial LEDU general editable con 12 intervenciones y duración teórica de 41 minutos. Verifica siempre las bases oficiales de la edición concreta antes del torneo.
-- Cronómetro local basado en marcas temporales; no acumula deriva por depender de ticks de intervalos.
+- Editor del formato del debate: nombre de la intervención, tipo, postura, interviniente, duración, avisos, exceso de tiempo, orden, alta y baja de intervenciones.
+- Preset LEDU general editable con 12 intervenciones y duración teórica de 41 minutos. Comprueba siempre el reglamento de la edición concreta antes del torneo.
+- Cronómetro local basado en marcas temporales para evitar deriva acumulada.
 - Inicio, pausa, reanudación, reinicio de la intervención actual, anterior, siguiente y finalización del debate.
 - Tiempo excedido visible, avisos visuales y sonido opcional activado por el usuario.
-- Enlaces de control por sala generados desde el panel y regenerables; un enlace público sin clave solo permite consultar.
-- Registro append-only de transiciones del cronómetro en la pestaña Registro.
-- Sincronización automática cada 10 segundos, feedback de conexión y recuperación de conflictos de revisión.
-- Modo de demostración local si no existe VITE_APPS_SCRIPT_URL.
+- Enlaces de control por sala generados desde gestión y regenerables; un enlace público sin clave solo permite consultar.
+- Registro de transiciones del cronómetro en la pestaña Registro, sin escribir cada segundo.
+- Sincronización automática cada 10 segundos, feedback de conexión y detección de conflictos de revisión.
 
-## Requisitos
+## Arquitectura
 
-- Node.js 20 o superior.
-- Un documento privado de Google Sheets.
-- Google Apps Script publicado como aplicación web.
-- Un proyecto Vercel conectado al repositorio.
+- **Frontend:** React + TypeScript + Vite.
+- **Backend:** funciones de servidor de Vercel en el directorio api/.
+- **Persistencia:** Google Sheets API, autenticada desde el servidor mediante una cuenta de servicio.
+- **Coordinación compartida:** Upstash Redis para sesiones revocables, claves de control por sala y bloqueo distribuido de las escrituras.
+- **Seguridad:** los secretos solo viven en variables privadas de Vercel y nunca se envían al bundle del navegador.
 
 ## Desarrollo local
 
     npm install
     npm run dev
 
-En modo demo, la contraseña de muestra es "contraseña". Solo sirve para desarrollo sin backend y no es una credencial de producción.
+Si no se configura VITE_API_URL, el entorno local utiliza el modo de demostración en el navegador. La contraseña de muestra es "contraseña" y no es una credencial de producción.
 
-## Build y pruebas
+## Pruebas y compilación
 
     npm test
     npm run build
-
-## Backend de Google Sheets
-
-Consulta docs/DEPLOYMENT.md y apps-script/README.md. El backend está preparado para la hoja de cálculo configurada para este proyecto. La propiedad de script ADMIN_PASSWORD es obligatoria; SPREADSHEET_ID es opcional si se usa el ID por defecto.
-
-Pestañas usadas: Config, Rondas, Equipos, Jueces, Salas, Cronometros y Registro. Config.formatPhases contiene el formato global del debate.
+    npx esbuild api/index.ts --bundle --platform=node --format=esm --outfile=/tmp/ledu-api-check.mjs
 
 ## Despliegue
 
-Vercel debe definir VITE_APPS_SCRIPT_URL en Production y volver a compilar después de cambiarla. La actualización del frontend no despliega automáticamente el código fuente de Apps Script: al cambiar apps-script/Code.gs, actualiza el proyecto de Apps Script y publica una nueva versión de la implementación web.
+Consulta docs/DEPLOYMENT.md. La API es del mismo origen: el frontend llama a /api y el estado de salud está en /api?action=health. No es necesario definir VITE_APPS_SCRIPT_URL ni publicar una aplicación web de Apps Script.
 
-## Seguridad y límites conocidos
+La hoja configurada para el proyecto es:
 
-- La hoja de cálculo no debe ser pública y las credenciales no se envían al navegador.
-- La contraseña compartida es protección básica; usa una contraseña fuerte y privada en ADMIN_PASSWORD.
-- La clave de control del enlace no se envía en la navegación normal al servidor, pero cualquiera que obtenga ese enlace completo podrá controlar la sala hasta que se regenere. No compartas un enlace de control cuando solo quieras mostrar el cronómetro.
-- Los cambios de formato se bloquean mientras existan relojes en curso o pausados. Los relojes afectados se reinician a la primera intervención cuando la nueva secuencia se aplica.
-- El preset LEDU es una referencia inicial basada en la especificación del proyecto; confirma el reglamento aplicable al evento.
-- La prueba final debe incluir al menos dos salas simultáneas, recarga durante el reloj, control desde otro enlace sin clave, pérdida de red y ensayo en los dispositivos reales del torneo.
+https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI/edit
+
+Las pestañas de datos son Config, Rondas, Equipos, Jueces, Salas, Cronometros y Registro. La API puede crear Registro si no existe; no modifica silenciosamente encabezados incorrectos ni crea datos de torneo artificiales.
+
+## Seguridad y límites
+
+- Mantén la hoja privada y compártela como editora únicamente con el correo de la cuenta de servicio.
+- Configura una contraseña fuerte en ADMIN_PASSWORD; el placeholder de demo no es adecuado para producción.
+- Configura SESSION_SECRET y las variables privadas de Redis y Google en los entornos Vercel necesarios. No publiques claves en GitHub ni las pongas en variables VITE_*.
+- Las operaciones de escritura se serializan mediante un bloqueo distribuido y se verifican con revisiones para evitar sobrescrituras obsoletas.
+- Los enlaces de control son secretos por sala. Cualquier persona que obtenga el enlace completo puede controlar el cronómetro hasta que se regenere.
+- El preset LEDU es una referencia editable; confirma el reglamento y las bases del torneo real.
+- Antes de competir, prueba al menos dos salas simultáneas, recarga con el reloj activo, pausa, reanudación, reinicio, tiempo excedido, desconexión y recuperación en los dispositivos reales.
