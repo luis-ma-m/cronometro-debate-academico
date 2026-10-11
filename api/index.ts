@@ -81,6 +81,12 @@ function ensureConfigured(): void {
       503,
     );
   }
+  if (env("SESSION_SECRET").length < 32) {
+    throw new ApiError("NOT_CONFIGURED", "SESSION_SECRET debe tener al menos 32 caracteres aleatorios.", 503);
+  }
+  if (env("ADMIN_PASSWORD").length > 1024) {
+    throw new ApiError("NOT_CONFIGURED", "ADMIN_PASSWORD no puede superar 1024 caracteres.", 503);
+  }
 }
 
 function sha256(value: string): string {
@@ -471,6 +477,7 @@ async function withLock<T>(name: string, operation: () => Promise<T>): Promise<T
 
 async function createSession(password: string, ip: string): Promise<{ token: string; expiresAt: number }> {
   if (!env("ADMIN_PASSWORD")) throw new ApiError("NOT_CONFIGURED", "Configura ADMIN_PASSWORD en las variables privadas de Vercel.", 503);
+  if (password.length > 1024) throw new ApiError("INVALID_PAYLOAD", "La contraseña es demasiado larga.");
   const count = num(await redisCommand(["GET", "ledu:login-failures:" + sha256(ip)]));
   if (count >= 10) throw new ApiError("RATE_LIMITED", "Demasiados intentos de acceso. Espera 15 minutos antes de volver a intentarlo.", 429);
   if (!safeEquals(password, env("ADMIN_PASSWORD"))) {
@@ -705,14 +712,14 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
 
 async function health(): Promise<unknown> {
   ensureConfigured();
-  const metadata = await ensureSchema();
+  const data = await loadSheetData();
   const ping = await redisCommand(["PING"]);
   if (ping !== "PONG") throw new ApiError("COORDINATION_UNAVAILABLE", "No se ha podido verificar el servicio de coordinación.", 503);
   return {
     status: "ok",
     service: "LEDU Tournament Desk API",
-    spreadsheet: metadata.properties?.title || "Google Sheets",
-    sheets: (metadata.sheets || []).map((sheet) => sheet.properties.title),
+    spreadsheet: data.metadata.properties?.title || "Google Sheets",
+    sheets: (data.metadata.sheets || []).map((sheet) => sheet.properties.title),
     now: Date.now(),
   };
 }
@@ -772,6 +779,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const result = await dispatch(action, payload, req);
     res.status(200).json({ ok: true, data: result });
   } catch (error) {
+    if (!(error instanceof ApiError)) console.error("[ledu-api] Unexpected request failure", error);
     const result = errorPayload(error);
     res.status(statusForError(error)).json(result);
   }
