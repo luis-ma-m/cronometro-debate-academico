@@ -50,6 +50,7 @@ export interface Tournament {
   formatPhases?: Phase[];
   revision: number;
   updatedAt: number;
+  serverTime?: number;
 }
 
 export interface PublicRoom {
