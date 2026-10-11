@@ -198,7 +198,7 @@ function saveTournament_(p) {
     writeObjects_('Cronometros', input.rooms.map(function (r) {
       const previous = storedTimers[str_(r.id)];
       let t = previous || initialTimer_(r.phases || formatPhases);
-      if (formatChanged) {
+      if (resetTimers) {
         t = initialTimer_(r.phases || formatPhases);
         t.revision = previous ? previous.revision + 1 : 0;
       }
