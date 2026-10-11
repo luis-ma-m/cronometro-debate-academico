@@ -1,5 +1,6 @@
 export type TimerStatus = 'idle' | 'running' | 'paused' | 'finished';
-export type RoomStatus = 'unassigned' | 'ready' | 'running' | 'paused' | 'finished';
+export type RoomStatus = 'unassigned' | 'ready' | 'running' | 'paused' | 'finished' | 'issue';
+export type PhaseType = 'opening' | 'cross-examination' | 'rebuttal' | 'cross-rebuttal' | 'conclusion' | 'other';
 
 export interface Phase {
   id: string;
@@ -7,6 +8,9 @@ export interface Phase {
   side: 'favor' | 'contra';
   speaker: string;
   durationSeconds: number;
+  type?: PhaseType;
+  warningThresholdsSeconds?: number[];
+  allowOvertimeDisplay?: boolean;
 }
 
 export interface TimerState {
@@ -43,6 +47,7 @@ export interface Tournament {
   teams: Team[];
   judges: Judge[];
   rooms: Room[];
+  formatPhases?: Phase[];
   revision: number;
   updatedAt: number;
 }
