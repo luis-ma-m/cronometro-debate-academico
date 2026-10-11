@@ -1,8 +1,12 @@
 /**
  * LEDU Control — Google Apps Script backend.
- * Script Properties required: SPREADSHEET_ID, ADMIN_PASSWORD.
+ *
+ * The spreadsheet ID below is the sheet supplied for this project. A
+ * SPREADSHEET_ID Script Property can override it for other deployments.
+ * Set ADMIN_PASSWORD in Script Properties before deploying the web app.
  * Never use the demo password as a production credential.
  */
+const DEFAULT_SPREADSHEET_ID = '1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI';
 const SHEETS = {
   Config: ['key', 'value'],
   Rondas: ['id', 'number', 'name', 'active'],
@@ -15,8 +19,23 @@ const SESSION_TTL_SECONDS = 8 * 60 * 60;
 
 function doGet(e) {
   const action = String(e && e.parameter && e.parameter.action || '');
-  if (action === 'health') return json_({ ok: true, data: { status: 'ok', now: Date.now() } });
-  return json_({ ok: false, error: { code: 'POST_REQUIRED', message: 'Utiliza POST para las operaciones de la API.' } });
+  if (action === 'health') {
+    try {
+      const spreadsheet = spreadsheet_();
+      return json_({ ok: true, data: { status: 'ok', service: 'LEDU Control API', spreadsheet: spreadsheet.getName(), now: Date.now() } });
+    } catch (error) {
+      return json_({ ok: false, error: { code: error.code || 'BACKEND_NOT_READY', message: String(error.message || error) } });
+    }
+  }
+  return json_({
+    ok: true,
+    data: {
+      service: 'LEDU Control API',
+      status: 'ready-to-test',
+      healthUrl: '?action=health',
+      message: 'Este es el backend de la aplicación. Publica el frontend React por separado y configura VITE_APPS_SCRIPT_URL con la URL /exec.'
+    }
+  });
 }
 
 function doPost(e) {
@@ -128,8 +147,14 @@ function saveTournament_(p) {
         teamContraId: r.teamContraId || '', judgeIds: JSON.stringify(r.judgeIds || []),
         status: deriveRoomStatus_(r), phases: JSON.stringify(r.phases || []), notes: r.notes || '', updatedAt: Date.now() };
     }));
+    // Keep stored live timers for existing rooms; the management browser may
+    // hold an older timer snapshot from its last poll.
+    const storedTimers = {};
+    readObjects_('Cronometros').forEach(function (timerRow) {
+      storedTimers[str_(timerRow.roomId)] = timerFromRow_(timerRow);
+    });
     writeObjects_('Cronometros', input.rooms.map(function (r) {
-      const t = r.timer || initialTimer_(r.phases || []);
+      const t = storedTimers[str_(r.id)] || initialTimer_(r.phases || []);
       return { roomId: r.id, status: t.status, phaseIndex: t.phaseIndex, remainingSeconds: t.remainingSeconds,
         startedAt: t.startedAt || '', lastResumedAt: t.lastResumedAt || '', revision: t.revision || 0, updatedAt: t.updatedAt || Date.now() };
     }));
@@ -205,6 +230,21 @@ function validateAssignments_(t) {
   });
 }
 
+/**
+ * Public entry point shown in the Apps Script Run menu.
+ * Safe to rerun: existing rows are retained and defaults are added only if absent.
+ */
+function setupSheets() {
+  return setupSheets_();
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('LEDU Control')
+    .addItem('Preparar hoja del torneo', 'setupSheets')
+    .addToUi();
+}
+
 function setupSheets_() {
   const ss = spreadsheet_();
   Object.keys(SHEETS).forEach(function (name) {
@@ -227,17 +267,69 @@ function setupSheets_() {
       { key: 'updatedAt', value: String(Date.now()) }
     ]);
   }
-  return { spreadsheetName: ss.getName(), sheets: Object.keys(SHEETS) };
+
+  // Bootstrap a usable first round and empty rooms only on a brand-new sheet.
+  if (readObjects_('Rondas').length === 0) {
+    writeObjects_('Rondas', [{ id: 'r1', number: 1, name: 'Ronda 1', active: true }]);
+  }
+  if (readObjects_('Salas').length === 0) {
+    const phases = defaultPhases_();
+    const rooms = ['a1', 'a2', 'a3', 'a4'].map(function (id, index) {
+      return {
+        id: id, name: 'Sala A' + (index + 1), roundId: 'r1', teamFavorId: '', teamContraId: '',
+        judgeIds: '[]', status: 'unassigned', phases: JSON.stringify(phases), notes: '', updatedAt: Date.now()
+      };
+    });
+    writeObjects_('Salas', rooms);
+    writeObjects_('Cronometros', rooms.map(function (room) {
+      const timer = initialTimer_(phases);
+      return {
+        roomId: room.id, status: timer.status, phaseIndex: timer.phaseIndex,
+        remainingSeconds: timer.remainingSeconds, startedAt: '', lastResumedAt: '',
+        revision: 0, updatedAt: timer.updatedAt
+      };
+    }));
+  }
+
+  SpreadsheetApp.flush();
+  return {
+    spreadsheetName: ss.getName(),
+    spreadsheetId: ss.getId(),
+    sheets: Object.keys(SHEETS),
+    defaultRoundsCreated: readObjects_('Rondas').length,
+    defaultRoomsCreated: readObjects_('Salas').length
+  };
+}
+
+function defaultPhases_() {
+  return [
+    { id: 'f1', name: 'Introducción', side: 'favor', speaker: 'Orador/a 1', durationSeconds: 240 },
+    { id: 'c1', name: 'Introducción', side: 'contra', speaker: 'Orador/a 1', durationSeconds: 240 },
+    { id: 'f2', name: 'Refutación 1', side: 'favor', speaker: 'Orador/a 2', durationSeconds: 240 },
+    { id: 'c2', name: 'Refutación 1', side: 'contra', speaker: 'Orador/a 2', durationSeconds: 240 },
+    { id: 'f3', name: 'Refutación 2', side: 'favor', speaker: 'Orador/a 3', durationSeconds: 240 },
+    { id: 'c3', name: 'Refutación 2', side: 'contra', speaker: 'Orador/a 3', durationSeconds: 240 },
+    { id: 'f4', name: 'Refutación 3', side: 'favor', speaker: 'Orador/a 4', durationSeconds: 240 },
+    { id: 'c4', name: 'Refutación 3', side: 'contra', speaker: 'Orador/a 4', durationSeconds: 240 },
+    { id: 'f5', name: 'Conclusión', side: 'favor', speaker: 'Orador/a 5', durationSeconds: 180 },
+    { id: 'c5', name: 'Conclusión', side: 'contra', speaker: 'Orador/a 5', durationSeconds: 180 },
+    { id: 'f6', name: 'Cierre', side: 'favor', speaker: 'Orador/a 6', durationSeconds: 180 },
+    { id: 'c6', name: 'Cierre', side: 'contra', speaker: 'Orador/a 6', durationSeconds: 180 }
+  ];
 }
 
 function spreadsheet_() {
-  const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  if (!id) throw apiError_('NOT_CONFIGURED', 'Configura SPREADSHEET_ID en las propiedades del script.');
-  return SpreadsheetApp.openById(id);
+  const properties = PropertiesService.getScriptProperties();
+  const id = properties.getProperty('SPREADSHEET_ID') || DEFAULT_SPREADSHEET_ID;
+  try {
+    return SpreadsheetApp.openById(id);
+  } catch (error) {
+    throw apiError_('SPREADSHEET_ACCESS', 'No se ha podido abrir la hoja de cálculo configurada. Comprueba que la cuenta que ejecuta el script tiene acceso a la hoja ' + id + '.');
+  }
 }
 function sheet_(name) {
   const sheet = spreadsheet_().getSheetByName(name);
-  if (!sheet) throw apiError_('NOT_INITIALIZED', 'Falta la pestaña ' + name + '. Ejecuta setupSheets_ desde el editor de Apps Script.');
+  if (!sheet) throw apiError_('NOT_INITIALIZED', 'Falta la pestaña ' + name + '. Recarga la hoja y ejecuta LEDU Control → Preparar hoja del torneo.');
   return sheet;
 }
 function readObjects_(name) {

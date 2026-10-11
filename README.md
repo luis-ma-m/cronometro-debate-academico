@@ -35,7 +35,7 @@ Modo demo: la contraseña de muestra es contraseña. Esta contraseña solo se us
 
 ## Conectar Google Sheets
 
-Consulta docs/DEPLOYMENT.md. No almacenes secretos de Google en el frontend. El backend utiliza las propiedades de script SPREADSHEET_ID y ADMIN_PASSWORD.
+Consulta [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) y [apps-script/README.md](apps-script/README.md). El backend ya apunta a la [hoja del torneo](https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI/edit); solo hay que autorizar y desplegar el Apps Script vinculado. La propiedad de script `ADMIN_PASSWORD` es obligatoria; `SPREADSHEET_ID` es opcional porque tiene un valor por defecto.
 
 ## Modelo de datos
 
