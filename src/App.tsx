@@ -716,7 +716,6 @@ export default function App() {
     }
   };
   const assignmentWarnings = validateAssignments(data);
-  const hasLiveTimer = data.rooms.some((room) => room.timer.status === 'running' || room.timer.status === 'paused');
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><span className="brand-mark">L</span><span>LEDU <b>Control</b></span></div><div className="sidebar-section">TORNEO</div><nav>
