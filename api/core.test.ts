@@ -80,9 +80,21 @@ describe("Vercel API core", () => {
     expect(() => validateTournamentInput(tournament)).toThrow("dos salas de la misma ronda");
   });
 
-  it("rejects duplicate team, judge, and round IDs", () => {
+  it("rejects duplicate team IDs", () => {
     const tournament = makeTournament();
     tournament.teams.push({ ...tournament.teams[0] });
+    expect(() => validateTournamentInput(tournament)).toThrow("identificadores únicos");
+  });
+
+  it("rejects duplicate judge IDs", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({ ...tournament.judges[0] });
+    expect(() => validateTournamentInput(tournament)).toThrow("identificadores únicos");
+  });
+
+  it("rejects duplicate round IDs", () => {
+    const tournament = makeTournament();
+    tournament.rounds.push({ ...tournament.rounds[0] });
     expect(() => validateTournamentInput(tournament)).toThrow("identificadores únicos");
   });
 
