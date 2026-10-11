@@ -266,13 +266,13 @@ async function ensureSchema(): Promise<SpreadsheetMetadata> {
         await batchUpdateSpreadsheet(requests);
         metadata = await spreadsheetMetadata(true);
       }
-      return migrateToPermanentRooms(metadata);
+      return migrateToPermanentRooms();
     });
   }
   return migrateToPermanentRooms(metadata);
 }
 
-async function migrateToPermanentRooms(initialMetadata: SpreadsheetMetadata): Promise<SpreadsheetMetadata> {
+async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
   // Version 2 is intentionally a destructive reset: the product decision allows
   // the old tournament data to be discarded instead of being ambiguously mapped
   // onto permanent physical rooms and per-round assignments.
