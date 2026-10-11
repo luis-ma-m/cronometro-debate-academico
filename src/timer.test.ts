@@ -47,7 +47,8 @@ describe('LEDU timer state machine', () => {
     const next = transitionTimer(createTimer(), LEDU_PHASES, 'next', 5000);
     expect(next.phaseIndex).toBe(1);
     expect(next.remainingSeconds).toBe(LEDU_PHASES[1].durationSeconds);
-    expect(transitionTimer(createTimer(), LEDU_PHASES, 'previous', 6000)).toEqual(createTimer(LEDU_PHASES));
+    const initial = createTimer(LEDU_PHASES);
+    expect(transitionTimer(initial, LEDU_PHASES, 'previous', 6000)).toEqual(initial);
     const last = { ...createTimer(LEDU_PHASES), phaseIndex: LEDU_PHASES.length - 1 };
     expect(transitionTimer(last, LEDU_PHASES, 'next', 6000).status).toBe('finished');
   });
