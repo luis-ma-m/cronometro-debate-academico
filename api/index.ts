@@ -22,7 +22,7 @@ import {
   validateTournamentInput,
   type SheetName,
   type SheetRow,
-} from "./core";
+} from "./core.js";
 
 type RequestLike = {
   method?: string;
