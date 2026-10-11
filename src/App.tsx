@@ -13,7 +13,7 @@ const POLL_MS = 10000;
 type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'settings';
 
 function makeSlug(value: string): string {
-  return value.normalize('NFD').replace(/\\p{Diacritic}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
 }
 
 function getSession(): { token: string; expiresAt: number } | null {
@@ -704,7 +704,6 @@ export default function App() {
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
       setFormatDirty(false);
-      setRoomFormatMismatch(false);
       setSelectedRound(preview.targetRoundId);
       setActivationPreview(null);
       setLastSyncedAt(Date.now());
@@ -715,6 +714,16 @@ export default function App() {
       setActivatingRound(false);
     }
   };
+  const renameSelectedRound = () => {
+    const round = data.rounds.find((item) => item.id === activeRound);
+    if (!round) return;
+    const name = window.prompt('Nombre de la ronda', round.name);
+    if (name?.trim()) updateData((current) => ({
+      ...current,
+      rounds: current.rounds.map((item) => item.id === round.id ? { ...item, name: name.trim() } : item),
+    }));
+  };
+
   const assignmentWarnings = validateAssignments(data);
 
   return <div className="app-shell">
