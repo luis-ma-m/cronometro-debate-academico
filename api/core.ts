@@ -1,4 +1,4 @@
-import type { FormatPreset, Phase, PhysicalRoom, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
+import type { Phase, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
 
 export const DEFAULT_SPREADSHEET_ID = "1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI";
