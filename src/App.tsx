@@ -20,6 +20,32 @@ function getSession(): { token: string; expiresAt: number } | null {
 
 function makeId(prefix: string): string { return prefix + Math.random().toString(36).slice(2, 9); }
 
+function getInstitutionCatalog(tournament: Pick<Tournament, 'institutions' | 'teams' | 'judges'>): string[] {
+  const known = new Map<string, string>();
+  for (const rawName of [
+    ...(tournament.institutions ?? []),
+    ...tournament.teams.map((team) => team.institution),
+    ...tournament.judges.map((judge) => judge.institution),
+  ]) {
+    const name = rawName.trim();
+    const key = name.toLocaleLowerCase('es-ES');
+    if (name && !known.has(key)) known.set(key, name);
+  }
+  return [...known.values()].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
+function sameInstitution(left: string | undefined, right: string | undefined): boolean {
+  const a = left?.trim().toLocaleLowerCase('es-ES') ?? '';
+  const b = right?.trim().toLocaleLowerCase('es-ES') ?? '';
+  return Boolean(a && b && a === b);
+}
+
+function conflictingTeamForJudge(data: Tournament, room: Room, judge: Judge): Team | undefined {
+  const teamIds = [room.teamFavorId, room.teamContraId].filter(Boolean);
+  return teamIds.map((id) => data.teams.find((team) => team.id === id))
+    .find((team): team is Team => Boolean(team && sameInstitution(judge.institution, team.institution)));
+}
+
 export default function App() {
   const roomId = window.location.pathname.match(/^\/sala\/([^/]+)/)?.[1] ?? '';
   const [data, setData] = useState<Tournament>(readDemo);
@@ -42,6 +68,7 @@ export default function App() {
   const [formatDirty, setFormatDirty] = useState(false);
   const [roomFormatMismatch, setRoomFormatMismatch] = useState(false);
   const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
+  const [institutionDraft, setInstitutionDraft] = useState('');
   const [soundEnabled, setSoundEnabled] = useState(() => { try { return localStorage.getItem('ledu-timer-sound') === 'true'; } catch { return false; } });
   const controllerToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('control') ?? '';
 
@@ -67,6 +94,7 @@ export default function App() {
           const addedLocally = current.rooms.filter((room) => !fresh.rooms.some((remote) => remote.id === room.id));
           return { ...fresh, tournamentName: current.tournamentName, rounds: current.rounds, teams: current.teams,
             judges: current.judges, rooms: [...refreshedRooms, ...addedLocally], formatPhases: current.formatPhases,
+            institutions: current.institutions ?? fresh.institutions,
             revision: current.revision, updatedAt: current.updatedAt };
         });
         setConnected(true);
@@ -159,6 +187,7 @@ export default function App() {
           })),
         };
       }
+      payload = { ...payload, institutions: getInstitutionCatalog(payload) };
       // Older and newly created rooms may have no stored phases. Normalize them
       // to the configured tournament sequence (or the LEDU preset) before validating.
       const fallbackPhases = resolvePhases(payload.formatPhases, payload.rooms);
@@ -291,6 +320,18 @@ export default function App() {
   const rooms = data.rooms.filter((room) => room.roundId === activeRound);
   const counts = { total: rooms.length, running: rooms.filter((room) => room.timer.status === 'running').length, ready: rooms.filter((room) => room.status === 'ready').length, unassigned: rooms.filter((room) => room.status === 'unassigned').length, finished: rooms.filter((room) => room.timer.status === 'finished').length };
 
+  const addInstitution = () => {
+    const name = institutionDraft.trim();
+    if (!name) return;
+    const existing = getInstitutionCatalog(data).find((item) => item.toLocaleLowerCase('es-ES') === name.toLocaleLowerCase('es-ES'));
+    if (existing) {
+      setServerError('La institución "' + existing + '" ya está en el catálogo.');
+      return;
+    }
+    updateData((current) => ({ ...current, institutions: [...getInstitutionCatalog(current), name] }));
+    setInstitutionDraft('');
+    setServerError('');
+  };
   const addTeam = () => {
     const name = window.prompt('Nombre del equipo');
     if (!name?.trim()) return;
@@ -342,6 +383,73 @@ export default function App() {
     const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false };
     updateData((current) => ({ ...current, rounds: [...current.rounds, newRound] }));
     setSelectedRound(newRound.id);
+  };
+
+  const removeRoom = (room: Room) => {
+    const active = room.timer.status === 'running' || room.timer.status === 'paused';
+    const detail = active ? ' El cronómetro está iniciado o pausado; también se eliminará esta sala y su enlace de control.' : '';
+    if (!window.confirm('¿Eliminar la sala "' + room.name + '"? Se perderán sus asignaciones y su configuración.' + detail)) return;
+    updateData((current) => ({ ...current, rooms: current.rooms.filter((item) => item.id !== room.id) }));
+  };
+  const removeSelectedRound = () => {
+    const round = data.rounds.find((item) => item.id === activeRound);
+    if (!round) return;
+    if (data.rounds.length <= 1) {
+      setServerError('El torneo debe conservar al menos una ronda.');
+      return;
+    }
+    const affectedRooms = data.rooms.filter((room) => room.roundId === round.id);
+    const activeRooms = affectedRooms.filter((room) => room.timer.status === 'running' || room.timer.status === 'paused');
+    const detail = affectedRooms.length
+      ? ' También se eliminarán ' + affectedRooms.length + ' sala(s)' + (activeRooms.length ? ', incluidas ' + activeRooms.length + ' con cronómetros iniciados o pausados' : '') + '.'
+      : '';
+    if (!window.confirm('¿Eliminar la ronda "' + round.name + '"?' + detail + ' Esta acción no se puede deshacer.')) return;
+    const remainingRounds = data.rounds.filter((item) => item.id !== round.id);
+    const nextRounds = round.active
+      ? remainingRounds.map((item, index) => index === 0 ? { ...item, active: true } : item)
+      : remainingRounds;
+    updateData((current) => ({
+      ...current,
+      rounds: nextRounds,
+      rooms: current.rooms.filter((room) => room.roundId !== round.id),
+    }));
+    if (selectedRound === round.id) setSelectedRound(remainingRounds[0]?.id ?? '');
+    setServerError('');
+  };
+  const removeTeam = (team: Team) => {
+    const assignedRooms = data.rooms.filter((room) => room.teamFavorId === team.id || room.teamContraId === team.id);
+    const running = assignedRooms.some((room) => room.timer.status === 'running' || room.timer.status === 'paused');
+    if (running) {
+      setServerError('No se puede eliminar "' + team.name + '" porque está asignado a una sala con el cronómetro iniciado o pausado. Detén esos debates y vuelve a intentarlo.');
+      return;
+    }
+    if (!window.confirm('¿Eliminar el equipo "' + team.name + '"? Se quitará de ' + assignedRooms.length + ' asignación(es), si las tiene.')) return;
+    updateData((current) => ({
+      ...current,
+      teams: current.teams.filter((item) => item.id !== team.id),
+      rooms: current.rooms.map((room) => withRoomStatus({
+        ...room,
+        teamFavorId: room.teamFavorId === team.id ? '' : room.teamFavorId,
+        teamContraId: room.teamContraId === team.id ? '' : room.teamContraId,
+      }, current.minimumJudgesPerRoom ?? 1)),
+    }));
+  };
+  const removeJudge = (judge: Judge) => {
+    const assignedRooms = data.rooms.filter((room) => room.judgeIds.includes(judge.id));
+    const running = assignedRooms.some((room) => room.timer.status === 'running' || room.timer.status === 'paused');
+    if (running) {
+      setServerError('No se puede eliminar "' + judge.name + '" porque está asignado a una sala con el cronómetro iniciado o pausado. Detén esos debates y vuelve a intentarlo.');
+      return;
+    }
+    if (!window.confirm('¿Eliminar al juez "' + judge.name + '"? Se quitará de ' + assignedRooms.length + ' asignación(es), si las tiene.')) return;
+    updateData((current) => ({
+      ...current,
+      judges: current.judges.filter((item) => item.id !== judge.id),
+      rooms: current.rooms.map((room) => withRoomStatus({
+        ...room,
+        judgeIds: room.judgeIds.filter((id) => id !== judge.id),
+      }, current.minimumJudgesPerRoom ?? 1)),
+    }));
   };
 
   const configuredPhases = resolvePhases(data.formatPhases, data.rooms);
@@ -403,14 +511,18 @@ export default function App() {
       <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
       <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
 
-      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button onClick={() => markRoundActive(activeRound)} disabled={!activeRound || data.rounds.find((round) => round.id === activeRound)?.active}>Marcar activa</button></div><div className="managed-rooms">{rooms.map((room) => <section className="panel room-editor" key={room.id}><div className="panel-title"><div><input className="table-input room-name-input" aria-label="Nombre de la sala" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} /><p className="muted">Enlace público: /sala/{room.id}</p></div><div className="room-open-actions"><button className="icon-button" title="Abrir cronómetro" onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button><button className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button></div></div><div className="assign-grid"><label>Equipo a favor<select value={room.teamFavorId} onChange={(event) => updateRoom(room.id, { teamFavorId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label><label>Equipo en contra<select value={room.teamContraId} onChange={(event) => updateRoom(room.id, { teamContraId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label></div><div className="judges-select"><b>Jueces asignados</b><div className="check-grid">{data.judges.filter((judge) => judge.active || room.judgeIds.includes(judge.id)).map((judge) => <label key={judge.id} className="check-item"><input type="checkbox" checked={room.judgeIds.includes(judge.id)} onChange={(event) => updateRoom(room.id, { judgeIds: event.target.checked ? [...room.judgeIds, judge.id] : room.judgeIds.filter((id) => id !== judge.id) })} />{judge.name}{judge.active ? '' : ' · Inactivo'}</label>)}</div></div><div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div></section>)}</div>{rooms.length === 0 && <Empty text="Añade una sala a esta ronda para comenzar." />}</>}
+      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button onClick={() => markRoundActive(activeRound)} disabled={!activeRound || data.rounds.find((round) => round.id === activeRound)?.active}>Marcar activa</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || data.rounds.length <= 1} title="Eliminar ronda y sus salas"><Trash2 size={15} /> Eliminar ronda</button></div><div className="managed-rooms">{rooms.map((room) => <section className="panel room-editor" key={room.id}><div className="panel-title"><div><input className="table-input room-name-input" aria-label="Nombre de la sala" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} /><p className="muted">Enlace público: /sala/{room.id}</p></div><div className="room-open-actions"><button className="icon-button" title="Abrir cronómetro" onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button><button className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button><button className="icon-button danger-action" title="Eliminar sala" aria-label={'Eliminar sala ' + room.name} onClick={() => removeRoom(room)}><Trash2 size={15} /></button></div></div><div className="assign-grid"><label>Equipo a favor<select value={room.teamFavorId} onChange={(event) => updateRoom(room.id, { teamFavorId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label><label>Equipo en contra<select value={room.teamContraId} onChange={(event) => updateRoom(room.id, { teamContraId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label></div><div className="judges-select"><b>Jueces asignados</b><div className="check-grid">{data.judges.filter((judge) => judge.active || room.judgeIds.includes(judge.id)).map((judge) => {
+          const assigned = room.judgeIds.includes(judge.id);
+          const conflict = conflictingTeamForJudge(data, room, judge);
+          return <label key={judge.id} className="check-item" title={conflict ? 'Institución incompatible con ' + conflict.name : undefined}><input type="checkbox" checked={assigned} disabled={Boolean(conflict && !assigned)} onChange={(event) => updateRoom(room.id, { judgeIds: event.target.checked ? [...room.judgeIds, judge.id] : room.judgeIds.filter((id) => id !== judge.id) })} />{judge.name}{judge.active ? '' : ' · Inactivo'}{conflict ? ' · Institución incompatible' : ''}</label>;
+        })}</div></div><div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div></section>)}</div>{rooms.length === 0 && <Empty text="Añade una sala a esta ronda para comenzar." />}</>}
 
-      {view === 'teams' && <><div className="page-heading"><div><p className="eyebrow">PARTICIPANTES</p><h2>Equipos</h2><p className="muted">Listado de equipos disponibles para enfrentamientos.</p></div><button className="button primary" onClick={addTeam}><Plus size={16} /> Añadir equipo</button></div><section className="panel table-panel"><table><thead><tr><th>Equipo</th><th>Institución</th><th>Estado</th></tr></thead><tbody>{data.teams.map((team) => <tr key={team.id}><td><input className="table-input" aria-label="Nombre del equipo" value={team.name} onChange={(event) => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, name: event.target.value } : item) }))} /></td><td><input className="table-input" aria-label="Institución del equipo" value={team.institution} onChange={(event) => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, institution: event.target.value } : item) }))} /></td><td><button className={'state-pill ' + (team.active ? 'ready' : 'unassigned')} onClick={() => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, active: !item.active } : item) }))}>{team.active ? 'Activo' : 'Inactivo'}</button></td></tr>)}</tbody></table></section></>}
+      {view === 'teams' && <><div className="page-heading"><div><p className="eyebrow">PARTICIPANTES</p><h2>Equipos</h2><p className="muted">Listado de equipos disponibles para enfrentamientos.</p></div><button className="button primary" onClick={addTeam}><Plus size={16} /> Añadir equipo</button></div><section className="panel table-panel"><table><thead><tr><th>Equipo</th><th>Institución</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{data.teams.map((team) => <tr key={team.id}><td><input className="table-input" aria-label="Nombre del equipo" value={team.name} onChange={(event) => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, name: event.target.value } : item) }))} /></td><td><select className="table-input institution-select" aria-label="Institución del equipo" value={team.institution} onChange={(event) => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, institution: event.target.value } : item) }))}><option value="">Sin institución asignada</option>{getInstitutionCatalog(data).map((institution) => <option key={institution} value={institution}>{institution}</option>)}</select></td><td><button className={'state-pill ' + (team.active ? 'ready' : 'unassigned')} onClick={() => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, active: !item.active } : item) }))}>{team.active ? 'Activo' : 'Inactivo'}</button></td><td><button className="icon-button danger-action" title="Eliminar equipo" aria-label={'Eliminar equipo ' + team.name} onClick={() => removeTeam(team)}><Trash2 size={15} /></button></td></tr>)}</tbody></table></section></>}
 
-      {view === 'judges' && <><div className="page-heading"><div><p className="eyebrow">PANEL DE JUECES</p><h2>Jueces</h2><p className="muted">Un debate puede incluir varios jueces. Evita duplicar una asignación dentro de la misma ronda.</p></div><button className="button primary" onClick={addJudge}><Plus size={16} /> Añadir juez</button></div><section className="panel table-panel"><table><thead><tr><th>Juez/a</th><th>Institución</th><th>Estado</th></tr></thead><tbody>{data.judges.map((judge) => <tr key={judge.id}><td><input className="table-input" aria-label="Nombre del juez" value={judge.name} onChange={(event) => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, name: event.target.value } : item) }))} /></td><td><input className="table-input" aria-label="Institución del juez" value={judge.institution} onChange={(event) => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, institution: event.target.value } : item) }))} /></td><td><button className={'state-pill ' + (judge.active ? 'ready' : 'unassigned')} onClick={() => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, active: !item.active } : item) }))}>{judge.active ? 'Activo' : 'Inactivo'}</button></td></tr>)}</tbody></table></section></>}
+      {view === 'judges' && <><div className="page-heading"><div><p className="eyebrow">PANEL DE JUECES</p><h2>Jueces</h2><p className="muted">Un debate puede incluir varios jueces. Evita duplicar una asignación dentro de la misma ronda.</p></div><button className="button primary" onClick={addJudge}><Plus size={16} /> Añadir juez</button></div><section className="panel table-panel"><table><thead><tr><th>Juez/a</th><th>Institución</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>{data.judges.map((judge) => <tr key={judge.id}><td><input className="table-input" aria-label="Nombre del juez" value={judge.name} onChange={(event) => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, name: event.target.value } : item) }))} /></td><td><select className="table-input institution-select" aria-label="Institución del juez" value={judge.institution} onChange={(event) => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, institution: event.target.value } : item) }))}><option value="">Sin institución asignada</option>{getInstitutionCatalog(data).map((institution) => <option key={institution} value={institution}>{institution}</option>)}</select></td><td><button className={'state-pill ' + (judge.active ? 'ready' : 'unassigned')} onClick={() => updateData((current) => ({ ...current, judges: current.judges.map((item) => item.id === judge.id ? { ...item, active: !item.active } : item) }))}>{judge.active ? 'Activo' : 'Inactivo'}</button></td><td><button className="icon-button danger-action" title="Eliminar juez" aria-label={'Eliminar juez ' + judge.name} onClick={() => removeJudge(judge)}><Trash2 size={15} /></button></td></tr>)}</tbody></table></section></>}
 
       {view === 'settings' && <><div className="page-heading"><div><p className="eyebrow">CONFIGURACIÓN</p><h2>Formato y torneo</h2><p className="muted">Edita la secuencia base. Los cambios se aplicarán a todas las salas cuando guardes.</p></div><button className="button secondary" onClick={() => { setFormatDirty(true); updateData((current) => ({ ...current, formatPhases: LEDU_PHASES.map((phase) => ({ ...phase })) })); }}><RotateCcw size={16} /> Restaurar preset LEDU</button></div>
-      <section className="panel settings-panel"><label className="settings-name">Nombre del torneo<input className="table-input" value={data.tournamentName} onChange={(event) => updateData((current) => ({ ...current, tournamentName: event.target.value }))} /></label><label className="settings-name">Mínimo de jueces por sala<input className="table-input" type="number" min={1} max={25} step={1} value={data.minimumJudgesPerRoom ?? 1} onChange={(event) => updateData((current) => ({ ...current, minimumJudgesPerRoom: Math.max(1, Math.min(25, Math.trunc(Number(event.target.value) || 1))) }))} /></label>{roomFormatMismatch && <div className="notice warning-notice"><CircleHelp size={17} /><span>El formato global no coincide con el guardado en una o varias salas. Aplica el formato global para migrarlas; los relojes se reiniciarán al primer turno.</span><button className="button secondary" disabled={hasLiveTimer} onClick={() => { setFormatDirty(true); updateData((current) => ({ ...current })); }}>Aplicar a todas las salas</button></div>}<div className="format-summary"><div><b>{configuredPhases.length} intervenciones</b><span>Duración teórica total: {formatTime(configuredPhases.reduce((total, phase) => total + phase.durationSeconds, 0))}</span></div><span className={formatDirty ? 'state-pill paused' : 'state-pill ready'}>{formatDirty ? 'Formato modificado' : 'Formato guardado'}</span></div>
+      <section className="panel settings-panel"><label className="settings-name">Nombre del torneo<input className="table-input" value={data.tournamentName} onChange={(event) => updateData((current) => ({ ...current, tournamentName: event.target.value }))} /></label><label className="settings-name">Mínimo de jueces por sala<input className="table-input" type="number" min={1} max={25} step={1} value={data.minimumJudgesPerRoom ?? 1} onChange={(event) => updateData((current) => ({ ...current, minimumJudgesPerRoom: Math.max(1, Math.min(25, Math.trunc(Number(event.target.value) || 1))) }))} /></label><div className="institution-catalog"><div><h3>Catálogo de instituciones</h3><p className="muted">Las instituciones se gestionan una sola vez y se comparten entre equipos y jueces. Cada persona debe seleccionarla del listado.</p></div><form className="institution-create" onSubmit={(event) => { event.preventDefault(); addInstitution(); }}><input className="table-input" aria-label="Nombre de nueva institución" placeholder="Nombre de una institución nueva" value={institutionDraft} onChange={(event) => setInstitutionDraft(event.target.value)} maxLength={200} /><button className="button secondary" type="submit" disabled={!institutionDraft.trim()}><Plus size={15} /> Añadir institución</button></form><div className="institution-chips">{getInstitutionCatalog(data).map((institution) => <span key={institution}>{institution}</span>)}{getInstitutionCatalog(data).length === 0 && <span className="muted">Todavía no hay instituciones definidas.</span>}</div></div>{roomFormatMismatch && <div className="notice warning-notice"><CircleHelp size={17} /><span>El formato global no coincide con el guardado en una o varias salas. Aplica el formato global para migrarlas; los relojes se reiniciarán al primer turno.</span><button className="button secondary" disabled={hasLiveTimer} onClick={() => { setFormatDirty(true); updateData((current) => ({ ...current })); }}>Aplicar a todas las salas</button></div>}<div className="format-summary"><div><b>{configuredPhases.length} intervenciones</b><span>Duración teórica total: {formatTime(configuredPhases.reduce((total, phase) => total + phase.durationSeconds, 0))}</span></div><span className={formatDirty ? 'state-pill paused' : 'state-pill ready'}>{formatDirty ? 'Formato modificado' : 'Formato guardado'}</span></div>
       {hasLiveTimer && <div className="notice warning-notice"><CircleHelp size={17} /><span>Hay debates iniciados o pausados. Por seguridad, no se aplicará el formato hasta que todos estén detenidos.</span></div>}
       <div className="format-table-wrap"><table className="format-table"><thead><tr><th>#</th><th>Intervención</th><th>Tipo</th><th>Postura</th><th>Quién interviene</th><th>Segundos</th><th>Avisos</th><th>Exceso</th><th>Orden</th></tr></thead><tbody>{configuredPhases.map((phase, index) => <tr key={phase.id}><td>{index + 1}</td><td><input className="table-input" aria-label={'Nombre intervención ' + (index + 1)} value={phase.name} onChange={(event) => updatePhase(phase.id, { name: event.target.value })} /></td><td><select className="format-select" aria-label="Tipo de intervención" value={phase.type ?? 'other'} onChange={(event) => updatePhase(phase.id, { type: event.target.value as Phase['type'] })}><option value="opening">Exposición inicial</option><option value="cross-examination">Examen cruzado</option><option value="rebuttal">Refutación</option><option value="cross-rebuttal">Refutación cruzada</option><option value="conclusion">Conclusión</option><option value="other">Otro</option></select></td><td><select className="format-select" aria-label="Postura" value={phase.side} onChange={(event) => updatePhase(phase.id, { side: event.target.value as Phase['side'] })}><option value="favor">A favor</option><option value="contra">En contra</option></select></td><td><input className="table-input" aria-label="Interviniente" value={phase.speaker} onChange={(event) => updatePhase(phase.id, { speaker: event.target.value })} /></td><td><div className="duration-input"><input type="number" min={1} max={7200} value={phase.durationSeconds} aria-label="Duración en segundos" onChange={(event) => updatePhase(phase.id, { durationSeconds: Math.max(1, Math.min(7200, Number(event.target.value) || 1)) })} /><small>{formatTime(phase.durationSeconds)}</small></div></td><td><input className="threshold-input" aria-label="Umbrales de aviso en segundos" title="Segundos separados por coma" value={thresholdDrafts[phase.id] ?? (phase.warningThresholdsSeconds ?? []).join(', ')} onChange={(event) => { const value = event.target.value; setThresholdDrafts((drafts) => ({ ...drafts, [phase.id]: value })); if (/^\s*$|^\s*\d+\s*(,\s*\d+\s*)*$/.test(value)) updatePhase(phase.id, { warningThresholdsSeconds: value.trim() ? value.split(',').map((item) => Number(item.trim())) : [] }); }} onBlur={() => { const value = thresholdDrafts[phase.id] ?? (phase.warningThresholdsSeconds ?? []).join(', '); updatePhase(phase.id, { warningThresholdsSeconds: value.split(',').map((item) => Number(item.trim())).filter((item) => Number.isFinite(item) && item >= 0) }); setThresholdDrafts((drafts) => { const next = { ...drafts }; delete next[phase.id]; return next; }); }} /></td><td><label className="overtime-toggle"><input type="checkbox" checked={phase.allowOvertimeDisplay !== false} onChange={(event) => updatePhase(phase.id, { allowOvertimeDisplay: event.target.checked })} />Sí</label></td><td><div className="phase-order"><button className="icon-button" title="Subir intervención" aria-label="Subir intervención" disabled={index === 0} onClick={() => movePhase(index, -1)}><ArrowUp size={14} /></button><button className="icon-button" title="Bajar intervención" aria-label="Bajar intervención" disabled={index === configuredPhases.length - 1} onClick={() => movePhase(index, 1)}><ArrowDown size={14} /></button><button className="icon-button danger-action" title="Eliminar intervención" aria-label="Eliminar intervención" disabled={configuredPhases.length <= 1} onClick={() => removePhase(phase.id)}><Trash2 size={14} /></button></div></td></tr>)}</tbody></table></div><div className="settings-actions"><button className="button secondary" onClick={addPhase}><Plus size={16} /> Añadir intervención</button><p className="muted">Los cambios de formato reinician los cronómetros detenidos al primer turno al guardar.</p></div></section></>}
 
