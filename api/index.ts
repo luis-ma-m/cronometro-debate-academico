@@ -55,6 +55,8 @@ const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets/";
 const REDIS_RELEASE_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
 
 let cachedGoogleToken: { token: string; expiresAt: number } | null = null;
+let cachedSpreadsheetMetadata: { spreadsheetId: string; metadata: SpreadsheetMetadata; expiresAt: number } | null = null;
+const METADATA_CACHE_MS = 60_000;
 
 function env(name: string): string {
   return (process.env[name] || "").trim();
@@ -186,9 +188,17 @@ async function sheetsRequest<T>(path: string, init: RequestInit = {}): Promise<T
   return body as T;
 }
 
-async function spreadsheetMetadata(): Promise<SpreadsheetMetadata> {
+async function spreadsheetMetadata(forceRefresh = false): Promise<SpreadsheetMetadata> {
+  const id = spreadsheetId();
+  if (!forceRefresh && cachedSpreadsheetMetadata &&
+      cachedSpreadsheetMetadata.spreadsheetId === id &&
+      cachedSpreadsheetMetadata.expiresAt > Date.now()) {
+    return cachedSpreadsheetMetadata.metadata;
+  }
   const fields = "spreadsheetId,properties(title),sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))";
-  return sheetsRequest<SpreadsheetMetadata>("?fields=" + encodeURIComponent(fields));
+  const metadata = await sheetsRequest<SpreadsheetMetadata>("?fields=" + encodeURIComponent(fields));
+  cachedSpreadsheetMetadata = { spreadsheetId: id, metadata, expiresAt: Date.now() + METADATA_CACHE_MS };
+  return metadata;
 }
 
 function cellData(value: unknown): { userEnteredValue?: { stringValue?: string; numberValue?: number; boolValue?: boolean } } {
@@ -206,8 +216,12 @@ async function batchUpdateSpreadsheet(requests: unknown[]): Promise<void> {
 }
 
 async function ensureSchema(): Promise<SpreadsheetMetadata> {
+  const initialMetadata = await spreadsheetMetadata();
+  const initialTitles = new Set((initialMetadata.sheets || []).map((item) => item.properties.title));
+  if (SHEET_NAMES.every((name) => initialTitles.has(name))) return initialMetadata;
+
   return withLock("ledu:lock:schema", async () => {
-    let metadata = await spreadsheetMetadata();
+    let metadata = await spreadsheetMetadata(true);
     const existing = new Set((metadata.sheets || []).map((item) => item.properties.title));
     const missing = SHEET_NAMES.filter((name) => !existing.has(name));
     if (!missing.length) return metadata;
@@ -237,7 +251,7 @@ async function ensureSchema(): Promise<SpreadsheetMetadata> {
       });
     }
     await batchUpdateSpreadsheet(requests);
-    metadata = await spreadsheetMetadata();
+    metadata = await spreadsheetMetadata(true);
     return metadata;
   });
 }
