@@ -16,7 +16,8 @@ const SHEETS = {
   Cronometros: ['roomId', 'status', 'phaseIndex', 'remainingSeconds', 'startedAt', 'lastResumedAt', 'revision', 'updatedAt'],
   Registro: ['event_id', 'timestamp_utc', 'room_round_id', 'round_id', 'room_id', 'phase_index', 'event_type', 'elapsed_seconds', 'details']
 };
-const SESSION_TTL_SECONDS = 8 * 60 * 60;
+// Apps Script CacheService caps per-entry TTL at 21,600 seconds (6 hours).
+const SESSION_TTL_SECONDS = 6 * 60 * 60;
 
 function doGet(e) {
   const action = String(e && e.parameter && e.parameter.action || '');
