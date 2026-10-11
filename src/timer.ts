@@ -88,7 +88,7 @@ export function withRoomStatus<T extends { status: string; timer: TimerState; te
   return { ...room, status };
 }
 
-export function validateAssignments(tournament: { rounds: { id: string; name: string }[]; teams: { id: string; name: string }[]; judges: { id: string; name: string }[]; rooms: { id: string; name: string; roundId: string; teamFavorId: string; teamContraId: string; judgeIds: string[]; phases: Phase[] }[] }): string[] {
+export function validateAssignments(tournament: { rounds: { id: string; name: string }[]; teams: { id: string; name: string; institution?: string }[]; judges: { id: string; name: string; institution?: string }[]; rooms: { id: string; name: string; roundId: string; teamFavorId: string; teamContraId: string; judgeIds: string[]; phases: Phase[] }[] }): string[] {
   const errors: string[] = [];
   const roundIds = new Set(tournament.rounds.map((round) => round.id));
   const teamIds = new Map(tournament.teams.map((team) => [team.id, team.name]));
@@ -114,6 +114,18 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
       const other = judgeBookings.get(key);
       if (other && other !== room.name) errors.push(`${judgeIds.get(id) ?? id} está asignado a ${other} y ${room.name} en la misma ronda.`);
       else judgeBookings.set(key, room.name);
+
+      const judge = tournament.judges.find((item) => item.id === id);
+      const judgeInstitution = judge?.institution?.trim().toLocaleLowerCase('es-ES') ?? '';
+      if (judgeInstitution) {
+        for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
+          const team = tournament.teams.find((item) => item.id === teamId);
+          const teamInstitution = team?.institution?.trim().toLocaleLowerCase('es-ES') ?? '';
+          if (team && teamInstitution && teamInstitution === judgeInstitution) {
+            errors.push(`${judge.name} y ${team.name} comparten institución y no pueden coincidir en ${room.name}.`);
+          }
+        }
+      }
     }
     if (!Array.isArray(room.phases) || !room.phases.length) errors.push(`${room.name}: el formato no tiene intervenciones.`);
     else for (const phase of room.phases) {
