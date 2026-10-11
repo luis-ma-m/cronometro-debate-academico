@@ -216,8 +216,9 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
 }
 
 export function publicRoomData(room: Room): Omit<Room, "notes"> {
-  const { notes: _notes, ...safeRoom } = room;
-  return safeRoom;
+  const safeRoom = { ...room } as Partial<Room>;
+  delete safeRoom.notes;
+  return safeRoom as Omit<Room, "notes">;
 }
 
 export function publicRoomPayload(tournament: Tournament, roomId: string): PublicRoom {
