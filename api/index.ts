@@ -193,39 +193,47 @@ function cellData(value: unknown): { userEnteredValue?: { stringValue?: string; 
 }
 
 async function batchUpdateSpreadsheet(requests: unknown[]): Promise<void> {
-  await sheetsRequest(" :batchUpdate".trim(), {
+  await sheetsRequest(":batchUpdate", {
     method: "POST",
     body: JSON.stringify({ requests }),
   });
 }
 
 async function ensureSchema(): Promise<SpreadsheetMetadata> {
-  let metadata = await spreadsheetMetadata();
-  const titles = new Set((metadata.sheets || []).map((item) => item.properties.title));
-  const missingCore = SHEET_NAMES.filter((name) => name !== "Registro" && !titles.has(name));
-  if (missingCore.length) {
-    throw new ApiError(
-      "SCHEMA_MISMATCH",
-      "La hoja no contiene las pestañas requeridas: " + missingCore.join(", ") + ". No se ha modificado ningún dato.",
-      503,
-    );
-  }
-  if (!titles.has("Registro")) {
-    await withLock("ledu:lock:schema", async () => {
-      metadata = await spreadsheetMetadata();
-      const refreshedTitles = new Set((metadata.sheets || []).map((item) => item.properties.title));
-      if (!refreshedTitles.has("Registro")) {
-        const nextSheetId = Math.max(0, ...(metadata.sheets || []).map((item) => Number(item.properties.sheetId) || 0)) + 1;
-        const headers = SHEET_HEADERS.Registro.map((value) => ({ values: [cellData(value)] }));
-        await batchUpdateSpreadsheet([
-          { addSheet: { properties: { sheetId: nextSheetId, title: "Registro", gridProperties: { rowCount: 1000, columnCount: SHEET_HEADERS.Registro.length } } } },
-          { updateCells: { start: { sheetId: nextSheetId, rowIndex: 0, columnIndex: 0 }, rows: headers, fields: "userEnteredValue" } },
-        ]);
-      }
-    });
+  return withLock("ledu:lock:schema", async () => {
+    let metadata = await spreadsheetMetadata();
+    const existing = new Set((metadata.sheets || []).map((item) => item.properties.title));
+    const missing = SHEET_NAMES.filter((name) => !existing.has(name));
+    if (!missing.length) return metadata;
+
+    let nextSheetId = Math.max(0, ...(metadata.sheets || []).map((item) => Number(item.properties.sheetId) || 0)) + 1;
+    const requests: unknown[] = [];
+    for (const name of missing) {
+      const sheetId = nextSheetId++;
+      requests.push({
+        addSheet: {
+          properties: {
+            sheetId,
+            title: name,
+            gridProperties: {
+              rowCount: 1000,
+              columnCount: (SHEET_HEADERS[name] as readonly string[]).length,
+            },
+          },
+        },
+      });
+      requests.push({
+        updateCells: {
+          start: { sheetId, rowIndex: 0, columnIndex: 0 },
+          rows: [{ values: (SHEET_HEADERS[name] as readonly string[]).map(cellData) }],
+          fields: "userEnteredValue",
+        },
+      });
+    }
+    await batchUpdateSpreadsheet(requests);
     metadata = await spreadsheetMetadata();
-  }
-  return metadata;
+    return metadata;
+  });
 }
 
 async function loadSheetData(skipEnsure = false): Promise<SheetData> {
@@ -631,8 +639,8 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
     if (!room) throw new ApiError("ROOM_NOT_FOUND", "No se encuentra esa sala.", 404);
 
     const controlKey = str(payload.controlKey);
-    const expectedDigest = await redisCommand(["GET", "ledu:room-control:" + sha256(room.id)]);
-    if (!controlKey || typeof expectedDigest !== "string" || !safeEquals(controlKey, expectedDigest)) {
+    const expectedToken = await redisCommand(["GET", "ledu:room-control:" + sha256(room.id)]);
+    if (!controlKey || typeof expectedToken !== "string" || !safeEquals(controlKey, expectedToken)) {
       throw new ApiError("UNAUTHORIZED", "Abre esta sala desde el panel de organización para controlar el cronómetro.", 401);
     }
     if (payload.expectedRevision === undefined || num(payload.expectedRevision) !== room.timer.revision) {
