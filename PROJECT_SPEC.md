@@ -20,14 +20,14 @@ Crear una aplicación web para organizar un torneo académico LEDU. Se compone d
 - Control de concurrencia: LockService para escrituras, contador de revisión para prevenir sobrescrituras silenciosas y revisión por sala para acciones de reloj.
 
 ## Modelo de datos
-- Config: clave, valor; nombre del torneo y revisión global.
+- Config: clave, valor; nombre del torneo, revisión global, formato de debate y catálogo normalizado de instituciones compartido por equipos y jueces.
 - Rondas: ID, número, nombre, activa.
 - Equipos: ID, nombre, institución, activo.
 - Jueces: ID, nombre, institución, activo.
 - Salas: ID, nombre, ronda, equipo a favor, equipo en contra, lista de jueces, estado, fases, notas y fecha de actualización.
 - Cronometros: ID de sala, estado, fase, segundos restantes, marca de inicio, última reanudación, revisión y fecha de actualización.
 
-Los vínculos se realizan mediante IDs, no por nombres. Un equipo y un juez no pueden aparecer en dos salas de la misma ronda. Se permite asignar más de un juez a una sala.
+Los vínculos se realizan mediante IDs, no por nombres. Un equipo y un juez no pueden aparecer en dos salas de la misma ronda. Se permite asignar más de un juez a una sala. Las instituciones se eligen de un catálogo compartido; al añadir una institución, queda disponible tanto para equipos como para jueces. Un juez no puede formar parte del panel de una sala cuando comparte institución con cualquiera de los equipos enfrentados.
 
 ## Reglas del cronómetro
 - Cada sala mantiene su propio timer.
@@ -50,5 +50,6 @@ Los vínculos se realizan mediante IDs, no por nombres. Un equipo y un juez no p
 - Los cambios de asignación se ven en la página de sala sin recargar manualmente.
 - El panel distingue salas preparadas, en curso, pausadas, finalizadas y pendientes.
 - El backend impide equipos y jueces duplicados en la misma ronda.
+- La organización puede eliminar salas, rondas, equipos y jueces, limpiando las asignaciones relacionadas; una ronda conserva al menos una entrada y al eliminarse arrastra sus salas.
 - La gestión exige sesión válida cuando el backend está configurado.
 - El proyecto compila y los tests de cronómetro pasan en CI.
