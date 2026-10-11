@@ -52,3 +52,16 @@
 .room-open-actions{display:flex;align-items:center;gap:7px}
 .room-open-actions .text-button{font-size:10px;white-space:nowrap}
 @media(max-width:760px){.room-open-actions{align-items:flex-end;flex-direction:column}.room-open-actions .text-button{padding:3px}}
+
+.institution-catalog{border:1px solid #e1e6ee;border-radius:10px;padding:16px;margin:18px 0 22px;background:#fbfcfe}
+.institution-catalog h3{font-size:13px;margin:0 0 5px;color:#29364a}
+.institution-catalog .muted{line-height:1.5}
+.institution-create{display:flex;align-items:center;gap:10px;margin-top:12px}
+.institution-create .table-input{flex:1;min-width:0;border-color:#dce2eb;background:#fff}
+.institution-chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.institution-chips span{padding:6px 9px;border-radius:16px;background:#edf5f3;color:#226858;font-size:10px}
+.table-panel .institution-select{min-width:190px;border-color:#dce2eb;background:#fff}
+.table-panel td .icon-button{padding:7px}
+.round-tabs button.danger-action{color:#b8493d}
+.check-item:has(input:disabled){opacity:.65}
+@media(max-width:760px){.institution-create{align-items:stretch;flex-direction:column}.institution-create .button{width:100%}}
