@@ -64,10 +64,8 @@ function env(name: string): string {
 
 function requiredEnvironment(): string[] {
   const names = [
-    "GOOGLE_SERVICE_ACCOUNT_EMAIL",
-    "GOOGLE_PRIVATE_KEY",
+    "GOOGLE_SERVICE_ACCOUNT_JSON",
     "ADMIN_PASSWORD",
-    "SESSION_SECRET",
     "UPSTASH_REDIS_REST_URL",
     "UPSTASH_REDIS_REST_TOKEN",
   ];
@@ -83,9 +81,7 @@ function ensureConfigured(): void {
       503,
     );
   }
-  if (env("SESSION_SECRET").length < 32) {
-    throw new ApiError("NOT_CONFIGURED", "SESSION_SECRET debe tener al menos 32 caracteres aleatorios.", 503);
-  }
+  googleCredentials();
   if (env("ADMIN_PASSWORD").length > 1024) {
     throw new ApiError("NOT_CONFIGURED", "ADMIN_PASSWORD no puede superar 1024 caracteres.", 503);
   }
@@ -96,10 +92,33 @@ function sha256(value: string): string {
 }
 
 function safeEquals(left: string, right: string): boolean {
-  const key = env("SESSION_SECRET");
+  // Reuse the private panel password as the single authentication secret.
+  // Domain separation prevents this derived key from being reused elsewhere.
+  const key = createHash("sha256").update("LEDU Control auth key v1\0").update(env("ADMIN_PASSWORD")).digest();
   const leftDigest = createHmac("sha256", key).update(left).digest();
   const rightDigest = createHmac("sha256", key).update(right).digest();
   return timingSafeEqual(leftDigest, rightDigest);
+}
+
+function googleCredentials(): { clientEmail: string; privateKey: string } {
+  const raw = env("GOOGLE_SERVICE_ACCOUNT_JSON");
+  if (!raw) {
+    throw new ApiError("NOT_CONFIGURED", "Falta GOOGLE_SERVICE_ACCOUNT_JSON en Vercel. Pega el JSON completo de la cuenta técnica de Google Sheets.", 503);
+  }
+
+  let credentials: { client_email?: unknown; private_key?: unknown };
+  try {
+    credentials = JSON.parse(raw) as { client_email?: unknown; private_key?: unknown };
+  } catch {
+    throw new ApiError("NOT_CONFIGURED", "GOOGLE_SERVICE_ACCOUNT_JSON no contiene un JSON válido de cuenta de servicio.", 503);
+  }
+
+  const clientEmail = str(credentials.client_email);
+  const privateKey = str(credentials.private_key).replace(/\\n/g, "\n");
+  if (!clientEmail || !privateKey.includes("PRIVATE KEY")) {
+    throw new ApiError("NOT_CONFIGURED", "GOOGLE_SERVICE_ACCOUNT_JSON debe incluir client_email y private_key.", 503);
+  }
+  return { clientEmail, privateKey };
 }
 
 function base64Url(value: string | Buffer): string {
@@ -108,9 +127,7 @@ function base64Url(value: string | Buffer): string {
 
 async function googleAccessToken(): Promise<string> {
   if (cachedGoogleToken && cachedGoogleToken.expiresAt > Date.now() + 60000) return cachedGoogleToken.token;
-  const email = env("GOOGLE_SERVICE_ACCOUNT_EMAIL");
-  const privateKey = env("GOOGLE_PRIVATE_KEY").replace(/\\n/g, "\n");
-  if (!email || !privateKey) throw new ApiError("NOT_CONFIGURED", "Faltan las credenciales privadas de Google en Vercel.", 503);
+  const { clientEmail: email, privateKey } = googleCredentials();
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
@@ -503,7 +520,10 @@ async function createSession(password: string, ip: string): Promise<{ token: str
   await redisCommand(["DEL", "ledu:login-failures:" + sha256(ip)]);
   const token = randomBytes(32).toString("hex");
   const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1000;
-  await redisCommand(["SET", "ledu:session:" + sha256(token), JSON.stringify({ expiresAt }), "EX", SESSION_TTL_SECONDS]);
+  await redisCommand(["SET", "ledu:session:" + sha256(token), JSON.stringify({
+    expiresAt,
+    passwordHash: sha256(env("ADMIN_PASSWORD")),
+  }), "EX", SESSION_TTL_SECONDS]);
   return { token, expiresAt };
 }
 
@@ -513,8 +533,12 @@ async function requireSession(tokenValue: unknown): Promise<void> {
   const raw = await redisCommand(["GET", "ledu:session:" + sha256(token)]);
   if (typeof raw !== "string") throw new ApiError("UNAUTHORIZED", "Sesión caducada o no válida. Vuelve a iniciar sesión.", 401);
   try {
-    const session = JSON.parse(raw) as { expiresAt?: number };
-    if (!session.expiresAt || session.expiresAt <= Date.now()) throw new Error("expired");
+    const session = JSON.parse(raw) as { expiresAt?: number; passwordHash?: string };
+    if (
+      !session.expiresAt ||
+      session.expiresAt <= Date.now() ||
+      session.passwordHash !== sha256(env("ADMIN_PASSWORD"))
+    ) throw new Error("expired or password changed");
   } catch {
     throw new ApiError("UNAUTHORIZED", "Sesión caducada o no válida. Vuelve a iniciar sesión.", 401);
   }
