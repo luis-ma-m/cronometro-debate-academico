@@ -178,6 +178,21 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
   if (typeof tournament.tournamentName !== "string" || tournament.tournamentName.length > 200) {
     throw new ApiError("INVALID_PAYLOAD", "El nombre del torneo es obligatorio y no puede superar 200 caracteres.");
   }
+  const assertUniqueRecords = (items: Array<{ id: string; name: string }>, label: string) => {
+    const ids = new Set<string>();
+    for (const item of items) {
+      const id = str(item?.id).trim();
+      const name = str(item?.name).trim();
+      if (!id || !name || id.length > 100 || name.length > 200 || ids.has(id)) {
+        throw new ApiError("INVALID_PAYLOAD", label + " deben tener identificadores únicos y nombres no vacíos de hasta 200 caracteres.");
+      }
+      ids.add(id);
+    }
+  };
+  assertUniqueRecords(tournament.rounds, "Las rondas");
+  assertUniqueRecords(tournament.teams, "Los equipos");
+  assertUniqueRecords(tournament.judges, "Los jueces");
+
   const rounds = new Set(tournament.rounds.map((item) => str(item.id)).filter(Boolean));
   const teamIds = new Set(tournament.teams.map((item) => str(item.id)).filter(Boolean));
   const judgeIds = new Set(tournament.judges.map((item) => str(item.id)).filter(Boolean));
