@@ -171,8 +171,14 @@ function saveTournament_(p) {
     validatePhases_(formatPhases);
     const previousFormat = parseJson_(configValue_(configRows, 'formatPhases'), defaultPhases_());
     const formatChanged = JSON.stringify(previousFormat) !== JSON.stringify(formatPhases);
+    const previousRoomRows = readObjects_('Salas');
+    const roomPhasesChanged = input.rooms.some(function (room) {
+      const oldRoom = previousRoomRows.find(function (row) { return str_(row.id) === str_(room.id); });
+      return oldRoom && JSON.stringify(parseJson_(oldRoom.phases, [])) !== JSON.stringify(room.phases || []);
+    });
+    const resetTimers = formatChanged || roomPhasesChanged;
     const persistedTimerRows = readObjects_('Cronometros');
-    if (formatChanged && persistedTimerRows.some(function (row) { return row.status === 'running' || row.status === 'paused'; })) {
+    if (resetTimers && persistedTimerRows.some(function (row) { return row.status === 'running' || row.status === 'paused'; })) {
       throw apiError_('ACTIVE_TIMERS', 'No se puede cambiar el formato mientras haya cronómetros en curso o pausados. Detén los debates y vuelve a guardar.');
     }
     writeObjects_('Rondas', input.rounds.map(function (r) { return { id: r.id, number: r.number, name: r.name, active: r.active }; }));
