@@ -117,7 +117,7 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
 
       const judge = tournament.judges.find((item) => item.id === id);
       const judgeInstitution = judge?.institution?.trim().toLocaleLowerCase('es-ES') ?? '';
-      if (judgeInstitution) {
+      if (judge && judgeInstitution) {
         for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
           const team = tournament.teams.find((item) => item.id === teamId);
           const teamInstitution = team?.institution?.trim().toLocaleLowerCase('es-ES') ?? '';
