@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { Judge, Phase, PublicRoom, Room, Round, Team, Tournament } from './domain';
-import { apiConfigured, getPublicRoom, getRoomControllerToken, getTournament, login, saveTournament, updateTimer } from './api';
+import { apiConfigured, getPublicRoom, getRoomControllerToken, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import type { TimerAction } from './timer';
@@ -184,9 +184,11 @@ export default function App() {
   };
 
   const logout = () => {
+    const token = session?.token;
     localStorage.removeItem(SESSION_KEY);
     setSession(null);
     setView('overview');
+    if (apiConfigured && token) void apiLogout(token).catch(() => undefined);
   };
 
   const timerAction = async (action: TimerAction) => {
