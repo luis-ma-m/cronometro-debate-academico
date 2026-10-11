@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ShieldCheck, Users, X } from 'lucide-react';
 import type { Judge, PublicRoom, Room, Round, Team, Tournament } from './domain';
 import { apiConfigured, getPublicRoom, getTournament, login, saveTournament, updateTimer } from './api';
-import { demoStorageKey, readDemo, writeDemo } from './demo';
+import { readDemo, writeDemo } from './demo';
 import { formatTime, secondsLeft, transitionTimer, withRoomStatus } from './timer';
 
 const SESSION_KEY = 'ledu-admin-session';
