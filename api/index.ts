@@ -276,11 +276,14 @@ async function migrateToPermanentRooms(initialMetadata: SpreadsheetMetadata): Pr
   // Version 2 is intentionally a destructive reset: the product decision allows
   // the old tournament data to be discarded instead of being ambiguously mapped
   // onto permanent physical rooms and per-round assignments.
-  const current = await sheetsRequest<{ values?: unknown[][] }>("/values/Config!A:B?majorDimension=ROWS");
-  const configRows = objectsFromRows(current.values);
-  if (configRows.some((row) => str(row.key) === "schemaVersion" && str(row.value) === "2")) return initialMetadata;
-
   return withLock("ledu:lock:schema-migration", async () => {
+    // Re-check schema version only after obtaining the lock. Two first requests
+    // can otherwise both decide to migrate and the second can erase new data.
+    const current = await sheetsRequest<{ values?: unknown[][] }>("/values/Config!A:B?majorDimension=ROWS");
+    const configRows = objectsFromRows(current.values);
+    if (configRows.some((row) => str(row.key) === "schemaVersion" && str(row.value) === "2")) {
+      return spreadsheetMetadata(true);
+    }
     const metadata = await spreadsheetMetadata(true);
     const requests: unknown[] = [];
     const now = Date.now();
@@ -979,8 +982,8 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
       throw new ApiError("REVISION_CONFLICT", "El cronómetro cambió en otro dispositivo. Actualiza el estado.", 409);
     }
     const now = Date.now();
-    if (action === "start" && tournament.activatedAt > 0 && now < tournament.activatedAt + 20_000) {
-      throw new ApiError("ROUND_TRANSITION", "La nueva ronda se está anunciando en las pantallas. El cronómetro podrá iniciarse al terminar la transición de 20 segundos.", 409);
+    if (tournament.activatedAt > 0 && now < tournament.activatedAt + 20_000) {
+      throw new ApiError("ROUND_TRANSITION", "La nueva ronda se está anunciando en las pantallas. Los controles del cronómetro estarán disponibles al terminar la transición de 20 segundos.", 409);
     }
     if (action === "start") {
       if (!room.teamFavorId || !room.teamContraId || room.teamFavorId === room.teamContraId || room.judgeIds.length < (tournament.minimumJudgesPerRoom || 1)) {
