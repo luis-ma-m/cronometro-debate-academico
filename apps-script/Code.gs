@@ -200,31 +200,39 @@ function saveTournament_(p) {
 function updateRoomTimer_(p) {
   const roomId = String(p.roomId || '');
   const action = String(p.action || '');
-  if (['start', 'pause', 'reset', 'next'].indexOf(action) < 0) throw apiError_('INVALID_ACTION', 'Acción de cronómetro no válida.');
+  if (['start', 'pause', 'reset', 'next', 'previous', 'finish'].indexOf(action) < 0) throw apiError_('INVALID_ACTION', 'Acción de cronómetro no válida.');
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const rooms = readObjects_('Salas');
-    const row = rooms.find(function (r) { return String(r.id) === roomId; });
+    const row = readObjects_('Salas').find(function (r) { return String(r.id).toLowerCase() === roomId.toLowerCase(); });
     if (!row) throw apiError_('ROOM_NOT_FOUND', 'No se encuentra esa sala.');
-    const timerRows = readObjects_('Cronometros');
-    const stored = timerRows.find(function (t) { return String(t.roomId) === roomId; });
+    const canonicalId = String(row.id);
+    const expectedKey = PropertiesService.getScriptProperties().getProperty(roomControlPropertyKey_(canonicalId));
+    if (!expectedKey || !p.controlKey || !constantTimeEquals_(String(p.controlKey), expectedKey)) throw apiError_('UNAUTHORIZED', 'Abre esta sala desde el panel de organización para controlar el cronómetro.');
     const phases = parseJson_(row.phases, []);
+    const stored = readObjects_('Cronometros').find(function (t) { return String(t.roomId) === canonicalId; });
     const timer = stored ? timerFromRow_(stored) : initialTimer_(phases);
-    if (p.expectedRevision !== undefined && num_(p.expectedRevision) !== timer.revision) {
-      throw apiError_('REVISION_CONFLICT', 'El cronómetro recibió otra acción. Actualiza el estado.');
-    }
-    const next = transitionTimer_(timer, phases, action, Date.now());
-    upsertById_('Cronometros', 'roomId', roomId, {
-      roomId: roomId, status: next.status, phaseIndex: next.phaseIndex,
-      remainingSeconds: next.remainingSeconds, startedAt: next.startedAt || '',
-      lastResumedAt: next.lastResumedAt || '', revision: next.revision, updatedAt: next.updatedAt
-    });
-    upsertById_('Salas', 'id', roomId, Object.assign({}, row, { status: deriveRoomStatus_(Object.assign({}, row, { timer: next })), updatedAt: Date.now() }));
+    if (p.expectedRevision === undefined || num_(p.expectedRevision) !== timer.revision) throw apiError_('REVISION_CONFLICT', 'El cronómetro cambió en otro dispositivo. Actualiza el estado.');
+    const oldIndex = timer.phaseIndex;
+    const oldStatus = timer.status;
+    const oldRemaining = remaining_(timer, Date.now());
+    const timestamp = Date.now();
+    const next = transitionTimer_(timer, phases, action, timestamp);
+    if (next.revision === timer.revision) return publicRoomFromTournament_(canonicalId, readTournament_());
+    upsertById_('Cronometros', 'roomId', canonicalId, { roomId: canonicalId, status: next.status, phaseIndex: next.phaseIndex, remainingSeconds: next.remainingSeconds, startedAt: next.startedAt || '', lastResumedAt: next.lastResumedAt || '', revision: next.revision, updatedAt: next.updatedAt });
+    upsertById_('Salas', 'id', canonicalId, Object.assign({}, row, { status: deriveRoomStatus_(Object.assign({}, row, { timer: next })), updatedAt: timestamp }));
+    appendTimerEvent_(row, next, action, oldIndex, oldStatus, oldRemaining, timestamp);
     SpreadsheetApp.flush();
-    // Intentionally call the non-locking read function while the script lock is held.
-    return publicRoomFromTournament_(roomId, readTournament_());
+    return publicRoomFromTournament_(canonicalId, readTournament_());
   } finally { lock.releaseLock(); }
+}
+
+function appendTimerEvent_(roomRow, next, action, phaseIndex, previousStatus, remainingBefore, timestamp) {
+  const phases = parseJson_(roomRow.phases, []);
+  const phase = phases[phaseIndex] || {};
+  const types = { start: previousStatus === 'paused' ? 'resumed' : 'started', pause: 'paused', reset: 'reset', next: next.status === 'finished' ? 'finished' : 'phase_advanced', previous: 'phase_rewound', finish: 'finished' };
+  const elapsed = Math.max(0, num_(phase.durationSeconds) - remainingBefore);
+  sheet_('Registro').appendRow([Utilities.getUuid(), new Date(timestamp).toISOString(), str_(roomRow.id), str_(roomRow.roundId), str_(roomRow.id), phaseIndex, types[action] || action, Math.round(elapsed), JSON.stringify({ action: action, fromStatus: previousStatus, toStatus: next.status, revision: next.revision })]);
 }
 
 function publicRoomFromTournament_(roomId, tournament) {
