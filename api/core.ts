@@ -1,5 +1,5 @@
-import type { Phase, PublicRoom, Room, TimerState, Tournament } from "../src/domain";
-import type { TimerAction } from "../src/timer";
+import type { Phase, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
+import type { TimerAction } from "../src/timer.js";
 
 export const DEFAULT_SPREADSHEET_ID = "1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI";
 export const SESSION_TTL_SECONDS = 8 * 60 * 60;
