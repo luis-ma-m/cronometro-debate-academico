@@ -66,11 +66,11 @@ export function transitionTimer(timer: TimerState, phases: Phase[], action: Time
   return { ...timer, status: 'idle', phaseIndex: nextIndex, remainingSeconds: nextPhase.durationSeconds, startedAt: null, lastResumedAt: null, updatedAt: now, revision: timer.revision + 1 };
 }
 
-export function withRoomStatus<T extends { status: string; timer: TimerState; teamFavorId: string; teamContraId: string; judgeIds: string[] }>(room: T): T {
+export function withRoomStatus<T extends { status: string; timer: TimerState; teamFavorId: string; teamContraId: string; judgeIds: string[] }>(room: T, minimumJudgesPerRoom = 1): T {
   const status = room.timer.status === 'running' ? 'running'
     : room.timer.status === 'paused' ? 'paused'
     : room.timer.status === 'finished' ? 'finished'
-    : room.teamFavorId && room.teamContraId && room.judgeIds.length ? 'ready' : 'unassigned';
+    : room.teamFavorId && room.teamContraId && room.judgeIds.length >= minimumJudgesPerRoom ? 'ready' : 'unassigned';
   return { ...room, status };
 }
 
