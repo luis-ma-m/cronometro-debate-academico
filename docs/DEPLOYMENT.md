@@ -14,9 +14,9 @@ https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plce
 
 1. En Google Cloud Console, selecciona o crea un proyecto y habilita **Google Sheets API**.
 2. Crea una cuenta de servicio y genera una clave JSON para esa cuenta.
-3. Copia el valor de client_email a la variable privada GOOGLE_SERVICE_ACCOUNT_EMAIL de Vercel.
-4. Comparte la hoja anterior con ese correo y dale permiso de editor. La hoja debe seguir siendo privada; no habilites el acceso público.
-5. Conserva el contenido de private_key en un gestor seguro y úsalo solo para la variable privada GOOGLE_PRIVATE_KEY de Vercel. Puedes pegar el PEM con saltos de línea o con los saltos representados como \n. No lo guardes en GitHub ni lo compartas en el chat.
+3. Guarda el JSON descargado completo en una variable privada de Vercel llamada GOOGLE_SERVICE_ACCOUNT_JSON. No hace falta separar el correo y la clave en variables distintas.
+4. Comparte la hoja anterior con el valor client_email que aparece dentro del JSON y dale permiso de editor. La hoja debe seguir siendo privada; no habilites el acceso público.
+5. No subas el JSON a GitHub ni lo compartas por el chat. Solo debe estar guardado como variable privada en Vercel.
 
 La API conserva el esquema existente: Config, Rondas, Equipos, Jueces, Salas, Cronometros y Registro. Si falta únicamente la pestaña Registro, la API la crea con los encabezados correctos. Si falta una pestaña principal o los encabezados no coinciden, la API se detiene sin sobrescribir datos existentes.
 
@@ -36,19 +36,14 @@ En Project Settings → Environment Variables, configura estas variables como **
 
 | Variable | Valor |
 |---|---|
-| GOOGLE_SERVICE_ACCOUNT_EMAIL | Correo client_email de la cuenta de servicio. |
-| GOOGLE_PRIVATE_KEY | Clave privada PEM de la cuenta de servicio. |
-| GOOGLE_SHEETS_SPREADSHEET_ID | ID de la hoja indicada arriba; puede omitirse porque el proyecto tiene ese valor predeterminado. |
-| ADMIN_PASSWORD | Contraseña fuerte y privada para el panel. No uses la contraseña de demo. |
-| SESSION_SECRET | Secreto aleatorio de al menos 32 bytes para comparaciones de credenciales. |
-| UPSTASH_REDIS_REST_URL | REST URL de la base Redis de Upstash. |
-| UPSTASH_REDIS_REST_TOKEN | Token REST privado de esa base Redis. |
+| GOOGLE_SERVICE_ACCOUNT_JSON | Contenido completo del JSON de la cuenta técnica de Google Sheets. |
+| ADMIN_PASSWORD | La única contraseña privada que se introduce para entrar en el gestor. |
+| UPSTASH_REDIS_REST_URL | REST URL de Redis; coordina las escrituras entre funciones de Vercel. |
+| UPSTASH_REDIS_REST_TOKEN | Token privado de esa base Redis. |
 
-Puedes generar SESSION_SECRET localmente con:
+Estas son las cuatro variables imprescindibles. El ID de la hoja ya está fijado en el proyecto, y el backend deriva la clave interna de autenticación de ADMIN_PASSWORD: no hace falta una variable SESSION_SECRET adicional.
 
-    openssl rand -hex 32
-
-No es necesario definir VITE_APPS_SCRIPT_URL. No coloques ninguna de las credenciales anteriores en variables VITE_*: esas variables se incorporan al JavaScript público.
+En Vercel, elimina también VITE_APPS_SCRIPT_URL si sigue presente: pertenece a la versión antigua y ya no se utiliza. No pongas secretos en variables VITE_*, porque se incorporan al JavaScript público.
 
 Después de guardar las variables, vuelve a desplegar Vercel para asegurarte de que las funciones reciben la nueva configuración.
 
@@ -73,8 +68,8 @@ La API valida la sesión en el servidor, limita intentos fallidos de acceso, exc
 
 ## Diagnóstico
 
-- NOT_CONFIGURED: falta alguna variable privada de Vercel. El mensaje lista sus nombres, no sus valores.
-- GOOGLE_AUTH_FAILED: comprueba que el JSON de cuenta de servicio corresponde al correo y a la clave configurados.
+- NOT_CONFIGURED: falta alguna de las cuatro variables privadas, o GOOGLE_SERVICE_ACCOUNT_JSON no contiene un JSON válido con client_email y private_key. El mensaje indica la configuración que falta sin mostrar sus valores.
+- GOOGLE_AUTH_FAILED: comprueba que el JSON de cuenta de servicio es válido y que la clave no se ha revocado.
 - SHEETS_PERMISSION_DENIED: comparte el documento con el correo client_email de la cuenta de servicio y dale permiso de editor.
 - SCHEMA_MISMATCH: revisa las pestañas y los encabezados sin eliminarlos ni reordenarlos manualmente.
 - COORDINATION_UNAVAILABLE: verifica que Redis responde y que el REST URL y token están bien configurados.
