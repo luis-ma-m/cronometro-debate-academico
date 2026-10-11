@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
-import type { Judge, Phase, PublicRoom, Room, Round, Team, Tournament } from './domain';
-import { apiConfigured, getPublicRoom, getRoomControllerToken, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
+import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Team, Tournament } from './domain';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
+import type { RoundActivationPreview } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import type { TimerAction } from './timer';
@@ -10,6 +11,10 @@ import type { TimerAction } from './timer';
 const SESSION_KEY = 'ledu-admin-session';
 const POLL_MS = 10000;
 type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'settings';
+
+function makeSlug(value: string): string {
+  return value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
+}
 
 function getSession(): { token: string; expiresAt: number } | null {
   try {
@@ -69,6 +74,9 @@ export default function App() {
   const [roomFormatMismatch, setRoomFormatMismatch] = useState(false);
   const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
   const [institutionDraft, setInstitutionDraft] = useState('');
+  const [selectedFormatId, setSelectedFormatId] = useState('');
+  const [activationPreview, setActivationPreview] = useState<RoundActivationPreview | null>(null);
+  const [activatingRound, setActivatingRound] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => { try { return localStorage.getItem('ledu-timer-sound') === 'true'; } catch { return false; } });
   const controllerToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('control') ?? '';
 
@@ -79,9 +87,11 @@ export default function App() {
         const fresh = await getTournament(session.token);
         const responseReceivedAt = Date.now();
         if (typeof fresh.serverTime === 'number') setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
-        const format = fresh.formatPhases?.length ? fresh.formatPhases : LEDU_PHASES;
+        const format = fresh.formats?.find((item) => item.id === (fresh.rounds.find((round) => round.id === fresh.activeRoundId)?.defaultFormatId))?.phases
+          ?? (fresh.formatPhases?.length ? fresh.formatPhases : LEDU_PHASES);
         const roomFormatMismatch = fresh.rooms.some((room) => JSON.stringify(room.phases) !== JSON.stringify(format));
         setRoomFormatMismatch(roomFormatMismatch);
+        if (!selectedFormatId && fresh.formats?.length) setSelectedFormatId(fresh.formats[0].id);
         setData((current) => {
           if (!hasUnsavedRef.current) return fresh;
           const refreshedRooms = fresh.rooms.map((remote) => {
@@ -95,6 +105,7 @@ export default function App() {
           return { ...fresh, tournamentName: current.tournamentName, rounds: current.rounds, teams: current.teams,
             judges: current.judges, rooms: [...refreshedRooms, ...addedLocally], formatPhases: current.formatPhases,
             institutions: current.institutions ?? fresh.institutions,
+            formats: current.formats ?? fresh.formats, physicalRooms: current.physicalRooms ?? fresh.physicalRooms,
             revision: current.revision, updatedAt: current.updatedAt };
         });
         setConnected(true);
@@ -123,15 +134,25 @@ export default function App() {
     } else {
       const fresh = readDemo();
       setData(fresh);
-      const room = fresh.rooms.find((item) => item.id === roomId || item.name.toLowerCase() === roomId.toLowerCase());
-      if (!room) { setSnapshot(null); return; }
-      const round = fresh.rounds.find((item) => item.id === room.roundId);
+      const physical = fresh.physicalRooms.find((item) => item.slug === roomId || item.id === roomId);
+      if (!physical) { setSnapshot(null); return; }
+      const activeRoundId = fresh.activeRoundId || fresh.rounds.find((item) => item.active)?.id || '';
+      const room = fresh.rooms.find((item) => item.physicalRoomId === physical.id && item.roundId === activeRoundId);
+      const round = fresh.rounds.find((item) => item.id === activeRoundId);
+      const phases = room?.phases?.length ? room.phases : fresh.formats.find((item) => item.id === round?.defaultFormatId)?.phases ?? LEDU_PHASES;
+      const emptyRoom: Room = room ?? {
+        id: 'unassigned-' + physical.id, name: physical.name, roundId: activeRoundId, physicalRoomId: physical.id,
+        formatId: round?.defaultFormatId ?? '', teamFavorId: '', teamContraId: '', judgeIds: [], status: 'unassigned',
+        phases, timer: createTimer(phases), notes: '', updatedAt: Date.now(),
+      };
       setSnapshot({
-        tournamentName: fresh.tournamentName, roundName: round?.name ?? '',
-        room, teamFavor: fresh.teams.find((item) => item.id === room.teamFavorId)?.name ?? '',
-        teamContra: fresh.teams.find((item) => item.id === room.teamContraId)?.name ?? '',
-        judges: room.judgeIds.map((id) => fresh.judges.find((item) => item.id === id)?.name ?? '').filter(Boolean),
-        serverTime: Date.now(),
+        tournamentName: fresh.tournamentName, roundName: round?.name ?? 'Sin ronda activa',
+        room: emptyRoom, hasAssignment: Boolean(room), physicalRoomId: physical.id, roomSlug: physical.slug,
+        physicalRoomName: physical.name, activationRevision: fresh.activationRevision, activatedAt: fresh.activatedAt,
+        teamFavor: fresh.teams.find((item) => item.id === emptyRoom.teamFavorId)?.name ?? '',
+        teamContra: fresh.teams.find((item) => item.id === emptyRoom.teamContraId)?.name ?? '',
+        judges: emptyRoom.judgeIds.map((id) => fresh.judges.find((item) => item.id === id)?.name ?? '').filter(Boolean),
+        serverTime: Date.now(), minimumJudgesPerRoom: fresh.minimumJudgesPerRoom,
       });
       setConnected(true);
       setLastSyncedAt(Date.now());
@@ -253,7 +274,7 @@ export default function App() {
     try {
       if (apiConfigured) {
         const requestStartedAt = Date.now();
-        const updated = await updateTimer(snapshot.room.id, action, snapshot.room.timer.revision, controllerToken);
+        const updated = await updateTimer(snapshot.roomSlug, action, snapshot.room.timer.revision, controllerToken, snapshot.room.id, snapshot.activationRevision);
         const responseReceivedAt = Date.now();
         setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
         setSnapshot(updated);
@@ -289,16 +310,19 @@ export default function App() {
       if (!saved) return;
 
       let hash = '';
+      const assignment = saved.rooms.find((room) => room.id === id);
+      if (!assignment) throw new Error('La asignación ya no existe. Actualiza el panel.');
+      const physical = saved.physicalRooms.find((room) => room.id === assignment.physicalRoomId);
+      if (!physical) throw new Error('No se encuentra la sala física vinculada a esta asignación.');
       if (apiConfigured) {
         if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
-        const control = await getRoomControllerToken(session.token, id, rotate);
+        const control = await getRoomControllerToken(session.token, physical.slug, rotate);
         hash = '#control=' + encodeURIComponent(control.token);
       }
 
-      const roomName = saved.rooms.find((room) => room.id === id)?.name || id;
       setPreparedRoomLink({
-        roomName,
-        href: window.location.origin + '/sala/' + encodeURIComponent(id) + hash,
+        roomName: physical.name,
+        href: window.location.origin + '/sala/' + encodeURIComponent(physical.slug) + hash,
       });
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se ha podido preparar el enlace de control de la sala.');
