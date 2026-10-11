@@ -193,6 +193,27 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
   assertUniqueRecords(tournament.teams, "Los equipos");
   assertUniqueRecords(tournament.judges, "Los jueces");
 
+  if (tournament.institutions !== undefined) {
+    if (!Array.isArray(tournament.institutions)) {
+      throw new ApiError("INVALID_INSTITUTIONS", "El catálogo de instituciones debe ser una lista.");
+    }
+    const catalog = new Set<string>();
+    for (const item of tournament.institutions) {
+      const name = str(item).trim();
+      const key = name.toLocaleLowerCase("es-ES");
+      if (!name || name.length > 200 || catalog.has(key)) {
+        throw new ApiError("INVALID_INSTITUTIONS", "Las instituciones deben tener nombres no vacíos, únicos y de hasta 200 caracteres.");
+      }
+      catalog.add(key);
+    }
+    for (const person of [...tournament.teams, ...tournament.judges]) {
+      const name = str(person.institution).trim();
+      if (name && !catalog.has(name.toLocaleLowerCase("es-ES"))) {
+        throw new ApiError("INVALID_INSTITUTIONS", "La institución de " + str(person.name) + " no pertenece al catálogo.");
+      }
+    }
+  }
+
   const rounds = new Set(tournament.rounds.map((item) => str(item.id)).filter(Boolean));
   const teamIds = new Set(tournament.teams.map((item) => str(item.id)).filter(Boolean));
   const judgeIds = new Set(tournament.judges.map((item) => str(item.id)).filter(Boolean));
@@ -220,6 +241,21 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
       const bookingKey = str(room.roundId) + ":" + str(judgeId);
       if (judgeBookings.has(bookingKey)) throw new ApiError("JUDGE_DOUBLE_BOOKED", "Un juez está asignado a dos salas de la misma ronda.");
       judgeBookings.add(bookingKey);
+    }
+    for (const judgeId of room.judgeIds) {
+      const judge = tournament.judges.find((item) => str(item.id) === str(judgeId));
+      const judgeInstitution = str(judge?.institution).trim().toLocaleLowerCase("es-ES");
+      if (!judgeInstitution) continue;
+      for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
+        const team = tournament.teams.find((item) => str(item.id) === str(teamId));
+        const teamInstitution = str(team?.institution).trim().toLocaleLowerCase("es-ES");
+        if (team && teamInstitution && teamInstitution === judgeInstitution) {
+          throw new ApiError(
+            "INSTITUTION_CONFLICT",
+            "El juez " + str(judge?.name) + " y el equipo " + str(team.name) + " comparten institución y no pueden coincidir en la misma sala."
+          );
+        }
+      }
     }
     validatePhases(room.phases);
   }

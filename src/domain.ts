@@ -47,6 +47,7 @@ export interface Tournament {
   teams: Team[];
   judges: Judge[];
   rooms: Room[];
+  institutions?: string[];
   formatPhases?: Phase[];
   minimumJudgesPerRoom?: number;
   revision: number;

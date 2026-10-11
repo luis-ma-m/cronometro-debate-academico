@@ -98,6 +98,19 @@ describe("Vercel API core", () => {
     expect(() => validateTournamentInput(tournament)).toThrow("identificadores únicos");
   });
 
+  it("rejects assigning a judge to a team from the same institution", () => {
+    const tournament = makeTournament();
+    tournament.institutions = ["Universidad A", "Universidad B", "LEDU"];
+    tournament.judges[0].institution = "Universidad A";
+    expect(() => validateTournamentInput(tournament)).toThrow("comparten institución");
+  });
+
+  it("rejects institution values missing from the catalog", () => {
+    const tournament = makeTournament();
+    tournament.institutions = ["Universidad B", "LEDU"];
+    expect(() => validateTournamentInput(tournament)).toThrow("no pertenece al catálogo");
+  });
+
   it("rejects duplicate judge assignment across simultaneous rooms", () => {
     const tournament = makeTournament();
     tournament.teams.push({ id: "t3", name: "Equipo C", institution: "", active: true });
