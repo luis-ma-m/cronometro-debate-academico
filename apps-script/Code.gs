@@ -161,13 +161,20 @@ function saveTournament_(p) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    const currentRevision = num_(configValue_(readObjects_('Config'), 'revision')) || 1;
+    const configRows = readObjects_('Config');
+    const currentRevision = num_(configValue_(configRows, 'revision')) || 1;
     if (num_(p.expectedRevision) !== currentRevision) {
       throw apiError_('REVISION_CONFLICT', 'El torneo cambió en otro dispositivo. Actualiza los datos antes de guardar.');
     }
     validateAssignments_(input);
-    const formatPhases = Array.isArray(input.formatPhases) && input.formatPhases.length ? input.formatPhases : (input.rooms[0].phases || defaultPhases_());
+    const formatPhases = Array.isArray(input.formatPhases) && input.formatPhases.length ? input.formatPhases : (input.rooms[0] && input.rooms[0].phases || defaultPhases_());
     validatePhases_(formatPhases);
+    const previousFormat = parseJson_(configValue_(configRows, 'formatPhases'), defaultPhases_());
+    const formatChanged = JSON.stringify(previousFormat) !== JSON.stringify(formatPhases);
+    const persistedTimerRows = readObjects_('Cronometros');
+    if (formatChanged && persistedTimerRows.some(function (row) { return row.status === 'running' || row.status === 'paused'; })) {
+      throw apiError_('ACTIVE_TIMERS', 'No se puede cambiar el formato mientras haya cronómetros en curso o pausados. Detén los debates y vuelve a guardar.');
+    }
     writeObjects_('Rondas', input.rounds.map(function (r) { return { id: r.id, number: r.number, name: r.name, active: r.active }; }));
     writeObjects_('Equipos', input.teams.map(function (t) { return { id: t.id, name: t.name, institution: t.institution, active: t.active }; }));
     writeObjects_('Jueces', input.judges.map(function (j) { return { id: j.id, name: j.name, institution: j.institution, active: j.active }; }));
@@ -179,11 +186,20 @@ function saveTournament_(p) {
     // Keep stored live timers for existing rooms; the management browser may
     // hold an older timer snapshot from its last poll.
     const storedTimers = {};
-    readObjects_('Cronometros').forEach(function (timerRow) {
+    persistedTimerRows.forEach(function (timerRow) {
       storedTimers[str_(timerRow.roomId)] = timerFromRow_(timerRow);
     });
     writeObjects_('Cronometros', input.rooms.map(function (r) {
-      const t = storedTimers[str_(r.id)] || initialTimer_(r.phases || []);
+      const previous = storedTimers[str_(r.id)];
+      let t = previous || initialTimer_(r.phases || formatPhases);
+      if (formatChanged) {
+        t = initialTimer_(r.phases || formatPhases);
+        t.revision = previous ? previous.revision + 1 : 0;
+      }
+      if (r.phases && t.phaseIndex >= r.phases.length) {
+        t = initialTimer_(r.phases);
+        t.revision = previous ? previous.revision + 1 : t.revision;
+      }
       return { roomId: r.id, status: t.status, phaseIndex: t.phaseIndex, remainingSeconds: t.remainingSeconds,
         startedAt: t.startedAt || '', lastResumedAt: t.lastResumedAt || '', revision: t.revision || 0, updatedAt: t.updatedAt || Date.now() };
     }));
