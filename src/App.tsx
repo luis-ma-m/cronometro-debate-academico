@@ -71,7 +71,6 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [formatDirty, setFormatDirty] = useState(false);
-  const [roomFormatMismatch, setRoomFormatMismatch] = useState(false);
   const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
   const [institutionDraft, setInstitutionDraft] = useState('');
   const [selectedFormatId, setSelectedFormatId] = useState('');
@@ -87,10 +86,6 @@ export default function App() {
         const fresh = await getTournament(session.token);
         const responseReceivedAt = Date.now();
         if (typeof fresh.serverTime === 'number') setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
-        const format = fresh.formats?.find((item) => item.id === (fresh.rounds.find((round) => round.id === fresh.activeRoundId)?.defaultFormatId))?.phases
-          ?? (fresh.formatPhases?.length ? fresh.formatPhases : LEDU_PHASES);
-        const roomFormatMismatch = fresh.rooms.some((room) => JSON.stringify(room.phases) !== JSON.stringify(format));
-        setRoomFormatMismatch(roomFormatMismatch);
         if (!selectedFormatId && fresh.formats?.length) setSelectedFormatId(fresh.formats[0].id);
         setData((current) => {
           if (!hasUnsavedRef.current) return fresh;
@@ -229,7 +224,6 @@ export default function App() {
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
       setFormatDirty(false);
-      setRoomFormatMismatch(false);
       setConnected(true);
       setLastSyncedAt(Date.now());
       setServerError('');
@@ -438,8 +432,26 @@ export default function App() {
   const addRound = () => {
     const name = window.prompt('Nombre de la ronda', 'Ronda ' + (data.rounds.length + 1));
     if (!name?.trim()) return;
+    const timestamp = Date.now();
     const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false, defaultFormatId: data.formats[0]?.id ?? '' };
-    updateData((current) => ({ ...current, rounds: [...current.rounds, newRound] }));
+    const defaultFormat = data.formats.find((format) => format.id === newRound.defaultFormatId);
+    const phases = (defaultFormat?.phases?.length ? defaultFormat.phases : resolvePhases(data.formatPhases, data.rooms)).map((phase) => ({ ...phase }));
+    const newAssignments: Room[] = data.physicalRooms.map((physical) => ({
+      id: makeId('assignment'),
+      name: physical.name,
+      roundId: newRound.id,
+      physicalRoomId: physical.id,
+      formatId: '',
+      teamFavorId: '',
+      teamContraId: '',
+      judgeIds: [],
+      status: 'unassigned',
+      phases: phases.map((phase) => ({ ...phase })),
+      timer: { ...createTimer(phases), updatedAt: timestamp },
+      notes: '',
+      updatedAt: timestamp,
+    }));
+    updateData((current) => ({ ...current, rounds: [...current.rounds, newRound], rooms: [...current.rooms, ...newAssignments] }));
     setSelectedRound(newRound.id);
   };
 
