@@ -333,6 +333,20 @@ function tournamentFromData(data: SheetData): Tournament {
   const judges = data.rows.Jueces.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
   }));
+  const institutionMap = new Map<string, string>();
+  for (const rawName of [
+    ...parseJson<string[]>(configValue(config, "institutions"), []),
+    ...teams.map((team) => team.institution),
+    ...judges.map((judge) => judge.institution),
+  ]) {
+    const name = str(rawName).trim();
+    const key = name.toLocaleLowerCase("es-ES");
+    if (name && !institutionMap.has(key)) institutionMap.set(key, name);
+  }
+  const institutions = [...institutionMap.values()].sort((a, b) => a.localeCompare(b, "es"));
+  const canonicalInstitutions = new Map(institutions.map((name) => [name.toLocaleLowerCase("es-ES"), name]));
+  teams.forEach((team) => { team.institution = canonicalInstitutions.get(team.institution.trim().toLocaleLowerCase("es-ES")) ?? team.institution; });
+  judges.forEach((judge) => { judge.institution = canonicalInstitutions.get(judge.institution.trim().toLocaleLowerCase("es-ES")) ?? judge.institution; });
   const minimumJudges = Math.max(1, num(configValue(config, "minimumJudgesPerRoom")) || 1);
   const timers = timerRowMap(data.rows.Cronometros);
   const rooms = data.rows.Salas.map((row) => {
@@ -360,6 +374,7 @@ function tournamentFromData(data: SheetData): Tournament {
     teams,
     judges,
     rooms,
+    institutions,
     formatPhases: parseJson<Phase[]>(configValue(config, "formatPhases"), defaultPhases()),
     minimumJudgesPerRoom: minimumJudges,
     revision: num(configValue(config, "revision")) || 1,
@@ -654,6 +669,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     const nextRevision = current.revision + 1;
     setConfig(configRows, "tournamentName", tournament.tournamentName || "Torneo LEDU");
     setConfig(configRows, "formatPhases", JSON.stringify(phases));
+    setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
     setConfig(configRows, "revision", String(nextRevision));
     setConfig(configRows, "updatedAt", String(now));
