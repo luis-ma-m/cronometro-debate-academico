@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createTimer, formatTime, LEDU_PHASES, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
+import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 
 describe('preset LEDU general', () => {
   it('matches the reference turn sequence and duration from the project specification', () => {
@@ -8,6 +8,27 @@ describe('preset LEDU general', () => {
     expect(LEDU_PHASES[1].speaker).toContain('En contra pregunta');
     expect(LEDU_PHASES[10].side).toBe('contra');
     expect(LEDU_PHASES[11].side).toBe('favor');
+  });
+});
+
+describe('resolve room interventions', () => {
+  it('falls back to the LEDU preset when neither the global format nor rooms have phases', () => {
+    const phases = resolvePhases(undefined, [{ phases: [] }, {}]);
+    expect(phases).toHaveLength(12);
+    expect(phases.map((phase) => phase.durationSeconds).reduce((sum, value) => sum + value, 0)).toBe(41 * 60);
+  });
+
+  it('uses the global format before any room-specific phase list', () => {
+    const global = [{ ...LEDU_PHASES[0], id: 'custom-1', name: 'Intervención personalizada' }];
+    const phases = resolvePhases(global, [{ phases: LEDU_PHASES }]);
+    expect(phases).toHaveLength(1);
+    expect(phases[0].id).toBe('custom-1');
+  });
+
+  it('clones mutable warning thresholds so new rooms can edit their phase settings independently', () => {
+    const phases = resolvePhases([LEDU_PHASES[0]]);
+    phases[0].warningThresholdsSeconds?.push(5);
+    expect(LEDU_PHASES[0].warningThresholdsSeconds).toEqual([60, 30, 10]);
   });
 });
 
