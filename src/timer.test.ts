@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createTimer, formatTime, LEDU_PHASES, secondsLeft, transitionTimer, validateAssignments } from './timer';
+import { createTimer, formatTime, LEDU_PHASES, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 
 describe('preset LEDU general', () => {
   it('matches the reference turn sequence and duration from the project specification', () => {
@@ -8,6 +8,20 @@ describe('preset LEDU general', () => {
     expect(LEDU_PHASES[1].speaker).toContain('En contra pregunta');
     expect(LEDU_PHASES[10].side).toBe('contra');
     expect(LEDU_PHASES[11].side).toBe('favor');
+  });
+});
+
+describe('Room readiness', () => {
+  it('uses the configured judge minimum rather than assuming one judge is enough', () => {
+    const room = {
+      status: 'unassigned',
+      timer: createTimer(LEDU_PHASES),
+      teamFavorId: 'team-a',
+      teamContraId: 'team-b',
+      judgeIds: ['judge-1'],
+    };
+    expect(withRoomStatus(room, 2).status).toBe('unassigned');
+    expect(withRoomStatus({ ...room, judgeIds: ['judge-1', 'judge-2'] }, 2).status).toBe('ready');
   });
 });
 
