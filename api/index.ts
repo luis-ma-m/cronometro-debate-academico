@@ -233,32 +233,95 @@ async function batchUpdateSpreadsheet(requests: unknown[]): Promise<void> {
 }
 
 async function ensureSchema(): Promise<SpreadsheetMetadata> {
-  const initialMetadata = await spreadsheetMetadata();
-  const initialTitles = new Set((initialMetadata.sheets || []).map((item) => item.properties.title));
-  if (SHEET_NAMES.every((name) => initialTitles.has(name))) return initialMetadata;
-
-  return withLock("ledu:lock:schema", async () => {
-    let metadata = await spreadsheetMetadata(true);
-    const existing = new Set((metadata.sheets || []).map((item) => item.properties.title));
-    const missing = SHEET_NAMES.filter((name) => !existing.has(name));
-    if (!missing.length) return metadata;
-
-    let nextSheetId = Math.max(0, ...(metadata.sheets || []).map((item) => Number(item.properties.sheetId) || 0)) + 1;
-    const requests: unknown[] = [];
-    for (const name of missing) {
-      const sheetId = nextSheetId++;
-      requests.push({
-        addSheet: {
-          properties: {
-            sheetId,
-            title: name,
-            gridProperties: {
-              rowCount: 1000,
-              columnCount: (SHEET_HEADERS[name] as readonly string[]).length,
+  let metadata = await spreadsheetMetadata();
+  const initialTitles = new Set((metadata.sheets || []).map((item) => item.properties.title));
+  const missing = SHEET_NAMES.filter((name) => !initialTitles.has(name));
+  if (missing.length) {
+    return withLock("ledu:lock:schema", async () => {
+      metadata = await spreadsheetMetadata(true);
+      const existing = new Set((metadata.sheets || []).map((item) => item.properties.title));
+      const missingNow = SHEET_NAMES.filter((name) => !existing.has(name));
+      if (missingNow.length) {
+        let nextSheetId = Math.max(0, ...(metadata.sheets || []).map((item) => Number(item.properties.sheetId) || 0)) + 1;
+        const requests: unknown[] = [];
+        for (const name of missingNow) {
+          const sheetId = nextSheetId++;
+          requests.push({
+            addSheet: {
+              properties: {
+                sheetId,
+                title: name,
+                gridProperties: { rowCount: 1000, columnCount: (SHEET_HEADERS[name] as readonly string[]).length },
+              },
             },
+          });
+          requests.push({
+            updateCells: {
+              start: { sheetId, rowIndex: 0, columnIndex: 0 },
+              rows: [{ values: (SHEET_HEADERS[name] as readonly string[]).map(cellData) }],
+              fields: "userEnteredValue",
+            },
+          });
+        }
+        await batchUpdateSpreadsheet(requests);
+        metadata = await spreadsheetMetadata(true);
+      }
+      return migrateToPermanentRooms(metadata);
+    });
+  }
+  return migrateToPermanentRooms(metadata);
+}
+
+async function migrateToPermanentRooms(initialMetadata: SpreadsheetMetadata): Promise<SpreadsheetMetadata> {
+  // Version 2 is intentionally a destructive reset: the product decision allows
+  // the old tournament data to be discarded instead of being ambiguously mapped
+  // onto permanent physical rooms and per-round assignments.
+  const current = await sheetsRequest<{ values?: unknown[][] }>("/values/Config!A:B?majorDimension=ROWS");
+  const configRows = objectsFromRows(current.values);
+  if (configRows.some((row) => str(row.key) === "schemaVersion" && str(row.value) === "2")) return initialMetadata;
+
+  return withLock("ledu:lock:schema-migration", async () => {
+    const metadata = await spreadsheetMetadata(true);
+    const requests: unknown[] = [];
+    const now = Date.now();
+    const defaultPreset = {
+      id: "format-ledu",
+      name: "LEDU",
+      phases: defaultPhases(),
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const configSeed = [
+      ["tournamentName", "Torneo LEDU"],
+      ["formatPhases", JSON.stringify(defaultPhases())],
+      ["institutions", "[]"],
+      ["minimumJudgesPerRoom", "1"],
+      ["revision", "1"],
+      ["updatedAt", String(now)],
+      ["schemaVersion", "2"],
+      ["activeRoundId", ""],
+      ["activationRevision", "0"],
+      ["activatedAt", "0"],
+    ];
+    for (const name of SHEET_NAMES) {
+      const sheet = (metadata.sheets || []).find((item) => item.properties.title === name);
+      if (!sheet) throw new ApiError("SCHEMA_MISMATCH", "No se ha podido crear la pestaña " + name + ".", 503);
+      const sheetId = sheet.properties.sheetId;
+      const gridRows = Number(sheet.properties.gridProperties?.rowCount || 1000);
+      const gridColumns = Math.max(
+        Number(sheet.properties.gridProperties?.columnCount || 0),
+        (SHEET_HEADERS[name] as readonly string[]).length,
+      );
+      if (gridRows > 1 && gridColumns > 0) {
+        requests.push({
+          repeatCell: {
+            range: { sheetId, startRowIndex: 1, endRowIndex: gridRows, startColumnIndex: 0, endColumnIndex: gridColumns },
+            cell: { userEnteredValue: { stringValue: "" } },
+            fields: "userEnteredValue",
           },
-        },
-      });
+        });
+      }
       requests.push({
         updateCells: {
           start: { sheetId, rowIndex: 0, columnIndex: 0 },
@@ -267,12 +330,34 @@ async function ensureSchema(): Promise<SpreadsheetMetadata> {
         },
       });
     }
+    const configSheetId = sheetIdByName(metadata, "Config");
+    requests.push({
+      updateCells: {
+        start: { sheetId: configSheetId, rowIndex: 1, columnIndex: 0 },
+        rows: configSeed.map((row) => ({ values: row.map(cellData) })),
+        fields: "userEnteredValue",
+      },
+    });
+    const roundsSheetId = sheetIdByName(metadata, "Rondas");
+    requests.push({
+      updateCells: {
+        start: { sheetId: roundsSheetId, rowIndex: 1, columnIndex: 0 },
+        rows: [{ values: ["round-1", 1, "Ronda 1", false, defaultPreset.id].map(cellData) }],
+        fields: "userEnteredValue",
+      },
+    });
+    const formatsSheetId = sheetIdByName(metadata, "Formatos");
+    requests.push({
+      updateCells: {
+        start: { sheetId: formatsSheetId, rowIndex: 1, columnIndex: 0 },
+        rows: [{ values: [defaultPreset.id, defaultPreset.name, JSON.stringify(defaultPreset.phases), defaultPreset.version, defaultPreset.createdAt, defaultPreset.updatedAt].map(cellData) }],
+        fields: "userEnteredValue",
+      },
+    });
     await batchUpdateSpreadsheet(requests);
-    metadata = await spreadsheetMetadata(true);
-    return metadata;
+    return spreadsheetMetadata(true);
   });
 }
-
 async function loadSheetData(skipEnsure = false): Promise<SheetData> {
   const metadata = skipEnsure ? await spreadsheetMetadata() : await ensureSchema();
   const url = new URL(SHEETS_API + encodeURIComponent(spreadsheetId()) + "/values:batchGet");
@@ -324,8 +409,11 @@ function timerRowMap(rows: SheetRow[]): Map<string, TimerState> {
 
 function tournamentFromData(data: SheetData): Tournament {
   const config = data.rows.Config;
+  const activeRoundId = configValue(config, "activeRoundId");
   const rounds = data.rows.Rondas.map((row) => ({
-    id: str(row.id), number: num(row.number), name: str(row.name), active: bool(row.active),
+    id: str(row.id), number: num(row.number), name: str(row.name),
+    active: activeRoundId ? str(row.id) === activeRoundId : bool(row.active),
+    defaultFormatId: str(row.defaultFormatId),
   }));
   const teams = data.rows.Equipos.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
@@ -333,7 +421,7 @@ function tournamentFromData(data: SheetData): Tournament {
   const judges = data.rows.Jueces.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
   }));
-  const institutionMap = new Map<string, string>();
+  const institutionsMap = new Map<string, string>();
   for (const rawName of [
     ...parseJson<string[]>(configValue(config, "institutions"), []),
     ...teams.map((team) => team.institution),
@@ -341,12 +429,21 @@ function tournamentFromData(data: SheetData): Tournament {
   ]) {
     const name = str(rawName).trim();
     const key = name.toLocaleLowerCase("es-ES");
-    if (name && !institutionMap.has(key)) institutionMap.set(key, name);
+    if (name && !institutionsMap.has(key)) institutionsMap.set(key, name);
   }
-  const institutions = [...institutionMap.values()].sort((a, b) => a.localeCompare(b, "es"));
+  const institutions = [...institutionsMap.values()].sort((a, b) => a.localeCompare(b, "es"));
   const canonicalInstitutions = new Map(institutions.map((name) => [name.toLocaleLowerCase("es-ES"), name] as const));
   teams.forEach((team) => { team.institution = canonicalInstitutions.get(team.institution.trim().toLocaleLowerCase("es-ES")) ?? team.institution; });
   judges.forEach((judge) => { judge.institution = canonicalInstitutions.get(judge.institution.trim().toLocaleLowerCase("es-ES")) ?? judge.institution; });
+
+  const physicalRooms: PhysicalRoom[] = data.rows.SalasFisicas.map((row) => ({
+    id: str(row.id), slug: str(row.slug), name: str(row.name), active: bool(row.active),
+    createdAt: num(row.createdAt), updatedAt: num(row.updatedAt),
+  }));
+  const formats: FormatPreset[] = data.rows.Formatos.map((row) => ({
+    id: str(row.id), name: str(row.name), phases: parseJson<Phase[]>(row.phases, defaultPhases()),
+    version: Math.max(1, num(row.version) || 1), createdAt: num(row.createdAt), updatedAt: num(row.updatedAt),
+  }));
   const minimumJudges = Math.max(1, num(configValue(config, "minimumJudgesPerRoom")) || 1);
   const timers = timerRowMap(data.rows.Cronometros);
   const rooms = data.rows.Salas.map((row) => {
@@ -356,6 +453,8 @@ function tournamentFromData(data: SheetData): Tournament {
       id: str(row.id),
       name: str(row.name),
       roundId: str(row.roundId),
+      physicalRoomId: str(row.physicalRoomId),
+      formatId: str(row.formatId),
       teamFavorId: str(row.teamFavorId),
       teamContraId: str(row.teamContraId),
       judgeIds: parseJson<string[]>(row.judgeIds, []),
@@ -374,6 +473,11 @@ function tournamentFromData(data: SheetData): Tournament {
     teams,
     judges,
     rooms,
+    physicalRooms,
+    formats,
+    activeRoundId,
+    activationRevision: num(configValue(config, "activationRevision")),
+    activatedAt: num(configValue(config, "activatedAt")),
     institutions,
     formatPhases: parseJson<Phase[]>(configValue(config, "formatPhases"), defaultPhases()),
     minimumJudgesPerRoom: minimumJudges,
@@ -382,7 +486,6 @@ function tournamentFromData(data: SheetData): Tournament {
     serverTime: Date.now(),
   };
 }
-
 function rowObjectForRoom(room: Room, minimumJudges: number, timestamp: number): SheetRow {
   return {
     id: room.id,
@@ -395,6 +498,8 @@ function rowObjectForRoom(room: Room, minimumJudges: number, timestamp: number):
     phases: JSON.stringify(room.phases || []),
     notes: room.notes || "",
     updatedAt: timestamp,
+    physicalRoomId: room.physicalRoomId,
+    formatId: room.formatId || "",
   };
 }
 
