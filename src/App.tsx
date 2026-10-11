@@ -230,17 +230,26 @@ export default function App() {
 
   const openRoom = async (id: string, rotate = false) => {
     if (rotate && !window.confirm('Regenerar el enlace de control invalida el enlace anterior para esta sala. ¿Continuar?')) return;
-    const saved = await persist();
-    if (!saved) return;
+    // Open synchronously within the user gesture so browser popup blockers do not
+    // discard the room window after the async save/token calls.
+    const roomWindow = window.open('about:blank', '_blank');
+    if (!roomWindow) {
+      setServerError('El navegador ha bloqueado la ventana. Permite las ventanas emergentes para abrir el cronómetro.');
+      return;
+    }
     try {
+      const saved = await persist();
+      if (!saved) { roomWindow.close(); return; }
       let hash = '';
       if (apiConfigured) {
         if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
         const control = await getRoomControllerToken(session.token, id, rotate);
         hash = '#control=' + encodeURIComponent(control.token);
       }
-      window.open('/sala/' + encodeURIComponent(id) + hash, '_blank', 'noopener,noreferrer');
+      roomWindow.opener = null;
+      roomWindow.location.href = '/sala/' + encodeURIComponent(id) + hash;
     } catch (error) {
+      roomWindow.close();
       setServerError(error instanceof Error ? error.message : 'No se ha podido preparar el enlace de control de la sala.');
     }
   };
