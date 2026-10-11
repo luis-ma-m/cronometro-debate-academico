@@ -36,6 +36,7 @@ export default function App() {
   const hasUnsavedRef = useRef(false);
   const [connected, setConnected] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [formatDirty, setFormatDirty] = useState(false);
   const [roomFormatMismatch, setRoomFormatMismatch] = useState(false);
   const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
@@ -45,7 +46,10 @@ export default function App() {
   const reloadAdmin = useCallback(async () => {
     if (apiConfigured && session) {
       try {
+        const requestStartedAt = Date.now();
         const fresh = await getTournament(session.token);
+        const responseReceivedAt = Date.now();
+        if (typeof fresh.serverTime === 'number') setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
         const format = fresh.formatPhases?.length ? fresh.formatPhases : LEDU_PHASES;
         const roomFormatMismatch = fresh.rooms.some((room) => JSON.stringify(room.phases) !== JSON.stringify(format));
         setRoomFormatMismatch(roomFormatMismatch);
@@ -77,7 +81,14 @@ export default function App() {
   const reloadRoom = useCallback(async () => {
     if (!roomId) return;
     if (apiConfigured) {
-      try { setSnapshot(await getPublicRoom(roomId)); setConnected(true); setLastSyncedAt(Date.now()); setServerError(''); }
+      try {
+        const requestStartedAt = Date.now();
+        const fresh = await getPublicRoom(roomId);
+        const responseReceivedAt = Date.now();
+        setSnapshot(fresh);
+        setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
+        setConnected(true); setLastSyncedAt(responseReceivedAt); setServerError('');
+      }
       catch (error) { setConnected(false); setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.'); }
     } else {
       const fresh = readDemo();
@@ -194,7 +205,10 @@ export default function App() {
     if (!snapshot) return;
     try {
       if (apiConfigured) {
+        const requestStartedAt = Date.now();
         const updated = await updateTimer(snapshot.room.id, action, snapshot.room.timer.revision, controllerToken);
+        const responseReceivedAt = Date.now();
+        setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
         setSnapshot(updated);
       } else {
         const current = readDemo();
@@ -231,7 +245,7 @@ export default function App() {
     }
   };
 
-  if (roomId) return <RoomScreen snapshot={snapshot} now={now} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('ledu-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} lastSyncedAt={lastSyncedAt} />;
+  if (roomId) return <RoomScreen snapshot={snapshot} now={now} serverOffsetMs={serverOffsetMs} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('ledu-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} lastSyncedAt={lastSyncedAt} />;
 
   if (!session) {
     return <div className="login-shell">
@@ -327,7 +341,7 @@ export default function App() {
       {assignmentWarnings.length > 0 && view !== 'settings' && <div className="notice warning-notice"><CircleHelp size={17} /><span>Hay incidencias en las asignaciones: {assignmentWarnings.slice(0, 2).join(' ')}{assignmentWarnings.length > 2 ? ' +' + (assignmentWarnings.length - 2) + ' más.' : ''}</span></div>}
       {view === 'overview' && <><div className="page-heading"><div><p className="eyebrow">VISTA OPERATIVA</p><h2>Estado del torneo</h2><p className="muted">Seguimiento de debates, asignaciones y cronómetros.</p></div><div className="round-badge"><BookOpen size={17} /><span>Ronda activa: <b>{data.rounds.find((round) => round.active)?.name ?? 'Sin ronda activa'}</b></span></div></div>
       <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
-      <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} onOpen={() => void openRoom(room.id)} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
+      <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
 
       {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros.</p></div><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button onClick={() => markRoundActive(activeRound)} disabled={!activeRound || data.rounds.find((round) => round.id === activeRound)?.active}>Marcar activa</button></div><div className="managed-rooms">{rooms.map((room) => <section className="panel room-editor" key={room.id}><div className="panel-title"><div><input className="table-input room-name-input" aria-label="Nombre de la sala" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} /><p className="muted">Enlace público: /sala/{room.id}</p></div><div className="room-open-actions"><button className="icon-button" title="Abrir cronómetro" onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button><button className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button></div></div><div className="assign-grid"><label>Equipo a favor<select value={room.teamFavorId} onChange={(event) => updateRoom(room.id, { teamFavorId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label><label>Equipo en contra<select value={room.teamContraId} onChange={(event) => updateRoom(room.id, { teamContraId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label></div><div className="judges-select"><b>Jueces asignados</b><div className="check-grid">{data.judges.filter((judge) => judge.active || room.judgeIds.includes(judge.id)).map((judge) => <label key={judge.id} className="check-item"><input type="checkbox" checked={room.judgeIds.includes(judge.id)} onChange={(event) => updateRoom(room.id, { judgeIds: event.target.checked ? [...room.judgeIds, judge.id] : room.judgeIds.filter((id) => id !== judge.id) })} />{judge.name}{judge.active ? '' : ' · Inactivo'}</label>)}</div></div><div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div></section>)}</div>{rooms.length === 0 && <Empty text="Añade una sala a esta ronda para comenzar." />}</>}
 
@@ -353,17 +367,18 @@ function Stat({ label, value, icon }: { label: string; value: number; icon: Reac
 }
 function Empty({ text }: { text: string }) { return <div className="empty"><Monitor size={24} /><p>{text}</p></div>; }
 
-function RoomRow({ room, data, onOpen }: { room: Room; data: Tournament; onOpen: () => void }) {
+function RoomRow({ room, data, onOpen, now }: { room: Room; data: Tournament; onOpen: () => void; now: number }) {
   const favor = data.teams.find((team) => team.id === room.teamFavorId)?.name || 'Equipo pendiente';
   const contra = data.teams.find((team) => team.id === room.teamContraId)?.name || 'Equipo pendiente';
   const judges = room.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name).filter(Boolean);
   const title = room.timer.status === 'running' ? 'En curso' : room.timer.status === 'paused' ? 'Pausada' : room.timer.status === 'finished' ? 'Finalizada' : room.status === 'ready' ? 'Preparada' : 'Pendiente';
-  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer))}</strong>}<ChevronRight size={17} /></div></button>;
+  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer, now))}</strong>}<ChevronRight size={17} /></div></button>;
 }
 
-function RoomScreen({ snapshot, now, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected, lastSyncedAt }: {
+function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected, lastSyncedAt }: {
   snapshot: PublicRoom | null;
   now: number;
+  serverOffsetMs: number;
   error: string;
   onAction: (action: TimerAction) => void;
   onRetry: () => void;
@@ -375,7 +390,7 @@ function RoomScreen({ snapshot, now, error, onAction, onRetry, controllerEnabled
 }) {
   const room = snapshot?.room;
   const phase = room?.phases[room.timer.phaseIndex];
-  const left = room ? secondsLeft(room.timer, now) : 0;
+  const left = room ? secondsLeft(room.timer, now + serverOffsetMs) : 0;
   const pct = phase ? Math.max(0, Math.min(100, left / phase.durationSeconds * 100)) : 0;
   const ended = room?.timer.status === 'finished';
   const timedOut = room?.timer.status === 'running' && left <= 0;
