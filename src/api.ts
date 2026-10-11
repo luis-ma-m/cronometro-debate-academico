@@ -62,5 +62,40 @@ export const saveTournament = (token: string, expectedRevision: number, tourname
 export const getPublicRoom = (roomId: string) => apiCall<PublicRoom>('getPublicRoom', { roomId });
 export const getRoomControllerToken = (token: string, roomId: string, rotate = false) =>
   apiCall<{ token: string }>('getRoomControllerToken', { token, roomId, rotate });
-export const updateTimer = (roomId: string, action: TimerAction, expectedRevision: number, controlKey?: string) =>
-  apiCall<PublicRoom>('updateRoomTimer', { roomId, action, expectedRevision, controlKey });
+export interface PendingDebate {
+  assignmentId: string;
+  physicalRoomId: string;
+  roomName: string;
+  teamFavor: string;
+  teamContra: string;
+  phaseName: string;
+  status: string;
+  statusLabel: string;
+  remainingSeconds: number;
+}
+
+export interface RoundActivationPreview {
+  activeRoundId: string;
+  activeRoundName: string;
+  targetRoundId: string;
+  targetRoundName: string;
+  alreadyActive: boolean;
+  pending: PendingDebate[];
+  activationRevision: number;
+  serverTime: number;
+}
+
+export const getRoundActivationPreview = (token: string, roundId: string) =>
+  apiCall<RoundActivationPreview>('getRoundActivationPreview', { token, roundId });
+export const activateRound = (token: string, roundId: string, force = false) =>
+  apiCall<Tournament>('activateRound', { token, roundId, force });
+export const updateTimer = (
+  roomId: string,
+  action: TimerAction,
+  expectedRevision: number,
+  controlKey?: string,
+  assignmentId?: string,
+  expectedActivationRevision?: number,
+) => apiCall<PublicRoom>('updateRoomTimer', {
+  roomId, action, expectedRevision, controlKey, assignmentId, expectedActivationRevision,
+});
