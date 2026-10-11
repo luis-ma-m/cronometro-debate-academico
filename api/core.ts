@@ -1,4 +1,4 @@
-import type { Phase, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
+import type { FormatPreset, Phase, PhysicalRoom, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
 
 export const DEFAULT_SPREADSHEET_ID = "1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI";
@@ -6,10 +6,12 @@ export const SESSION_TTL_SECONDS = 8 * 60 * 60;
 
 export const SHEET_HEADERS = {
   Config: ["key", "value"],
-  Rondas: ["id", "number", "name", "active"],
+  Rondas: ["id", "number", "name", "active", "defaultFormatId"],
   Equipos: ["id", "name", "institution", "active"],
   Jueces: ["id", "name", "institution", "active"],
-  Salas: ["id", "name", "roundId", "teamFavorId", "teamContraId", "judgeIds", "status", "phases", "notes", "updatedAt"],
+  Salas: ["id", "name", "roundId", "teamFavorId", "teamContraId", "judgeIds", "status", "phases", "notes", "updatedAt", "physicalRoomId", "formatId"],
+  SalasFisicas: ["id", "slug", "name", "active", "createdAt", "updatedAt"],
+  Formatos: ["id", "name", "phases", "version", "createdAt", "updatedAt"],
   Cronometros: ["roomId", "status", "phaseIndex", "remainingSeconds", "startedAt", "lastResumedAt", "revision", "updatedAt"],
   Registro: ["event_id", "timestamp_utc", "room_round_id", "round_id", "room_id", "phase_index", "event_type", "elapsed_seconds", "details"],
 } as const;
@@ -172,7 +174,8 @@ export function validatePhases(phases: unknown): asserts phases is Phase[] {
 export function validateTournamentInput(value: unknown): asserts value is Tournament {
   const tournament = value as Tournament;
   if (!tournament || !Array.isArray(tournament.rooms) || !Array.isArray(tournament.teams) ||
-      !Array.isArray(tournament.judges) || !Array.isArray(tournament.rounds)) {
+      !Array.isArray(tournament.judges) || !Array.isArray(tournament.rounds) ||
+      !Array.isArray(tournament.physicalRooms) || !Array.isArray(tournament.formats)) {
     throw new ApiError("INVALID_PAYLOAD", "Estructura del torneo inválida.");
   }
   if (typeof tournament.tournamentName !== "string" || tournament.tournamentName.length > 200) {
@@ -192,6 +195,25 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
   assertUniqueRecords(tournament.rounds, "Las rondas");
   assertUniqueRecords(tournament.teams, "Los equipos");
   assertUniqueRecords(tournament.judges, "Los jueces");
+  assertUniqueRecords(tournament.formats, "Los formatos");
+  const physicalIds = new Set<string>();
+  const physicalSlugs = new Set<string>();
+  for (const physical of tournament.physicalRooms) {
+    const id = str(physical?.id).trim();
+    const slug = str(physical?.slug).trim().toLocaleLowerCase("es-ES");
+    const name = str(physical?.name).trim();
+    if (!id || !name || !slug || name.length > 200 || id.length > 100 || slug.length > 100 ||
+        physicalIds.has(id) || physicalSlugs.has(slug) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      throw new ApiError("INVALID_PHYSICAL_ROOM", "Las salas físicas deben tener nombres e identificadores únicos y un enlace válido.");
+    }
+    physicalIds.add(id);
+    physicalSlugs.add(slug);
+  }
+  const formatIds = new Set(tournament.formats.map((format) => str(format.id)));
+  for (const format of tournament.formats) validatePhases(format.phases);
+  if (!Number.isFinite(Number(tournament.activationRevision)) || Number(tournament.activationRevision) < 0) {
+    throw new ApiError("INVALID_ACTIVATION", "La revisión de activación no es válida.");
+  }
 
   if (tournament.institutions !== undefined) {
     if (!Array.isArray(tournament.institutions)) {
@@ -215,16 +237,27 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
   }
 
   const rounds = new Set(tournament.rounds.map((item) => str(item.id)).filter(Boolean));
+  for (const round of tournament.rounds) {
+    if (round.defaultFormatId && !formatIds.has(str(round.defaultFormatId))) {
+      throw new ApiError("INVALID_FORMAT", "La ronda " + str(round.name) + " referencia un formato inexistente.");
+    }
+  }
   const teamIds = new Set(tournament.teams.map((item) => str(item.id)).filter(Boolean));
   const judgeIds = new Set(tournament.judges.map((item) => str(item.id)).filter(Boolean));
   const teamBookings = new Set<string>();
   const judgeBookings = new Set<string>();
+  const physicalRoundBookings = new Set<string>();
   const roomIds = new Set<string>();
 
   for (const room of tournament.rooms) {
     if (!room || !str(room.id) || roomIds.has(str(room.id))) throw new ApiError("INVALID_ASSIGNMENT", "Las salas deben tener identificadores únicos.");
     roomIds.add(str(room.id));
     if (!rounds.has(str(room.roundId))) throw new ApiError("INVALID_ASSIGNMENT", "La sala " + str(room.name) + " tiene una ronda inexistente.");
+    if (!physicalIds.has(str(room.physicalRoomId))) throw new ApiError("INVALID_ASSIGNMENT", "La asignación " + str(room.name) + " no tiene una sala física válida.");
+    if (room.formatId && !formatIds.has(str(room.formatId))) throw new ApiError("INVALID_FORMAT", "La sala " + str(room.name) + " referencia un formato inexistente.");
+    const physicalRoundKey = str(room.physicalRoomId) + ":" + str(room.roundId);
+    if (physicalRoundBookings.has(physicalRoundKey)) throw new ApiError("DUPLICATE_ROOM_ASSIGNMENT", "Una sala física no puede tener dos asignaciones en la misma ronda.");
+    physicalRoundBookings.add(physicalRoundKey);
     if (room.teamFavorId && room.teamFavorId === room.teamContraId) throw new ApiError("INVALID_ASSIGNMENT", "Un equipo no puede debatir contra sí mismo.");
     for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
       if (!teamIds.has(str(teamId))) throw new ApiError("INVALID_ASSIGNMENT", "Una sala contiene un equipo inexistente.");
@@ -272,22 +305,51 @@ export function publicRoomData(room: Room): Omit<Room, "notes"> {
   return safeRoom as Omit<Room, "notes">;
 }
 
-export function publicRoomPayload(tournament: Tournament, roomId: string): PublicRoom {
-  if (!roomId) throw new ApiError("INVALID_ROOM", "Falta el identificador de sala.");
-  const room = tournament.rooms.find((item) => item.id.toLowerCase() === roomId.toLowerCase());
-  if (!room) throw new ApiError("ROOM_NOT_FOUND", "No se encuentra esa sala.", 404);
-  const round = tournament.rounds.find((item) => item.id === room.roundId);
+export function publicRoomPayload(tournament: Tournament, roomSlug: string): PublicRoom {
+  if (!roomSlug) throw new ApiError("INVALID_ROOM", "Falta el identificador de sala.");
+  const physical = tournament.physicalRooms.find((item) =>
+    item.slug.toLocaleLowerCase("es-ES") === roomSlug.toLocaleLowerCase("es-ES") ||
+    item.id.toLocaleLowerCase("es-ES") === roomSlug.toLocaleLowerCase("es-ES"));
+  if (!physical) throw new ApiError("ROOM_NOT_FOUND", "No se encuentra esa sala física.", 404);
+  const activeRoundId = tournament.activeRoundId || tournament.rounds.find((item) => item.active)?.id || "";
+  const round = tournament.rounds.find((item) => item.id === activeRoundId);
+  const assignment = tournament.rooms.find((item) => item.physicalRoomId === physical.id && item.roundId === activeRoundId);
+  const phases = assignment?.phases?.length
+    ? assignment.phases
+    : tournament.formats.find((item) => item.id === round?.defaultFormatId)?.phases ?? tournament.formatPhases ?? defaultPhases();
+  const now = Date.now();
+  const room: Room = assignment ? assignment : {
+    id: "unassigned-" + physical.id,
+    name: physical.name,
+    roundId: activeRoundId,
+    physicalRoomId: physical.id,
+    formatId: round?.defaultFormatId ?? "",
+    teamFavorId: "",
+    teamContraId: "",
+    judgeIds: [],
+    status: "unassigned",
+    phases,
+    timer: initialTimer(phases),
+    notes: "",
+    updatedAt: now,
+  };
   const favor = tournament.teams.find((item) => item.id === room.teamFavorId);
   const contra = tournament.teams.find((item) => item.id === room.teamContraId);
   const judges = room.judgeIds.map((id) => tournament.judges.find((item) => item.id === id)?.name ?? "").filter(Boolean);
   return {
     tournamentName: tournament.tournamentName,
-    roundName: round?.name ?? "",
+    roundName: round?.name ?? "Sin ronda activa",
     room: publicRoomData(room) as Room,
+    hasAssignment: Boolean(assignment),
+    physicalRoomId: physical.id,
+    roomSlug: physical.slug,
+    physicalRoomName: physical.name,
+    activationRevision: tournament.activationRevision ?? 0,
+    activatedAt: tournament.activatedAt ?? 0,
     teamFavor: favor?.name ?? "",
     teamContra: contra?.name ?? "",
     judges,
     minimumJudgesPerRoom: tournament.minimumJudgesPerRoom,
-    serverTime: Date.now(),
+    serverTime: now,
   };
 }
