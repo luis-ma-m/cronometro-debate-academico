@@ -181,6 +181,11 @@ export default function App() {
   useEffect(() => {
     if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
   }, [data.rounds, selectedRound]);
+  useEffect(() => {
+    if (!selectedFormatId || !data.formats.some((format) => format.id === selectedFormatId)) {
+      setSelectedFormatId(data.formats[0]?.id ?? '');
+    }
+  }, [data.formats, selectedFormatId]);
 
   const updateData = (updater: (current: Tournament) => Tournament) => {
     setPreparedRoomLink(null);
@@ -509,43 +514,194 @@ export default function App() {
     }));
   };
 
-  const configuredPhases = resolvePhases(data.formatPhases, data.rooms);
+  const selectedPreset = data.formats.find((format) => format.id === selectedFormatId) ?? data.formats[0];
+  const editingFormatId = selectedPreset?.id ?? '';
+  const configuredPhases = selectedPreset?.phases?.length ? selectedPreset.phases : resolvePhases(data.formatPhases, data.rooms);
   const updatePhase = (id: string, patch: Partial<Phase>) => {
     setFormatDirty(true);
-    updateData((current) => {
-      const phases = resolvePhases(current.formatPhases, current.rooms);
-      return { ...current, formatPhases: phases.map((phase) => phase.id === id ? { ...phase, ...patch } : phase) };
-    });
+    updateData((current) => ({
+      ...current,
+      formats: current.formats.map((format) => format.id === editingFormatId
+        ? { ...format, phases: format.phases.map((phase) => phase.id === id ? { ...phase, ...patch } : phase), version: format.version + 1, updatedAt: Date.now() }
+        : format),
+    }));
   };
   const movePhase = (index: number, offset: number) => {
     const nextIndex = index + offset;
-    if (nextIndex < 0 || nextIndex >= configuredPhases.length) return;
+    if (nextIndex < 0 || nextIndex >= configuredPhases.length || !selectedPreset) return;
     setFormatDirty(true);
-    updateData((current) => {
-      const phases = [...(current.formatPhases?.length ? current.formatPhases : configuredPhases)];
-      [phases[index], phases[nextIndex]] = [phases[nextIndex], phases[index]];
-      return { ...current, formatPhases: phases };
-    });
+    updateData((current) => ({
+      ...current,
+      formats: current.formats.map((format) => {
+        if (format.id !== editingFormatId) return format;
+        const phases = [...format.phases];
+        [phases[index], phases[nextIndex]] = [phases[nextIndex], phases[index]];
+        return { ...format, phases, version: format.version + 1, updatedAt: Date.now() };
+      }),
+    }));
   };
   const addPhase = () => {
+    if (!selectedPreset) return;
     setFormatDirty(true);
-    updateData((current) => {
-      const phases = current.formatPhases?.length ? current.formatPhases : configuredPhases;
-      const phase: Phase = { id: makeId('p'), name: 'Nueva intervención', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'other', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true };
-      return { ...current, formatPhases: [...phases, phase] };
-    });
+    updateData((current) => ({
+      ...current,
+      formats: current.formats.map((format) => format.id === editingFormatId
+        ? { ...format, phases: [...format.phases, { id: makeId('p'), name: 'Nueva intervención', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'other', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true }], version: format.version + 1, updatedAt: Date.now() }
+        : format),
+    }));
   };
   const removePhase = (id: string) => {
     if (configuredPhases.length <= 1) { setServerError('El formato debe tener al menos una intervención.'); return; }
     setFormatDirty(true);
-    updateData((current) => ({ ...current, formatPhases: (current.formatPhases ?? configuredPhases).filter((phase) => phase.id !== id) }));
+    updateData((current) => ({
+      ...current,
+      formats: current.formats.map((format) => format.id === editingFormatId
+        ? { ...format, phases: format.phases.filter((phase) => phase.id !== id), version: format.version + 1, updatedAt: Date.now() }
+        : format),
+    }));
   };
-  const markRoundActive = (roundId: string) => updateData((current) => ({ ...current, rounds: current.rounds.map((round) => ({ ...round, active: round.id === roundId })) }));
-  const renameSelectedRound = () => {
-    const round = data.rounds.find((item) => item.id === activeRound);
-    if (!round) return;
-    const name = window.prompt('Nombre de la ronda', round.name);
-    if (name?.trim()) updateData((current) => ({ ...current, rounds: current.rounds.map((item) => item.id === round.id ? { ...item, name: name.trim() } : item) }));
+  const addFormat = () => {
+    const name = window.prompt('Nombre del nuevo formato de debate', 'Nuevo formato');
+    if (!name?.trim()) return;
+    if (data.formats.some((format) => format.name.trim().toLocaleLowerCase('es-ES') === name.trim().toLocaleLowerCase('es-ES'))) {
+      setServerError('Ya existe un formato con ese nombre.');
+      return;
+    }
+    const timestamp = Date.now();
+    const format: FormatPreset = {
+      id: makeId('format'), name: name.trim(), phases: configuredPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
+      version: 1, createdAt: timestamp, updatedAt: timestamp,
+    };
+    updateData((current) => ({ ...current, formats: [...current.formats, format] }));
+    setSelectedFormatId(format.id);
+    setFormatDirty(false);
+    setThresholdDrafts({});
+    setServerError('');
+  };
+  const renameSelectedFormat = () => {
+    if (!selectedPreset) return;
+    const name = window.prompt('Nombre del formato', selectedPreset.name);
+    if (!name?.trim()) return;
+    if (data.formats.some((format) => format.id !== selectedPreset.id && format.name.trim().toLocaleLowerCase('es-ES') === name.trim().toLocaleLowerCase('es-ES'))) {
+      setServerError('Ya existe otro formato con ese nombre.');
+      return;
+    }
+    updateData((current) => ({ ...current, formats: current.formats.map((format) => format.id === selectedPreset.id ? { ...format, name: name.trim(), version: format.version + 1, updatedAt: Date.now() } : format) }));
+    setServerError('');
+  };
+  const removeSelectedFormat = () => {
+    if (!selectedPreset) return;
+    if (data.formats.length <= 1) { setServerError('El torneo debe conservar al menos un formato.'); return; }
+    const fallback = data.formats.find((format) => format.id !== selectedPreset.id);
+    if (!fallback) return;
+    const referenceCount = data.rounds.filter((round) => round.defaultFormatId === selectedPreset.id).length
+      + data.rooms.filter((room) => room.formatId === selectedPreset.id).length;
+    if (!window.confirm('¿Eliminar el formato "' + selectedPreset.name + '"?' + (referenceCount ? ' Se sustituirán ' + referenceCount + ' referencia(s) por el formato "' + fallback.name + '". Los debates ya configurados conservarán su copia de fases hasta la próxima activación.' : ' Los debates ya configurados conservarán su copia de fases.') )) return;
+    updateData((current) => ({
+      ...current,
+      formats: current.formats.filter((format) => format.id !== selectedPreset.id),
+      rounds: current.rounds.map((round) => round.defaultFormatId === selectedPreset.id ? { ...round, defaultFormatId: fallback.id } : round),
+      rooms: current.rooms.map((room) => room.formatId === selectedPreset.id ? { ...room, formatId: '' } : room),
+      formatPhases: current.formatPhases,
+    }));
+    setSelectedFormatId(fallback.id);
+    setFormatDirty(false);
+    setThresholdDrafts({});
+    setServerError('');
+  };
+  const setRoundFormat = (roundId: string, formatId: string) => {
+    updateData((current) => ({ ...current, rounds: current.rounds.map((round) => round.id === roundId ? { ...round, defaultFormatId: formatId } : round) }));
+  };
+  const requestRoundActivation = async (roundId: string) => {
+    setServerError('');
+    try {
+      if (hasUnsavedRef.current) {
+        const saved = await persist();
+        if (!saved) return;
+      }
+      let preview: RoundActivationPreview;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        preview = await getRoundActivationPreview(session.token, roundId);
+      } else {
+        const target = data.rounds.find((round) => round.id === roundId);
+        if (!target) throw new Error('No se encuentra la ronda seleccionada.');
+        const activeId = data.activeRoundId || data.rounds.find((round) => round.active)?.id || '';
+        const pending = data.rooms.filter((room) => room.roundId === activeId && (room.teamFavorId || room.teamContraId) && room.timer.status !== 'finished').map((room) => ({
+          assignmentId: room.id,
+          physicalRoomId: room.physicalRoomId,
+          roomName: data.physicalRooms.find((physical) => physical.id === room.physicalRoomId)?.name ?? room.name,
+          teamFavor: data.teams.find((team) => team.id === room.teamFavorId)?.name ?? 'Equipo sin asignar',
+          teamContra: data.teams.find((team) => team.id === room.teamContraId)?.name ?? 'Equipo sin asignar',
+          phaseName: room.phases[room.timer.phaseIndex]?.name ?? 'Sin fase',
+          status: room.timer.status,
+          statusLabel: room.timer.status === 'running' ? 'en marcha' : room.timer.status === 'paused' ? 'pausado' : 'preparado/sin iniciar',
+          remainingSeconds: secondsLeft(room.timer, Date.now()),
+        }));
+        preview = {
+          activeRoundId: activeId,
+          activeRoundName: data.rounds.find((round) => round.id === activeId)?.name ?? 'Ninguna',
+          targetRoundId: target.id,
+          targetRoundName: target.name,
+          alreadyActive: activeId === target.id,
+          pending,
+          activationRevision: data.activationRevision,
+          serverTime: Date.now(),
+        };
+      }
+      if (preview.alreadyActive) { setServerError('Esa ronda ya está activa.'); return; }
+      setActivationPreview(preview);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se ha podido preparar la activación de la ronda.');
+    }
+  };
+  const confirmRoundActivation = async (force: boolean) => {
+    const preview = activationPreview;
+    if (!preview || activatingRound) return;
+    setActivatingRound(true);
+    setServerError('');
+    try {
+      let saved: Tournament;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        saved = await apiActivateRound(session.token, preview.targetRoundId, force);
+      } else {
+        const target = data.rounds.find((round) => round.id === preview.targetRoundId);
+        if (!target) throw new Error('No se encuentra la ronda seleccionada.');
+        const now = Date.now();
+        const rooms = data.rooms.map((room) => {
+          if (room.roundId === target.id) {
+            const format = data.formats.find((item) => item.id === (room.formatId || target.defaultFormatId)) ?? data.formats[0];
+            const phases = (format?.phases?.length ? format.phases : room.phases).map((phase) => ({ ...phase }));
+            return withRoomStatus({ ...room, phases, timer: { ...createTimer(phases), revision: room.timer.revision + 1, updatedAt: now }, updatedAt: now }, data.minimumJudgesPerRoom ?? 1);
+          }
+          if (room.roundId === data.activeRoundId && room.timer.status !== 'finished') {
+            const timer = room.timer.status === 'running'
+              ? transitionTimer(room.timer, room.phases, 'pause')
+              : room.timer.status === 'paused' ? { ...room.timer, revision: room.timer.revision + 1, updatedAt: now } : room.timer;
+            return withRoomStatus({ ...room, timer, updatedAt: now }, data.minimumJudgesPerRoom ?? 1);
+          }
+          return room;
+        });
+        saved = { ...data, activeRoundId: target.id, activationRevision: data.activationRevision + 1, activatedAt: now,
+          rounds: data.rounds.map((round) => ({ ...round, active: round.id === target.id })), rooms,
+          revision: data.revision + 1, updatedAt: now };
+        writeDemo(saved);
+      }
+      setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
+      setFormatDirty(false);
+      setRoomFormatMismatch(false);
+      setSelectedRound(preview.targetRoundId);
+      setActivationPreview(null);
+      setLastSyncedAt(Date.now());
+      setConnected(true);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se ha podido activar la ronda.');
+    } finally {
+      setActivatingRound(false);
+    }
   };
   const assignmentWarnings = validateAssignments(data);
   const hasLiveTimer = data.rooms.some((room) => room.timer.status === 'running' || room.timer.status === 'paused');
