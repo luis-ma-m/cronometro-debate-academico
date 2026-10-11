@@ -86,7 +86,6 @@ export default function App() {
         const fresh = await getTournament(session.token);
         const responseReceivedAt = Date.now();
         if (typeof fresh.serverTime === 'number') setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
-        if (!selectedFormatId && fresh.formats?.length) setSelectedFormatId(fresh.formats[0].id);
         setData((current) => {
           if (!hasUnsavedRef.current) return fresh;
           const refreshedRooms = fresh.rooms.map((remote) => {
