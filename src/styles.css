@@ -3,7 +3,7 @@
 
 /* Functional polish: connection, format editor and enhanced room controls */
 .live-status i.disconnected,.public-pill i.disconnected{background:#d49b36;box-shadow:0 0 0 3px #d49b361c}
-.warning-notice{background:#fff7e7;color:#885b13;border:1px solid #f3dfb8}
+.warning-notice{background:#fff7e7;color:#885b13;border:1px solid #f3dfb8}.room-link-ready{flex-wrap:wrap}.room-link-ready .button{margin-left:auto}
 .warning-notice svg{flex-shrink:0}
 .settings-panel{padding:24px}
 .settings-name{display:grid;gap:8px;max-width:620px;color:#58657a;font-size:12px;font-weight:700}
