@@ -53,6 +53,7 @@ function doPost(e) {
 function dispatch_(action, p) {
   switch (action) {
     case 'login': return login_(p);
+    case 'logout': return logout_(p);
     case 'getTournament': requireSession_(p.token); return readTournament_();
     case 'getPublicRoom': return getPublicRoom_(String(p.roomId || ''));
     case 'getRoomControllerToken': return getRoomControllerToken_(p);
@@ -69,6 +70,11 @@ function login_(p) {
   const token = Utilities.getUuid() + Utilities.getUuid();
   CacheService.getScriptCache().put('session:' + token, '1', SESSION_TTL_SECONDS);
   return { token: token, expiresAt: Date.now() + SESSION_TTL_SECONDS * 1000 };
+}
+
+function logout_(p) {
+  if (p && p.token) CacheService.getScriptCache().remove('session:' + String(p.token));
+  return { loggedOut: true };
 }
 
 function requireSession_(token) {
