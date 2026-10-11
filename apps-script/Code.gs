@@ -13,7 +13,8 @@ const SHEETS = {
   Equipos: ['id', 'name', 'institution', 'active'],
   Jueces: ['id', 'name', 'institution', 'active'],
   Salas: ['id', 'name', 'roundId', 'teamFavorId', 'teamContraId', 'judgeIds', 'status', 'phases', 'notes', 'updatedAt'],
-  Cronometros: ['roomId', 'status', 'phaseIndex', 'remainingSeconds', 'startedAt', 'lastResumedAt', 'revision', 'updatedAt']
+  Cronometros: ['roomId', 'status', 'phaseIndex', 'remainingSeconds', 'startedAt', 'lastResumedAt', 'revision', 'updatedAt'],
+  Registro: ['event_id', 'timestamp_utc', 'room_round_id', 'round_id', 'room_id', 'phase_index', 'event_type', 'elapsed_seconds', 'details']
 };
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 
@@ -54,6 +55,7 @@ function dispatch_(action, p) {
     case 'login': return login_(p);
     case 'getTournament': requireSession_(p.token); return readTournament_();
     case 'getPublicRoom': return getPublicRoom_(String(p.roomId || ''));
+    case 'getRoomControllerToken': return getRoomControllerToken_(p);
     case 'saveTournament': requireSession_(p.token); return saveTournament_(p);
     case 'updateRoomTimer': return updateRoomTimer_(p);
     default: throw apiError_('UNKNOWN_ACTION', 'Acción no reconocida.');
@@ -101,6 +103,7 @@ function readTournament_() {
   return {
     tournamentName: str_(configValue_(config, 'tournamentName')) || 'Torneo LEDU',
     rounds: rounds, teams: teams, judges: judges, rooms: rooms,
+    formatPhases: parseJson_(configValue_(config, 'formatPhases'), defaultPhases_()),
     revision: num_(configValue_(config, 'revision')) || 1,
     updatedAt: num_(configValue_(config, 'updatedAt')) || Date.now()
   };
@@ -109,7 +112,7 @@ function readTournament_() {
 function getPublicRoom_(roomId) {
   if (!roomId) throw apiError_('INVALID_ROOM', 'Falta el identificador de sala.');
   const tournament = readTournament_();
-  const room = tournament.rooms.find(function (r) { return r.id === roomId; });
+  const room = tournament.rooms.find(function (r) { return r.id.toLowerCase() === roomId.toLowerCase(); });
   if (!room) throw apiError_('ROOM_NOT_FOUND', 'No se encuentra esa sala.');
   const round = tournament.rounds.find(function (r) { return r.id === room.roundId; });
   const favor = tournament.teams.find(function (t) { return t.id === room.teamFavorId; });
@@ -118,11 +121,35 @@ function getPublicRoom_(roomId) {
     const judge = tournament.judges.find(function (j) { return j.id === id; });
     return judge ? judge.name : '';
   }).filter(Boolean);
-  return {
-    tournamentName: tournament.tournamentName, roundName: round ? round.name : '',
-    room: room, teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '',
-    judges: judges, serverTime: Date.now()
-  };
+  return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '',
+    room: publicRoomData_(room), teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '',
+    judges: judges, serverTime: Date.now() };
+}
+
+function publicRoomData_(room) {
+  return { id: room.id, name: room.name, roundId: room.roundId, teamFavorId: room.teamFavorId,
+    teamContraId: room.teamContraId, judgeIds: room.judgeIds, status: room.status,
+    phases: room.phases, timer: room.timer, updatedAt: room.updatedAt };
+}
+
+function getRoomControllerToken_(p) {
+  requireSession_(p.token);
+  const roomId = str_(p.roomId);
+  if (!roomId) throw apiError_('INVALID_ROOM', 'Falta el identificador de sala.');
+  const row = readObjects_('Salas').find(function (item) { return str_(item.id).toLowerCase() === roomId.toLowerCase(); });
+  if (!row) throw apiError_('ROOM_NOT_FOUND', 'Guarda primero los cambios de esa sala.');
+  const key = roomControlPropertyKey_(str_(row.id));
+  const properties = PropertiesService.getScriptProperties();
+  let token = properties.getProperty(key);
+  if (!token || p.rotate === true || String(p.rotate).toLowerCase() === 'true') {
+    token = Utilities.getUuid() + Utilities.getUuid();
+    properties.setProperty(key, token);
+  }
+  return { token: token };
+}
+
+function roomControlPropertyKey_(roomId) {
+  return 'ROOM_CONTROL_TOKEN_' + String(roomId).replace(/[^a-zA-Z0-9_-]/g, '_');
 }
 
 function saveTournament_(p) {
@@ -139,6 +166,8 @@ function saveTournament_(p) {
       throw apiError_('REVISION_CONFLICT', 'El torneo cambió en otro dispositivo. Actualiza los datos antes de guardar.');
     }
     validateAssignments_(input);
+    const formatPhases = Array.isArray(input.formatPhases) && input.formatPhases.length ? input.formatPhases : (input.rooms[0].phases || defaultPhases_());
+    validatePhases_(formatPhases);
     writeObjects_('Rondas', input.rounds.map(function (r) { return { id: r.id, number: r.number, name: r.name, active: r.active }; }));
     writeObjects_('Equipos', input.teams.map(function (t) { return { id: t.id, name: t.name, institution: t.institution, active: t.active }; }));
     writeObjects_('Jueces', input.judges.map(function (j) { return { id: j.id, name: j.name, institution: j.institution, active: j.active }; }));
@@ -160,6 +189,7 @@ function saveTournament_(p) {
     }));
     const nextRevision = currentRevision + 1;
     setConfig_('tournamentName', input.tournamentName || 'Torneo LEDU');
+    setConfig_('formatPhases', JSON.stringify(formatPhases));
     setConfig_('revision', String(nextRevision));
     setConfig_('updatedAt', String(Date.now()));
     SpreadsheetApp.flush();
@@ -267,6 +297,7 @@ function setupSheets_() {
       { key: 'updatedAt', value: String(Date.now()) }
     ]);
   }
+  if (!configValue_(readObjects_('Config'), 'formatPhases')) setConfig_('formatPhases', JSON.stringify(defaultPhases_()));
 
   // Bootstrap a usable first round and empty rooms only on a brand-new sheet.
   if (readObjects_('Rondas').length === 0) {
