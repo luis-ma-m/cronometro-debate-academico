@@ -242,7 +242,7 @@ function publicRoomFromTournament_(roomId, tournament) {
   const favor = tournament.teams.find(function (t) { return t.id === room.teamFavorId; });
   const contra = tournament.teams.find(function (t) { return t.id === room.teamContraId; });
   const judges = room.judgeIds.map(function (id) { const item = tournament.judges.find(function (j) { return j.id === id; }); return item ? item.name : ''; }).filter(Boolean);
-  return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '', room: room, teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '', judges: judges, serverTime: Date.now() };
+  return { tournamentName: tournament.tournamentName, roundName: round ? round.name : '', room: publicRoomData_(room), teamFavor: favor ? favor.name : '', teamContra: contra ? contra.name : '', judges: judges, serverTime: Date.now() };
 }
 
 function validateAssignments_(t) {
@@ -417,30 +417,34 @@ function initialTimer_(phases) {
     startedAt: null, lastResumedAt: null, revision: 0, updatedAt: Date.now() };
 }
 function remaining_(timer, now) {
-  if (timer.status !== 'running' || timer.lastResumedAt === null) return Math.max(0, timer.remainingSeconds);
-  return Math.max(0, timer.remainingSeconds - Math.floor((now - timer.lastResumedAt) / 1000));
+  if (timer.status !== 'running' || timer.lastResumedAt === null) return num_(timer.remainingSeconds);
+  return num_(timer.remainingSeconds) - Math.floor((now - timer.lastResumedAt) / 1000);
 }
 function transitionTimer_(timer, phases, action, now) {
   const phase = phases[timer.phaseIndex];
+  if (action === 'finish') {
+    if (timer.status === 'finished') return timer;
+    return Object.assign({}, timer, { status: 'finished', remainingSeconds: 0, lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
+  }
   if (action === 'reset') {
-    const fresh = initialTimer_(phases);
-    fresh.updatedAt = now;
-    fresh.revision = timer.revision + 1;
-    return fresh;
+    if (!phase) return timer;
+    return Object.assign({}, timer, { status: 'idle', remainingSeconds: num_(phase.durationSeconds), startedAt: null, lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
   }
   if (action === 'start') {
     if (timer.status === 'running' || timer.status === 'finished' || !phase) return timer;
-    const rest = timer.status === 'paused' ? remaining_(timer, now) : (timer.remainingSeconds || num_(phase.durationSeconds));
-    return Object.assign({}, timer, { status: 'running', remainingSeconds: rest, startedAt: timer.startedAt || now, lastResumedAt: now, revision: timer.revision + 1, updatedAt: now });
+    return Object.assign({}, timer, { status: 'running', startedAt: timer.startedAt || now, lastResumedAt: now, revision: timer.revision + 1, updatedAt: now });
   }
   if (action === 'pause') {
     if (timer.status !== 'running') return timer;
     return Object.assign({}, timer, { status: 'paused', remainingSeconds: remaining_(timer, now), lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
   }
-  const index = timer.phaseIndex + 1;
+  if (timer.status === 'finished') return timer;
+  const index = action === 'previous' ? timer.phaseIndex - 1 : timer.phaseIndex + 1;
+  if (index < 0) return timer;
   if (index >= phases.length) return Object.assign({}, timer, { status: 'finished', remainingSeconds: 0, lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
   return Object.assign({}, timer, { status: 'idle', phaseIndex: index, remainingSeconds: num_(phases[index].durationSeconds), startedAt: null, lastResumedAt: null, revision: timer.revision + 1, updatedAt: now });
 }
+
 function constantTimeEquals_(a, b) {
   if (a.length !== b.length) return false;
   let result = 0;
