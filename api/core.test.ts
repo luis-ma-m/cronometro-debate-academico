@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FormatPreset, PhysicalRoom, Room, Tournament } from "../src/domain.js";
+import type { Room, Tournament } from "../src/domain.js";
 import {
   ApiError,
   defaultPhases,
@@ -40,7 +40,7 @@ function makeTournament(): Tournament {
     judges: [{ id: "j1", name: "Juez 1", institution: "LEDU", active: true }],
     rooms: [room],
     physicalRooms: [{ id: "physical-a1", slug: "sala-a1", name: "Sala A1", active: true, createdAt: now, updatedAt: now }],
-    formats: [{ id: "format-ledu", name: "LEDU", phases, version: 1, createdAt: now, updatedAt: now }] as FormatPreset[],
+    formats: [{ id: "format-ledu", name: "LEDU", phases, version: 1, createdAt: now, updatedAt: now }],
     activeRoundId: "r1",
     activationRevision: 1,
     activatedAt: now - 30_000,
