@@ -493,29 +493,17 @@ async function requireSession(tokenValue: unknown): Promise<void> {
 
 async function roomControllerToken(p: Record<string, unknown>): Promise<{ token: string }> {
   await requireSession(p.token);
-  const tournament = tournamentFromData(await loadSheetData());
-  const room = tournament.rooms.find((item) => item.id.toLowerCase() === str(p.roomId).toLowerCase());
-  if (!room) throw new ApiError("ROOM_NOT_FOUND", "Guarda primero los cambios de esa sala.", 404);
-  const key = "ledu:room-control:" + sha256(room.id);
-  return withLock("ledu:lock:room-control:" + sha256(room.id), async () => {
+  return withLock(WRITE_LOCK, async () => {
+    const tournament = tournamentFromData(await loadSheetData(true));
+    const room = tournament.rooms.find((item) => item.id.toLowerCase() === str(p.roomId).toLowerCase());
+    if (!room) throw new ApiError("ROOM_NOT_FOUND", "Guarda primero los cambios de esa sala.", 404);
+    const key = "ledu:room-control:" + sha256(room.id);
     const current = await redisCommand(["GET", key]);
     const rotate = p.rotate === true || String(p.rotate).toLowerCase() === "true";
-    if (typeof current === "string" && current && !rotate) {
-      // The token itself is never stored: Redis contains only its SHA-256 digest.
-      // A digest cannot be used as the original room-control key by the client.
-      return { token: "" };
-    }
+    if (typeof current === "string" && current && !rotate) return { token: current };
     const token = randomBytes(32).toString("hex");
-    await redisCommand(["SET", key, sha256(token)]);
+    await redisCommand(["SET", key, token]);
     return { token };
-  }).then(async (result) => {
-    if (result.token) return result;
-    // Existing keys cannot be recovered from the digest. Rotate once to issue a usable token.
-    return withLock("ledu:lock:room-control:" + sha256(room.id), async () => {
-      const token = randomBytes(32).toString("hex");
-      await redisCommand(["SET", key, sha256(token)]);
-      return { token };
-    });
   });
 }
 
@@ -644,7 +632,7 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
 
     const controlKey = str(payload.controlKey);
     const expectedDigest = await redisCommand(["GET", "ledu:room-control:" + sha256(room.id)]);
-    if (!controlKey || typeof expectedDigest !== "string" || !safeEquals(sha256(controlKey), expectedDigest)) {
+    if (!controlKey || typeof expectedDigest !== "string" || !safeEquals(controlKey, expectedDigest)) {
       throw new ApiError("UNAUTHORIZED", "Abre esta sala desde el panel de organización para controlar el cronómetro.", 401);
     }
     if (payload.expectedRevision === undefined || num(payload.expectedRevision) !== room.timer.revision) {
