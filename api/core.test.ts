@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Room, Tournament } from "../src/domain";
+import type { Room, Tournament } from "../src/domain.js";
 import {
   ApiError,
   defaultPhases,
@@ -10,7 +10,7 @@ import {
   rowsToValues,
   transitionTimer,
   validateTournamentInput,
-} from "./core";
+} from "./core.js";
 
 function makeTournament(): Tournament {
   const phases = defaultPhases();
