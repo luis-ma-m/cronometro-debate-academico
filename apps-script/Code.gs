@@ -232,6 +232,8 @@ function updateRoomTimer_(p) {
     const expectedKey = PropertiesService.getScriptProperties().getProperty(roomControlPropertyKey_(canonicalId));
     if (!expectedKey || !p.controlKey || !constantTimeEquals_(String(p.controlKey), expectedKey)) throw apiError_('UNAUTHORIZED', 'Abre esta sala desde el panel de organización para controlar el cronómetro.');
     const phases = parseJson_(row.phases, []);
+    if (action === 'start' && (!str_(row.teamFavorId) || !str_(row.teamContraId) || str_(row.teamFavorId) === str_(row.teamContraId) || !parseJson_(row.judgeIds, []).length)) throw apiError_('INVALID_ASSIGNMENT', 'Asigna dos equipos distintos y al menos un juez antes de iniciar.');
+    if (action === 'start') validatePhases_(phases);
     const stored = readObjects_('Cronometros').find(function (t) { return String(t.roomId) === canonicalId; });
     const timer = stored ? timerFromRow_(stored) : initialTimer_(phases);
     if (p.expectedRevision === undefined || num_(p.expectedRevision) !== timer.revision) throw apiError_('REVISION_CONFLICT', 'El cronómetro cambió en otro dispositivo. Actualiza el estado.');
