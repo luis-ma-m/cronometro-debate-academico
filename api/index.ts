@@ -269,7 +269,7 @@ async function ensureSchema(): Promise<SpreadsheetMetadata> {
       return migrateToPermanentRooms();
     });
   }
-  return migrateToPermanentRooms(metadata);
+  return migrateToPermanentRooms();
 }
 
 async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
