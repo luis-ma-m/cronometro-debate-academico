@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Activity, ArrowLeft, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, FileSpreadsheet, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ShieldCheck, Users, X } from 'lucide-react';
+import { Activity, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ShieldCheck, Users, X } from 'lucide-react';
 import type { Judge, PublicRoom, Room, Round, Team, Tournament } from './domain';
-import { apiCall, apiConfigured, getPublicRoom, getTournament, login, saveTournament, updateTimer } from './api';
+import { apiConfigured, getPublicRoom, getTournament, login, saveTournament, updateTimer } from './api';
 import { demoStorageKey, readDemo, writeDemo } from './demo';
 import { formatTime, secondsLeft, transitionTimer, withRoomStatus } from './timer';
 
