@@ -177,6 +177,8 @@ function saveTournament_(p) {
     validateAssignments_(input);
     const formatPhases = Array.isArray(input.formatPhases) && input.formatPhases.length ? input.formatPhases : (input.rooms[0] && input.rooms[0].phases || defaultPhases_());
     validatePhases_(formatPhases);
+    const minimumJudgesPerRoom = Number(input.minimumJudgesPerRoom === undefined ? 1 : input.minimumJudgesPerRoom);
+    if (!Number.isInteger(minimumJudgesPerRoom) || minimumJudgesPerRoom < 1 || minimumJudgesPerRoom > 25) throw apiError_('INVALID_CONFIGURATION', 'El mínimo de jueces por sala debe ser un número entre 1 y 25.');
     const previousFormat = parseJson_(configValue_(configRows, 'formatPhases'), defaultPhases_());
     const formatChanged = JSON.stringify(previousFormat) !== JSON.stringify(formatPhases);
     const previousRoomRows = readObjects_('Salas');
@@ -195,7 +197,7 @@ function saveTournament_(p) {
     writeObjects_('Salas', input.rooms.map(function (r) {
       return { id: r.id, name: r.name, roundId: r.roundId, teamFavorId: r.teamFavorId || '',
         teamContraId: r.teamContraId || '', judgeIds: JSON.stringify(r.judgeIds || []),
-        status: deriveRoomStatus_(r), phases: JSON.stringify(r.phases || []), notes: r.notes || '', updatedAt: Date.now() };
+        status: deriveRoomStatus_(r, minimumJudgesPerRoom), phases: JSON.stringify(r.phases || []), notes: r.notes || '', updatedAt: Date.now() };
     }));
     // Keep stored live timers for existing rooms; the management browser may
     // hold an older timer snapshot from its last poll.
@@ -220,6 +222,7 @@ function saveTournament_(p) {
     const nextRevision = currentRevision + 1;
     setConfig_('tournamentName', input.tournamentName || 'Torneo LEDU');
     setConfig_('formatPhases', JSON.stringify(formatPhases));
+    setConfig_('minimumJudgesPerRoom', String(minimumJudgesPerRoom));
     setConfig_('revision', String(nextRevision));
     setConfig_('updatedAt', String(Date.now()));
     SpreadsheetApp.flush();
