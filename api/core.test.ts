@@ -158,6 +158,22 @@ describe("Vercel API core", () => {
     expect(payload.judges).toEqual(["Juez 1"]);
   });
 
+  it("treats a pre-created but empty room row as unassigned on its permanent public link", () => {
+    const tournament = makeTournament();
+    tournament.rooms[0] = {
+      ...tournament.rooms[0],
+      teamFavorId: "",
+      teamContraId: "",
+      judgeIds: [],
+      status: "unassigned",
+    };
+    const payload = publicRoomPayload(tournament, "sala-a1");
+    expect(payload.hasAssignment).toBe(false);
+    expect(payload.teamFavor).toBe("");
+    expect(payload.teamContra).toBe("");
+    expect(payload.judges).toEqual([]);
+  });
+
   it("derives room readiness using the configured judge minimum", () => {
     const tournament = makeTournament();
     expect(deriveRoomStatus(tournament.rooms[0], 2)).toBe("unassigned");
