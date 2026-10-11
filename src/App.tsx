@@ -329,17 +329,102 @@ function RoomRow({ room, data, onOpen }: { room: Room; data: Tournament; onOpen:
   return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer))}</strong>}<ChevronRight size={17} /></div></button>;
 }
 
-function RoomScreen({ snapshot, now, error, onAction, onRetry }: { snapshot: PublicRoom | null; now: number; error: string; onAction: (action: 'start' | 'pause' | 'reset' | 'next') => void; onRetry: () => void }) {
+function RoomScreen({ snapshot, now, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected, lastSyncedAt }: {
+  snapshot: PublicRoom | null;
+  now: number;
+  error: string;
+  onAction: (action: TimerAction) => void;
+  onRetry: () => void;
+  controllerEnabled: boolean;
+  soundEnabled: boolean;
+  onToggleSound: () => void;
+  connected: boolean;
+  lastSyncedAt: number | null;
+}) {
   const room = snapshot?.room;
   const phase = room?.phases[room.timer.phaseIndex];
   const left = room ? secondsLeft(room.timer, now) : 0;
   const pct = phase ? Math.max(0, Math.min(100, left / phase.durationSeconds * 100)) : 0;
   const ended = room?.timer.status === 'finished';
-  return <main className="timer-shell"><header className="timer-top"><a href="/gestion" className="brand"><span className="brand-mark">L</span><span>LEDU <b>Control</b></span></a><span className="public-pill"><i /> CRONÓMETRO DE SALA</span></header>
+  const timedOut = room?.timer.status === 'running' && left <= 0;
+  const fullyAssigned = Boolean(snapshot?.teamFavor && snapshot.teamContra && snapshot.judges.length > 0 && room?.phases.length);
+  const lastLeft = useRef<number | null>(null);
+
+  useEffect(() => {
+    const previous = lastLeft.current;
+    if (soundEnabled && room?.timer.status === 'running' && previous !== null && left < previous) {
+      const thresholds = phase?.warningThresholdsSeconds ?? [30, 10];
+      if (thresholds.some((threshold) => previous > threshold && left <= threshold) || (previous > 0 && left <= 0)) playTone();
+    }
+    lastLeft.current = left;
+  }, [left, soundEnabled, room?.timer.status, phase?.id, phase?.warningThresholdsSeconds]);
+
+  const runAction = (action: TimerAction, confirmation?: string) => {
+    if (!controllerEnabled || !fullyAssigned) return;
+    if (confirmation && !window.confirm(confirmation)) return;
+    onAction(action);
+  };
+
+  return <main className="timer-shell">
+    <header className="timer-top">
+      <a href="/gestion" className="brand"><span className="brand-mark">L</span><span>LEDU <b>Control</b></span></a>
+      <div className="timer-top-actions">
+        <span className="public-pill"><i className={connected ? '' : 'disconnected'} />{connected ? 'SINCRONIZADO' : 'SIN CONEXIÓN'}</span>
+        <button className="button secondary sound-toggle" onClick={onToggleSound} aria-pressed={soundEnabled}><>{soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}{soundEnabled ? 'Avisos sonoros activados' : 'Activar sonido'}</></button>
+      </div>
+    </header>
     {!snapshot ? <section className="timer-empty"><Monitor size={36} /><h1>Sala no disponible</h1><p>{error || 'La sala no existe o aún no se ha configurado.'}</p><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Reintentar</button></section> :
-    <><section className="timer-heading"><p>{snapshot.tournamentName} <span>·</span> {snapshot.roundName}</p><h1>{room?.name}</h1><div className="team-versus"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div><div className="judge-line"><Gavel size={16} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div></section>
-    <section className="timer-card"><div className="timer-status"><span className={'state-pill ' + (room?.timer.status || '')}>{ended ? 'Debate finalizado' : room?.timer.status === 'running' ? 'Intervención en curso' : room?.timer.status === 'paused' ? 'Cronómetro pausado' : 'Preparado para comenzar'}</span><span>INTERVENCIÓN {(room?.timer.phaseIndex ?? 0) + 1} / {room?.phases.length ?? 0}</span></div><div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''} · {phase?.side === 'favor' ? 'A favor' : phase?.side === 'contra' ? 'En contra' : ''}</b></div><div className={'timer-digits ' + (left <= 30 && room?.timer.status === 'running' ? 'urgent' : '')}>{formatTime(left)}</div><div className="timer-track"><div style={{ width: pct + '%' }} /></div><div className="timer-controls">{room?.timer.status === 'running' ? <button className="button primary big" onClick={() => onAction('pause')}><Pause size={19} /> Pausar</button> : <button className="button primary big" onClick={() => onAction('start')} disabled={ended}><Play size={19} /> {room?.timer.status === 'paused' ? 'Reanudar' : 'Iniciar intervención'}</button>}<button className="button secondary big" onClick={() => onAction('next')} disabled={ended}><ArrowRight size={18} /> Siguiente</button><button className="button ghost big" onClick={() => { if (window.confirm('¿Reiniciar el debate desde la primera intervención?')) onAction('reset'); }}><RotateCcw size={17} /> Reiniciar</button></div><p className="timer-note"><ShieldCheck size={15} /> El cronómetro se controla desde este dispositivo de sala. Los datos de torneo se actualizan automáticamente.</p></section>
-    <section className="phase-list"><div className="panel-title"><div><h3>Orden de intervenciones</h3><p>Fases configuradas para este debate</p></div><span>{room?.phases.length ?? 0} intervenciones</span></div>{room?.phases.map((item, index) => <div key={item.id} className={'phase-row ' + (index === room.timer.phaseIndex ? 'current' : index < room.timer.phaseIndex ? 'passed' : '')}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.speaker} · {item.side === 'favor' ? 'A favor' : 'En contra'}</small></div><strong>{formatTime(item.durationSeconds)}</strong>{index === room.timer.phaseIndex && <span className="current-dot" />}</div>)}</section></>}
-    {error && <p className="error timer-error">{error}</p>}<footer className="footer timer-footer"><span>LEDU Control</span><button className="text-button" onClick={onRetry}><RefreshCw size={14} /> Actualizar estado</button></footer>
+    <>
+      <section className="timer-heading">
+        <p>{snapshot.tournamentName} <span>·</span> {snapshot.roundName}</p>
+        <h1>{room?.name}</h1>
+        <div className="team-versus"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
+        <div className="judge-line"><Gavel size={16} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
+      </section>
+      <section className="timer-card">
+        <div className="timer-status"><span className={'state-pill ' + (timedOut ? 'paused' : room?.timer.status || '')}>{ended ? 'Debate finalizado' : timedOut ? 'Tiempo agotado · exceso de tiempo' : room?.timer.status === 'running' ? 'Intervención en curso' : room?.timer.status === 'paused' ? 'Cronómetro pausado' : 'Preparado para comenzar'}</span><span>INTERVENCIÓN {(room?.timer.phaseIndex ?? 0) + 1} / {room?.phases.length ?? 0}</span></div>
+        <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''} · {phase?.side === 'favor' ? 'A favor' : phase?.side === 'contra' ? 'En contra' : ''}</b></div>
+        <div className={'timer-digits ' + ((left <= 30 || timedOut) && room?.timer.status === 'running' ? 'urgent' : '')}>{formatTime(phase?.allowOvertimeDisplay === false && left < 0 ? 0 : left)}</div>
+        <div className="timer-track"><div style={{ width: pct + '%' }} /></div>
+        {!fullyAssigned && <div className="notice warning-notice timer-assignment-warning"><CircleHelp size={16} /><span>Para iniciar el debate, asigna los dos equipos, al menos un juez y un formato válido desde el panel.</span></div>}
+        <div className="timer-controls">
+          {room?.timer.status === 'running'
+            ? <button className="button primary big" onClick={() => runAction('pause')} disabled={!controllerEnabled}><Pause size={19} /> Pausar</button>
+            : <button className="button primary big" onClick={() => runAction('start')} disabled={!controllerEnabled || !fullyAssigned || ended}><Play size={19} /> {room?.timer.status === 'paused' ? 'Reanudar' : 'Iniciar intervención'}</button>}
+          <button className="button secondary big" onClick={() => runAction('previous', '¿Volver a la intervención anterior? Se detendrá el reloj actual.')} disabled={!controllerEnabled || !room || room.timer.phaseIndex === 0 || ended}><ArrowRight className="reverse-arrow" size={18} /> Anterior</button>
+          <button className="button secondary big" onClick={() => runAction('next')} disabled={!controllerEnabled || ended}><ArrowRight size={18} /> Siguiente</button>
+          <button className="button ghost big" onClick={() => runAction('reset', '¿Reiniciar únicamente esta intervención?')} disabled={!controllerEnabled || !phase || ended}><RotateCcw size={17} /> Reiniciar turno</button>
+          <button className="button ghost big" onClick={() => runAction('finish', '¿Dar por finalizado el debate?')} disabled={!controllerEnabled || ended}><Check size={17} /> Finalizar</button>
+        </div>
+        <p className="timer-note"><ShieldCheck size={15} /> {controllerEnabled ? 'Este enlace puede controlar únicamente el cronómetro de esta sala.' : 'Modo de solo lectura. Para controlar el reloj, abre la sala desde el panel de organización.'} {lastSyncedAt ? 'Última sincronización: ' + new Date(lastSyncedAt).toLocaleTimeString('es-ES') : 'Esperando la primera sincronización.'}</p>
+      </section>
+      <section className="phase-list"><div className="panel-title"><div><h3>Orden de intervenciones</h3><p>Secuencia y tiempos configurados para este debate</p></div><span>{room?.phases.length ?? 0} intervenciones</span></div>{room?.phases.map((item, index) => <div key={item.id} className={'phase-row ' + (index === room.timer.phaseIndex ? 'current' : index < room.timer.phaseIndex ? 'passed' : '')}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.speaker} · {item.side === 'favor' ? 'A favor' : 'En contra'}</small></div><strong>{formatTime(item.durationSeconds)}</strong>{index === room.timer.phaseIndex && <span className="current-dot" />}</div>)}</section>
+    </>}
+    {error && <p className="error timer-error">{error}</p>}
+    <footer className="footer timer-footer"><span>LEDU Control</span><button className="text-button" onClick={onRetry}><RefreshCw size={14} /> Actualizar estado</button></footer>
   </main>;
+}
+
+let audioContext: AudioContext | null = null;
+function playTone() {
+  try {
+    const Context = window.AudioContext;
+    if (!Context) return;
+    if (!audioContext) audioContext = new Context();
+    const context = audioContext;
+    if (context.state === 'suspended') void context.resume();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.18);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.2);
+  } catch {
+    // Sound is an optional convenience; the visual clock remains authoritative.
+  }
 }
