@@ -32,6 +32,8 @@ export default function App() {
   const [now, setNow] = useState(Date.now());
   const [snapshot, setSnapshot] = useState<PublicRoom | null>(null);
   const [saving, setSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const hasUnsavedRef = useRef(false);
   const [connected, setConnected] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [formatDirty, setFormatDirty] = useState(false);
@@ -47,7 +49,20 @@ export default function App() {
         const roomFormatMismatch = fresh.rooms.some((room) => JSON.stringify(room.phases) !== JSON.stringify(format));
         const hasLiveTimer = fresh.rooms.some((room) => room.timer.status === 'running' || room.timer.status === 'paused');
         if (roomFormatMismatch && !hasLiveTimer) setFormatDirty(true);
-        setData(fresh);
+        setData((current) => {
+          if (!hasUnsavedRef.current) return fresh;
+          const refreshedRooms = fresh.rooms.map((remote) => {
+            const local = current.rooms.find((room) => room.id === remote.id);
+            if (!local) return remote;
+            const merged = { ...remote, name: local.name, roundId: local.roundId, teamFavorId: local.teamFavorId,
+              teamContraId: local.teamContraId, judgeIds: local.judgeIds, phases: local.phases, notes: local.notes };
+            return { ...withRoomStatus({ ...merged, timer: remote.timer }), updatedAt: remote.updatedAt };
+          });
+          const addedLocally = current.rooms.filter((room) => !fresh.rooms.some((remote) => remote.id === room.id));
+          return { ...fresh, tournamentName: current.tournamentName, rounds: current.rounds, teams: current.teams,
+            judges: current.judges, rooms: [...refreshedRooms, ...addedLocally], formatPhases: current.formatPhases,
+            revision: current.revision, updatedAt: current.updatedAt };
+        });
         setConnected(true);
         setLastSyncedAt(Date.now());
         setServerError('');
@@ -105,7 +120,11 @@ export default function App() {
     if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
   }, [data.rounds, selectedRound]);
 
-  const updateData = (updater: (current: Tournament) => Tournament) => setData((current) => ({ ...updater(current), updatedAt: Date.now() }));
+  const updateData = (updater: (current: Tournament) => Tournament) => {
+    hasUnsavedRef.current = true;
+    setHasUnsavedChanges(true);
+    setData((current) => ({ ...updater(current), updatedAt: Date.now() }));
+  };
   const persist = async (): Promise<Tournament | null> => {
     setSaving(true);
     try {
@@ -137,6 +156,8 @@ export default function App() {
         writeDemo(saved);
       }
       setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
       setFormatDirty(false);
       setConnected(true);
       setLastSyncedAt(Date.now());
@@ -296,8 +317,9 @@ export default function App() {
       <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
       <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
     </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Google Sheets conectado' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
-    <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · cada 10 s' : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : 'Guardar cambios'}</button></div></header>
+    <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · cada 10 s' : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
+      {hasUnsavedChanges && <div className="notice warning-notice"><CircleHelp size={17} /><span>Tienes cambios locales sin guardar. El panel seguirá actualizando los cronómetros sin descartar estas ediciones.</span><button className="text-button" onClick={() => { if (window.confirm('¿Descartar todos los cambios locales y volver a cargar los datos guardados?')) { hasUnsavedRef.current = false; setHasUnsavedChanges(false); setFormatDirty(false); void reloadAdmin(); } }}>Descartar y recargar</button></div>}
       {assignmentWarnings.length > 0 && view !== 'settings' && <div className="notice warning-notice"><CircleHelp size={17} /><span>Hay incidencias en las asignaciones: {assignmentWarnings.slice(0, 2).join(' ')}{assignmentWarnings.length > 2 ? ' +' + (assignmentWarnings.length - 2) + ' más.' : ''}</span></div>}
       {view === 'overview' && <><div className="page-heading"><div><p className="eyebrow">VISTA OPERATIVA</p><h2>Estado del torneo</h2><p className="muted">Seguimiento de debates, asignaciones y cronómetros.</p></div><div className="round-badge"><BookOpen size={17} /><span>Ronda activa: <b>{data.rounds.find((round) => round.active)?.name ?? 'Sin ronda activa'}</b></span></div></div>
       <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
