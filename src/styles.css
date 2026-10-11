@@ -45,3 +45,10 @@
   .timer-top-actions{gap:5px}
   .sound-toggle{max-width:145px;white-space:normal}
 }
+
+.threshold-input{width:125px;max-width:100%;border:1px solid #dce2eb;border-radius:7px;padding:8px 7px;color:#344157;font-size:11px;font-variant-numeric:tabular-nums}
+.overtime-toggle{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#56647a;white-space:nowrap}
+.overtime-toggle input{accent-color:#177e6b}
+.room-open-actions{display:flex;align-items:center;gap:7px}
+.room-open-actions .text-button{font-size:10px;white-space:nowrap}
+@media(max-width:760px){.room-open-actions{align-items:flex-end;flex-direction:column}.room-open-actions .text-button{padding:3px}}
