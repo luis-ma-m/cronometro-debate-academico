@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Activity, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ShieldCheck, Users, X } from 'lucide-react';
-import type { Judge, PublicRoom, Room, Round, Team, Tournament } from './domain';
-import { apiConfigured, getPublicRoom, getTournament, login, saveTournament, updateTimer } from './api';
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import type { Judge, Phase, PublicRoom, Room, Round, Team, Tournament } from './domain';
+import { apiConfigured, getPublicRoom, getRoomControllerToken, getTournament, login, saveTournament, updateTimer } from './api';
 import { readDemo, writeDemo } from './demo';
-import { formatTime, secondsLeft, transitionTimer, withRoomStatus } from './timer';
+import { createTimer, formatTime, LEDU_PHASES, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
+import type { TimerAction } from './timer';
 
 const SESSION_KEY = 'ledu-admin-session';
-const POLL_MS = 8000;
-type View = 'overview' | 'rooms' | 'teams' | 'judges';
+const POLL_MS = 10000;
+type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'settings';
 
 function getSession(): { token: string; expiresAt: number } | null {
   try {
@@ -31,22 +32,33 @@ export default function App() {
   const [now, setNow] = useState(Date.now());
   const [snapshot, setSnapshot] = useState<PublicRoom | null>(null);
   const [saving, setSaving] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [formatDirty, setFormatDirty] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(() => { try { return localStorage.getItem('ledu-timer-sound') === 'true'; } catch { return false; } });
+  const controllerToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('control') ?? '';
 
   const reloadAdmin = useCallback(async () => {
     if (apiConfigured && session) {
       try {
         const fresh = await getTournament(session.token);
         setData(fresh);
+        setConnected(true);
+        setLastSyncedAt(Date.now());
         setServerError('');
-      } catch (error) { setServerError(error instanceof Error ? error.message : 'No se ha podido cargar el torneo.'); }
+      } catch (error) {
+        setConnected(false);
+        if (error instanceof Error && 'code' in error && (error as Error & { code?: string }).code === 'UNAUTHORIZED') { localStorage.removeItem(SESSION_KEY); setSession(null); }
+        setServerError(error instanceof Error ? error.message : 'No se ha podido cargar el torneo.');
+      }
     } else if (!apiConfigured) setData(readDemo());
   }, [session]);
 
   const reloadRoom = useCallback(async () => {
     if (!roomId) return;
     if (apiConfigured) {
-      try { setSnapshot(await getPublicRoom(roomId)); setServerError(''); }
-      catch (error) { setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.'); }
+      try { setSnapshot(await getPublicRoom(roomId)); setConnected(true); setLastSyncedAt(Date.now()); setServerError(''); }
+      catch (error) { setConnected(false); setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.'); }
     } else {
       const fresh = readDemo();
       setData(fresh);
@@ -60,6 +72,8 @@ export default function App() {
         judges: room.judgeIds.map((id) => fresh.judges.find((item) => item.id === id)?.name ?? '').filter(Boolean),
         serverTime: Date.now(),
       });
+      setConnected(true);
+      setLastSyncedAt(Date.now());
       setServerError('');
     }
   }, [roomId]);
@@ -87,21 +101,46 @@ export default function App() {
   }, [data.rounds, selectedRound]);
 
   const updateData = (updater: (current: Tournament) => Tournament) => setData((current) => ({ ...updater(current), updatedAt: Date.now() }));
-  const persist = async () => {
+  const persist = async (): Promise<Tournament | null> => {
     setSaving(true);
     try {
+      let payload = data;
+      if (formatDirty) {
+        if (data.rooms.some((room) => room.timer.status === 'running' || room.timer.status === 'paused')) {
+          throw new Error('Pausa o finaliza los cronómetros antes de aplicar un cambio global de formato. No se alterará ningún debate en curso.');
+        }
+        const phases = data.formatPhases?.length ? data.formatPhases : LEDU_PHASES;
+        const timestamp = Date.now();
+        payload = {
+          ...data,
+          rooms: data.rooms.map((room) => ({
+            ...room,
+            phases,
+            timer: { ...createTimer(phases), revision: room.timer.revision + 1, updatedAt: timestamp },
+            updatedAt: timestamp,
+          })),
+        };
+      }
+      const issues = validateAssignments(payload);
+      if (issues.length) throw new Error('Corrige las asignaciones antes de guardar: ' + issues.slice(0, 3).join(' '));
+      let saved: Tournament;
       if (apiConfigured) {
         if (!session) throw new Error('Inicia sesión antes de guardar.');
-        const saved = await saveTournament(session.token, data.revision, data);
-        setData(saved);
+        saved = await saveTournament(session.token, data.revision, payload);
       } else {
-        const copy = { ...data, revision: data.revision + 1, updatedAt: Date.now() };
-        writeDemo(copy);
-        setData(copy);
+        saved = { ...payload, revision: payload.revision + 1, updatedAt: Date.now() };
+        writeDemo(saved);
       }
+      setData(saved);
+      setFormatDirty(false);
+      setConnected(true);
+      setLastSyncedAt(Date.now());
       setServerError('');
-    } catch (error) { setServerError(error instanceof Error ? error.message : 'No se han podido guardar los cambios.'); }
-    finally { setSaving(false); }
+      return saved;
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se han podido guardar los cambios.');
+      return null;
+    } finally { setSaving(false); }
   };
 
   const submitLogin = async (event: FormEvent) => {
@@ -122,11 +161,11 @@ export default function App() {
     setView('overview');
   };
 
-  const timerAction = async (action: 'start' | 'pause' | 'reset' | 'next') => {
+  const timerAction = async (action: TimerAction) => {
     if (!snapshot) return;
     try {
       if (apiConfigured) {
-        const updated = await updateTimer(snapshot.room.id, action, snapshot.room.timer.revision);
+        const updated = await updateTimer(snapshot.room.id, action, snapshot.room.timer.revision, controllerToken);
         setSnapshot(updated);
       } else {
         const current = readDemo();
@@ -138,11 +177,31 @@ export default function App() {
         setData(next);
         await reloadRoom();
       }
+      setConnected(true);
       setServerError('');
-    } catch (error) { setServerError(error instanceof Error ? error.message : 'No se ha podido controlar el cronómetro.'); }
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se ha podido controlar el cronómetro.');
+      if (error instanceof Error && 'code' in error && (error as Error & { code?: string }).code === 'REVISION_CONFLICT') await reloadRoom();
+    }
   };
 
-  if (roomId) return <RoomScreen snapshot={snapshot} now={now} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} />;
+  const openRoom = async (id: string) => {
+    const saved = await persist();
+    if (!saved) return;
+    try {
+      let hash = '';
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        const control = await getRoomControllerToken(session.token, id);
+        hash = '#control=' + encodeURIComponent(control.token);
+      }
+      window.open('/sala/' + encodeURIComponent(id) + hash, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se ha podido preparar el enlace de control de la sala.');
+    }
+  };
+
+  if (roomId) return <RoomScreen snapshot={snapshot} now={now} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('ledu-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} lastSyncedAt={lastSyncedAt} />;
 
   if (!session) {
     return <div className="login-shell">
