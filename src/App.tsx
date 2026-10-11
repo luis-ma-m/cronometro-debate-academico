@@ -4,7 +4,7 @@ import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight
 import type { Judge, Phase, PublicRoom, Room, Round, Team, Tournament } from './domain';
 import { apiConfigured, getPublicRoom, getRoomControllerToken, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
 import { readDemo, writeDemo } from './demo';
-import { createTimer, formatTime, LEDU_PHASES, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
+import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import type { TimerAction } from './timer';
 
 const SESSION_KEY = 'ledu-admin-session';
@@ -159,6 +159,21 @@ export default function App() {
           })),
         };
       }
+      // Older and newly created rooms may have no stored phases. Normalize them
+      // to the configured tournament sequence (or the LEDU preset) before validating.
+      const fallbackPhases = resolvePhases(payload.formatPhases, payload.rooms);
+      payload = {
+        ...payload,
+        formatPhases: payload.formatPhases?.length ? payload.formatPhases : fallbackPhases,
+        rooms: payload.rooms.map((room) => {
+          if (room.phases?.length) return room;
+          const phases = resolvePhases(fallbackPhases);
+          const timer = room.timer.status === 'running' || room.timer.status === 'paused'
+            ? room.timer
+            : { ...createTimer(phases), revision: room.timer.revision + 1, updatedAt: Date.now() };
+          return { ...room, phases, timer, updatedAt: Date.now() };
+        }),
+      };
       const issues = validateAssignments(payload);
       if (issues.length) throw new Error('Corrige las asignaciones antes de guardar: ' + issues.slice(0, 3).join(' '));
       let saved: Tournament;
@@ -292,7 +307,21 @@ export default function App() {
     const name = window.prompt('Nombre de la sala', 'Sala nueva');
     if (!name?.trim()) return;
     const roundIdValue = activeRound || data.rounds[0]?.id || makeId('r');
-    const room: Room = { id: makeId('s'), name: name.trim(), roundId: roundIdValue, teamFavorId: '', teamContraId: '', judgeIds: [], status: 'unassigned', phases: data.rooms[0]?.phases ?? [], timer: data.rooms[0]?.timer ? { ...data.rooms[0].timer, status: 'idle', phaseIndex: 0, remainingSeconds: data.rooms[0].phases[0]?.durationSeconds ?? 240, startedAt: null, lastResumedAt: null, revision: 0 } : { status: 'idle', phaseIndex: 0, remainingSeconds: 240, startedAt: null, lastResumedAt: null, revision: 0, updatedAt: Date.now() }, notes: '', updatedAt: Date.now() };
+    const phases = resolvePhases(data.formatPhases, data.rooms);
+    const timestamp = Date.now();
+    const room: Room = {
+      id: makeId('s'),
+      name: name.trim(),
+      roundId: roundIdValue,
+      teamFavorId: '',
+      teamContraId: '',
+      judgeIds: [],
+      status: 'unassigned',
+      phases,
+      timer: { ...createTimer(phases), updatedAt: timestamp },
+      notes: '',
+      updatedAt: timestamp,
+    };
     updateData((current) => ({ ...current, rooms: [...current.rooms, room] }));
   };
   const updateRoom = (id: string, patch: Partial<Room>) => {
@@ -315,11 +344,11 @@ export default function App() {
     setSelectedRound(newRound.id);
   };
 
-  const configuredPhases = data.formatPhases?.length ? data.formatPhases : (data.rooms[0]?.phases?.length ? data.rooms[0].phases : LEDU_PHASES);
+  const configuredPhases = resolvePhases(data.formatPhases, data.rooms);
   const updatePhase = (id: string, patch: Partial<Phase>) => {
     setFormatDirty(true);
     updateData((current) => {
-      const phases = current.formatPhases?.length ? current.formatPhases : (current.rooms[0]?.phases?.length ? current.rooms[0].phases : LEDU_PHASES);
+      const phases = resolvePhases(current.formatPhases, current.rooms);
       return { ...current, formatPhases: phases.map((phase) => phase.id === id ? { ...phase, ...patch } : phase) };
     });
   };
@@ -374,7 +403,7 @@ export default function App() {
       <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
       <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
 
-      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros.</p></div><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button onClick={() => markRoundActive(activeRound)} disabled={!activeRound || data.rounds.find((round) => round.id === activeRound)?.active}>Marcar activa</button></div><div className="managed-rooms">{rooms.map((room) => <section className="panel room-editor" key={room.id}><div className="panel-title"><div><input className="table-input room-name-input" aria-label="Nombre de la sala" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} /><p className="muted">Enlace público: /sala/{room.id}</p></div><div className="room-open-actions"><button className="icon-button" title="Abrir cronómetro" onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button><button className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button></div></div><div className="assign-grid"><label>Equipo a favor<select value={room.teamFavorId} onChange={(event) => updateRoom(room.id, { teamFavorId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label><label>Equipo en contra<select value={room.teamContraId} onChange={(event) => updateRoom(room.id, { teamContraId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label></div><div className="judges-select"><b>Jueces asignados</b><div className="check-grid">{data.judges.filter((judge) => judge.active || room.judgeIds.includes(judge.id)).map((judge) => <label key={judge.id} className="check-item"><input type="checkbox" checked={room.judgeIds.includes(judge.id)} onChange={(event) => updateRoom(room.id, { judgeIds: event.target.checked ? [...room.judgeIds, judge.id] : room.judgeIds.filter((id) => id !== judge.id) })} />{judge.name}{judge.active ? '' : ' · Inactivo'}</label>)}</div></div><div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div></section>)}</div>{rooms.length === 0 && <Empty text="Añade una sala a esta ronda para comenzar." />}</>}
+      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button onClick={() => markRoundActive(activeRound)} disabled={!activeRound || data.rounds.find((round) => round.id === activeRound)?.active}>Marcar activa</button></div><div className="managed-rooms">{rooms.map((room) => <section className="panel room-editor" key={room.id}><div className="panel-title"><div><input className="table-input room-name-input" aria-label="Nombre de la sala" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} /><p className="muted">Enlace público: /sala/{room.id}</p></div><div className="room-open-actions"><button className="icon-button" title="Abrir cronómetro" onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button><button className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button></div></div><div className="assign-grid"><label>Equipo a favor<select value={room.teamFavorId} onChange={(event) => updateRoom(room.id, { teamFavorId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label><label>Equipo en contra<select value={room.teamContraId} onChange={(event) => updateRoom(room.id, { teamContraId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label></div><div className="judges-select"><b>Jueces asignados</b><div className="check-grid">{data.judges.filter((judge) => judge.active || room.judgeIds.includes(judge.id)).map((judge) => <label key={judge.id} className="check-item"><input type="checkbox" checked={room.judgeIds.includes(judge.id)} onChange={(event) => updateRoom(room.id, { judgeIds: event.target.checked ? [...room.judgeIds, judge.id] : room.judgeIds.filter((id) => id !== judge.id) })} />{judge.name}{judge.active ? '' : ' · Inactivo'}</label>)}</div></div><div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div></section>)}</div>{rooms.length === 0 && <Empty text="Añade una sala a esta ronda para comenzar." />}</>}
 
       {view === 'teams' && <><div className="page-heading"><div><p className="eyebrow">PARTICIPANTES</p><h2>Equipos</h2><p className="muted">Listado de equipos disponibles para enfrentamientos.</p></div><button className="button primary" onClick={addTeam}><Plus size={16} /> Añadir equipo</button></div><section className="panel table-panel"><table><thead><tr><th>Equipo</th><th>Institución</th><th>Estado</th></tr></thead><tbody>{data.teams.map((team) => <tr key={team.id}><td><input className="table-input" aria-label="Nombre del equipo" value={team.name} onChange={(event) => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, name: event.target.value } : item) }))} /></td><td><input className="table-input" aria-label="Institución del equipo" value={team.institution} onChange={(event) => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, institution: event.target.value } : item) }))} /></td><td><button className={'state-pill ' + (team.active ? 'ready' : 'unassigned')} onClick={() => updateData((current) => ({ ...current, teams: current.teams.map((item) => item.id === team.id ? { ...item, active: !item.active } : item) }))}>{team.active ? 'Activo' : 'Inactivo'}</button></td></tr>)}</tbody></table></section></>}
 
