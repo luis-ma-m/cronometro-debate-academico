@@ -25,12 +25,38 @@ export interface TimerState {
 
 export interface Team { id: string; name: string; institution: string; active: boolean }
 export interface Judge { id: string; name: string; institution: string; active: boolean }
-export interface Round { id: string; number: number; name: string; active: boolean }
+export interface Round {
+  id: string;
+  number: number;
+  name: string;
+  active: boolean;
+  defaultFormatId: string;
+}
+
+export interface FormatPreset {
+  id: string;
+  name: string;
+  phases: Phase[];
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PhysicalRoom {
+  id: string;
+  slug: string;
+  name: string;
+  active: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export interface Room {
   id: string;
   name: string;
   roundId: string;
+  physicalRoomId: string;
+  formatId: string;
   teamFavorId: string;
   teamContraId: string;
   judgeIds: string[];
@@ -47,6 +73,11 @@ export interface Tournament {
   teams: Team[];
   judges: Judge[];
   rooms: Room[];
+  physicalRooms: PhysicalRoom[];
+  formats: FormatPreset[];
+  activeRoundId: string;
+  activationRevision: number;
+  activatedAt: number;
   institutions?: string[];
   formatPhases?: Phase[];
   minimumJudgesPerRoom?: number;
@@ -59,6 +90,12 @@ export interface PublicRoom {
   tournamentName: string;
   roundName: string;
   room: Room;
+  hasAssignment: boolean;
+  physicalRoomId: string;
+  roomSlug: string;
+  physicalRoomName: string;
+  activationRevision: number;
+  activatedAt: number;
   teamFavor: string;
   teamContra: string;
   judges: string[];
