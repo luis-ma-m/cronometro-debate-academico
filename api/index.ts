@@ -720,6 +720,18 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
       if (!room.teamFavorId || !room.teamContraId || room.teamFavorId === room.teamContraId || room.judgeIds.length < (tournament.minimumJudgesPerRoom || 1)) {
         throw new ApiError("INVALID_ASSIGNMENT", "Asigna dos equipos distintos y al menos " + (tournament.minimumJudgesPerRoom || 1) + " juez(es) antes de iniciar.");
       }
+      for (const judgeId of room.judgeIds) {
+        const judge = tournament.judges.find((item) => item.id === judgeId);
+        const judgeInstitution = str(judge?.institution).trim().toLocaleLowerCase("es-ES");
+        if (!judgeInstitution) continue;
+        for (const teamId of [room.teamFavorId, room.teamContraId]) {
+          const team = tournament.teams.find((item) => item.id === teamId);
+          const teamInstitution = str(team?.institution).trim().toLocaleLowerCase("es-ES");
+          if (teamInstitution && teamInstitution === judgeInstitution) {
+            throw new ApiError("INSTITUTION_CONFLICT", "El juez " + str(judge?.name) + " y el equipo " + str(team?.name) + " comparten institución y no pueden coincidir en la misma sala.");
+          }
+        }
+      }
       validatePhases(room.phases);
     }
 
