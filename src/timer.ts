@@ -15,6 +15,20 @@ export const LEDU_PHASES: Phase[] = [
   { id: 'ledu-12', name: 'Conclusión', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'conclusion', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
 ];
 
+/**
+ * Resolves the tournament's usable phase sequence. New/legacy rooms sometimes
+ * have an empty phase list; use the global format, then another configured room,
+ * and finally the LEDU preset so a room can always be saved with valid phases.
+ */
+export function resolvePhases(formatPhases?: Phase[] | null, rooms: { phases?: Phase[] | null }[] = []): Phase[] {
+  const roomPhases = rooms.find((room) => room.phases?.length)?.phases;
+  const source = formatPhases?.length ? formatPhases : roomPhases?.length ? roomPhases : LEDU_PHASES;
+  return source.map((phase) => ({
+    ...phase,
+    warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])],
+  }));
+}
+
 export type TimerAction = 'start' | 'pause' | 'reset' | 'next' | 'previous' | 'finish';
 
 export const createTimer = (phases: Phase[] = LEDU_PHASES): TimerState => ({
