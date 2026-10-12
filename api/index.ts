@@ -193,13 +193,30 @@ async function sheetsRequest<T>(path: string, init: RequestInit = {}): Promise<T
   }
   const body = await response.json().catch(() => ({})) as { error?: { message?: string }; [key: string]: unknown };
   if (!response.ok) {
+    const googleMessage = typeof body.error?.message === "string" ? body.error.message : "Google no devolvió detalles.";
+    // Keep the upstream reason in Vercel logs. Without it, all non-403/404
+    // failures collapse into the same message and cannot be diagnosed.
+    console.error("[ledu-api] Google Sheets API request failed", {
+      status: response.status,
+      method: init.method || "GET",
+      path,
+      message: googleMessage,
+    });
     const status = response.status === 403 || response.status === 404 ? 503 : response.status;
-    const code = response.status === 403 ? "SHEETS_PERMISSION_DENIED" : response.status === 404 ? "SHEET_NOT_FOUND" : "SHEETS_ERROR";
+    const code = response.status === 403
+      ? "SHEETS_PERMISSION_DENIED"
+      : response.status === 404
+        ? "SHEET_NOT_FOUND"
+        : response.status === 429
+          ? "SHEETS_RATE_LIMITED"
+          : "SHEETS_ERROR";
     const message = response.status === 403
       ? "La cuenta de servicio no tiene permiso para editar la hoja. Comparte la hoja con su correo y dale permiso de editor."
       : response.status === 404
         ? "No se encuentra la hoja configurada. Comprueba GOOGLE_SHEETS_SPREADSHEET_ID."
-        : "Google Sheets ha rechazado la operación. Comprueba la configuración de la hoja.";
+        : response.status === 429
+          ? "Google Sheets ha limitado temporalmente las operaciones por cuota. Espera un momento y vuelve a intentarlo."
+          : "Google Sheets ha rechazado la operación. Comprueba la configuración de la hoja.";
     throw new ApiError(code, message, status);
   }
   return body as T;
@@ -300,7 +317,33 @@ async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
         503,
       );
     }
-    const metadata = await spreadsheetMetadata(true);
+    let metadata = await spreadsheetMetadata(true);
+
+    // Existing spreadsheets can have manually reduced grid sizes. Ensure every
+    // tab can hold its current schema before issuing clear/write ranges; otherwise
+    // Google rejects the entire migration batch with HTTP 400 and no detail reaches
+    // the UI. Growing a grid is non-destructive, so perform it before the reset.
+    const dimensionRequests: unknown[] = [];
+    for (const name of SHEET_NAMES) {
+      const sheet = (metadata.sheets || []).find((item) => item.properties.title === name);
+      if (!sheet) throw new ApiError("SCHEMA_MISMATCH", "No se ha podido crear la pestaña " + name + ".", 503);
+      const sheetId = sheet.properties.sheetId;
+      const gridRows = Number(sheet.properties.gridProperties?.rowCount || 1000);
+      const gridColumns = Number(sheet.properties.gridProperties?.columnCount || 1);
+      const requiredRows = name === "Config" ? 1 + 10 : 2;
+      const requiredColumns = (SHEET_HEADERS[name] as readonly string[]).length;
+      if (gridRows < requiredRows) {
+        dimensionRequests.push({ appendDimension: { sheetId, dimension: "ROWS", length: requiredRows - gridRows } });
+      }
+      if (gridColumns < requiredColumns) {
+        dimensionRequests.push({ appendDimension: { sheetId, dimension: "COLUMNS", length: requiredColumns - gridColumns } });
+      }
+    }
+    if (dimensionRequests.length) {
+      await batchUpdateSpreadsheet(dimensionRequests);
+      metadata = await spreadsheetMetadata(true);
+    }
+
     const requests: unknown[] = [];
     const now = Date.now();
     const defaultPreset = {
@@ -328,10 +371,7 @@ async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
       if (!sheet) throw new ApiError("SCHEMA_MISMATCH", "No se ha podido crear la pestaña " + name + ".", 503);
       const sheetId = sheet.properties.sheetId;
       const gridRows = Number(sheet.properties.gridProperties?.rowCount || 1000);
-      const gridColumns = Math.max(
-        Number(sheet.properties.gridProperties?.columnCount || 0),
-        (SHEET_HEADERS[name] as readonly string[]).length,
-      );
+      const gridColumns = Number(sheet.properties.gridProperties?.columnCount || (SHEET_HEADERS[name] as readonly string[]).length);
       if (gridRows > 1 && gridColumns > 0) {
         requests.push({
           repeatCell: {
