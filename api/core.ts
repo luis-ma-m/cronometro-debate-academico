@@ -1,5 +1,4 @@
 import type { Phase, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
-import { parseScoringConfig, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
 
