@@ -28,7 +28,7 @@ describe('incompatibility domain rules', () => {
 describe('incompatibility assignment validation', () => {
   it('combines institutional, team-judge and judge-judge rules but accepts empty lists', () => {
     const tournament = {
-      rounds: [] as {id:string;name:string}[],
+      rounds: [{id:'r1',name:'Ronda 1'}] as {id:string;name:string}[],
       teams: [
         {id:'t1',name:'Equipo A',institution:'Uni A',incompatibleJudgeIds:[] as string[]},
         {id:'t2',name:'Equipo B',institution:'Uni B',incompatibleJudgeIds:[] as string[]},
