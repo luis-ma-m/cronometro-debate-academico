@@ -24,6 +24,13 @@ El esquema v3 utiliza las pestañas `Config`, `Rondas`, `Equipos`, `Jueces`, `Sa
 
 La migración solo se ejecuta cuando `VERCEL_ENV=production`. Un despliegue `Preview` contra la misma hoja compartida recibe `SCHEMA_MIGRATION_PRODUCTION_ONLY` y no borra los datos existentes. Después de que Production haya completado la migración, los previews pueden leer el esquema v2. Si se va a reutilizar la hoja para otro torneo, exporta antes cualquier información que quieras conservar.
 
+
+## Incompatibilidades (esquema v3)
+
+El esquema v3 añade `incompatibleJudgeIds` a `Equipos` y `Jueces` (listas JSON de IDs). Las reglas de institución, equipo–juez y juez–juez se validan tanto en el gestor como en la API; las relaciones juez–juez se guardan recíprocamente.
+
+**Aviso:** la primera petición de Production cuando `Config` no contenga `schemaVersion=3` borra y reinicializa los datos de torneo de las pestañas existentes, y crea la ronda inicial y el formato LEDU. La operación no preserva los datos v2. No despliegues esta versión sobre Production hasta aceptar esa pérdida; exporta previamente cualquier información que necesites. Preview continúa bloqueado para esta migración destructiva y no debe inicializar la hoja compartida.
+
 ## 2. Preparar coordinación en Upstash Redis
 
 Las funciones de Vercel son efímeras y pueden ejecutarse en paralelo. Un bloqueo en memoria no sirve para coordinar distintas instancias, por lo que Redis es necesario para mantener las garantías de concurrencia y revocación de sesiones.
