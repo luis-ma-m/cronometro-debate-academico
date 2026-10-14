@@ -67,6 +67,28 @@ export interface Room {
   updatedAt: number;
 }
 
+export type FaultSeverity = 'minor' | 'major';
+export interface TeamScore { teamId: string; points: number | null }
+export interface RecordedFault {
+  id: string;
+  judgeId: string;
+  teamId: string;
+  severity: FaultSeverity;
+  note: string;
+}
+export interface DebateRecord {
+  id: string;
+  roundId: string;
+  roomId: string;
+  teamFavorId: string;
+  teamContraId: string;
+  judgeIds: string[];
+  scores: TeamScore[];
+  faults: RecordedFault[];
+  notes: string;
+  updatedAt: number;
+}
+
 export interface Tournament {
   tournamentName: string;
   rounds: Round[];
@@ -75,6 +97,7 @@ export interface Tournament {
   rooms: Room[];
   physicalRooms: PhysicalRoom[];
   formats: FormatPreset[];
+  debateRecords?: DebateRecord[];
   activeRoundId: string;
   activationRevision: number;
   activatedAt: number;
