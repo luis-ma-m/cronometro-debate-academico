@@ -1,6 +1,7 @@
 import { createHash, createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
+import { findAssignmentConflicts } from "../src/incompatibilities.js";
 import {
   ApiError,
   DEFAULT_SPREADSHEET_ID,
@@ -13,6 +14,7 @@ import {
   num,
   objectsFromRows,
   parseJson,
+  parseStringArray,
   publicRoomPayload,
   remainingSeconds,
   str,
@@ -476,11 +478,11 @@ function tournamentFromData(data: SheetData): Tournament {
   }));
   const teams = data.rows.Equipos.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
-    incompatibleJudgeIds: parseJson<string[]>(row.incompatibleJudgeIds, []),
+    incompatibleJudgeIds: parseStringArray(row.incompatibleJudgeIds),
   }));
   const judges = data.rows.Jueces.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
-    incompatibleJudgeIds: parseJson<string[]>(row.incompatibleJudgeIds, []),
+    incompatibleJudgeIds: parseStringArray(row.incompatibleJudgeIds),
   }));
   const institutionsMap = new Map<string, string>();
   for (const rawName of [
@@ -1047,17 +1049,18 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
       if (!room.teamFavorId || !room.teamContraId || room.teamFavorId === room.teamContraId || room.judgeIds.length < (tournament.minimumJudgesPerRoom || 1)) {
         throw new ApiError("INVALID_ASSIGNMENT", "Asigna dos equipos distintos y al menos " + (tournament.minimumJudgesPerRoom || 1) + " juez(es) antes de iniciar.");
       }
-      for (const judgeId of room.judgeIds) {
-        const judge = tournament.judges.find((item) => item.id === judgeId);
-        const judgeInstitution = str(judge?.institution).trim().toLocaleLowerCase("es-ES");
-        if (!judgeInstitution) continue;
-        for (const teamId of [room.teamFavorId, room.teamContraId]) {
-          const team = tournament.teams.find((item) => item.id === teamId);
-          const teamInstitution = str(team?.institution).trim().toLocaleLowerCase("es-ES");
-          if (teamInstitution && teamInstitution === judgeInstitution) {
-            throw new ApiError("INSTITUTION_CONFLICT", "El juez " + str(judge?.name) + " y el equipo " + str(team?.name) + " comparten institución y no pueden coincidir en la misma sala.");
-          }
-        }
+      const conflicts = findAssignmentConflicts({
+        teams: tournament.teams,
+        judges: tournament.judges,
+        rooms: [room],
+      });
+      if (conflicts.length) {
+        const code = conflicts.some((conflict) => conflict.type === "institution")
+          ? "INSTITUTION_CONFLICT"
+          : conflicts.some((conflict) => conflict.type === "team-judge")
+            ? "TEAM_JUDGE_CONFLICT"
+            : "JUDGE_JUDGE_CONFLICT";
+        throw new ApiError(code, room.name + ": " + [...new Set(conflicts.map((conflict) => conflict.message))].join(" "));
       }
       validatePhases(room.phases);
     }
