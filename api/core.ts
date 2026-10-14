@@ -1,5 +1,6 @@
 import type { Phase, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
+import { findAssignmentConflicts } from "../src/incompatibilities.js";
 
 export const DEFAULT_SPREADSHEET_ID = "1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI";
 export const SESSION_TTL_SECONDS = 8 * 60 * 60;
@@ -7,8 +8,8 @@ export const SESSION_TTL_SECONDS = 8 * 60 * 60;
 export const SHEET_HEADERS = {
   Config: ["key", "value"],
   Rondas: ["id", "number", "name", "active", "defaultFormatId"],
-  Equipos: ["id", "name", "institution", "active"],
-  Jueces: ["id", "name", "institution", "active"],
+  Equipos: ["id", "name", "institution", "active", "incompatibleJudgeIds"],
+  Jueces: ["id", "name", "institution", "active", "incompatibleJudgeIds"],
   Salas: ["id", "name", "roundId", "teamFavorId", "teamContraId", "judgeIds", "status", "phases", "notes", "updatedAt", "physicalRoomId", "formatId"],
   SalasFisicas: ["id", "slug", "name", "active", "createdAt", "updatedAt"],
   Formatos: ["id", "name", "phases", "version", "createdAt", "updatedAt"],
@@ -244,6 +245,25 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
   }
   const teamIds = new Set(tournament.teams.map((item) => str(item.id)).filter(Boolean));
   const judgeIds = new Set(tournament.judges.map((item) => str(item.id)).filter(Boolean));
+  for (const team of tournament.teams) {
+    const raw=(team as typeof team & {incompatibleJudgeIds?:unknown}).incompatibleJudgeIds;
+    if(raw===undefined) team.incompatibleJudgeIds=[];
+    else if(!Array.isArray(raw)||raw.some(id=>typeof id!=="string")) throw new ApiError("INVALID_INCOMPATIBILITIES","La lista de jueces incompatibles del equipo "+str(team.name)+" no es válida.");
+    if(new Set(team.incompatibleJudgeIds).size!==team.incompatibleJudgeIds.length) throw new ApiError("INVALID_INCOMPATIBILITIES","Hay jueces incompatibles duplicados en el equipo "+str(team.name)+".");
+    for(const id of team.incompatibleJudgeIds) if(!judgeIds.has(id)) throw new ApiError("INVALID_INCOMPATIBILITIES","El equipo "+str(team.name)+" referencia un juez inexistente.");
+  }
+  for (const judge of tournament.judges) {
+    const raw=(judge as typeof judge & {incompatibleJudgeIds?:unknown}).incompatibleJudgeIds;
+    if(raw===undefined) judge.incompatibleJudgeIds=[];
+    else if(!Array.isArray(raw)||raw.some(id=>typeof id!=="string")) throw new ApiError("INVALID_INCOMPATIBILITIES","La lista de jueces incompatibles de "+str(judge.name)+" no es válida.");
+    if(new Set(judge.incompatibleJudgeIds).size!==judge.incompatibleJudgeIds.length) throw new ApiError("INVALID_INCOMPATIBILITIES","Hay jueces incompatibles duplicados en "+str(judge.name)+".");
+    for(const id of judge.incompatibleJudgeIds){if(!judgeIds.has(id)) throw new ApiError("INVALID_INCOMPATIBILITIES","El juez "+str(judge.name)+" referencia un juez inexistente.");if(id===judge.id) throw new ApiError("INVALID_INCOMPATIBILITIES","Un juez no puede ser incompatible consigo mismo.");}
+  }
+  const symmetric=new Map<string,Set<string>>(tournament.judges.map(j=>[j.id,new Set(j.incompatibleJudgeIds)]));
+  for(const judge of tournament.judges) for(const id of judge.incompatibleJudgeIds) symmetric.get(id)?.add(judge.id);
+  for(const judge of tournament.judges) judge.incompatibleJudgeIds=[...(symmetric.get(judge.id)??[])].sort();
+  const relationConflict=findAssignmentConflicts(tournament).find(item=>item.type!=="institution");
+  if(relationConflict) throw new ApiError(relationConflict.type==="team-judge"?"TEAM_JUDGE_CONFLICT":"JUDGE_JUDGE_CONFLICT",relationConflict.roomName+": "+relationConflict.message);
   const teamBookings = new Set<string>();
   const judgeBookings = new Set<string>();
   const physicalRoundBookings = new Set<string>();
@@ -277,6 +297,10 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
     }
     for (const judgeId of room.judgeIds) {
       const judge = tournament.judges.find((item) => str(item.id) === str(judgeId));
+      for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
+        const team = tournament.teams.find((item) => str(item.id) === str(teamId));
+        if (team?.incompatibleJudgeIds.includes(judgeId)) throw new ApiError("TEAM_JUDGE_CONFLICT", "El juez " + str(judge?.name) + " es incompatible con el equipo " + str(team?.name) + " asignado a " + str(room.name) + ".");
+      }
       const judgeInstitution = str(judge?.institution).trim().toLocaleLowerCase("es-ES");
       if (!judgeInstitution) continue;
       for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
@@ -289,6 +313,11 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
           );
         }
       }
+    }
+    for(let i=0;i<room.judgeIds.length;i++) for(let j=i+1;j<room.judgeIds.length;j++) {
+      const leftId=room.judgeIds[i], rightId=room.judgeIds[j];
+      const left=tournament.judges.find(item=>item.id===leftId), right=tournament.judges.find(item=>item.id===rightId);
+      if(left?.incompatibleJudgeIds.includes(rightId)||right?.incompatibleJudgeIds.includes(leftId)) throw new ApiError("JUDGE_JUDGE_CONFLICT","Los jueces "+str(left?.name)+" y "+str(right?.name)+" son incompatibles y no pueden coincidir en "+str(room.name)+".");
     }
     validatePhases(room.phases);
   }
