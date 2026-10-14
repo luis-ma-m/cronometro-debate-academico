@@ -1,34 +1,5 @@
-import type { Room, Tournament } from './domain';
+import type { DebateRecord, Room, Tournament } from './domain';
 
-export type FaultSeverity = 'minor' | 'major';
-
-export interface TeamScore {
-  teamId: string;
-  points: number | null;
-}
-
-export interface RecordedFault {
-  id: string;
-  judgeId: string;
-  teamId: string;
-  severity: FaultSeverity;
-  note: string;
-}
-
-export interface DebateRecord {
-  id: string;
-  roundId: string;
-  roomId: string;
-  teamFavorId: string;
-  teamContraId: string;
-  judgeIds: string[];
-  scores: TeamScore[];
-  faults: RecordedFault[];
-  notes: string;
-  updatedAt: number;
-}
-
-/** Statistics use only manager-entered debate records, never timer event logs. */
 export interface JudgeStatistics {
   debateCount: number;
   rounds: Array<{ id: string; name: string }>;
@@ -41,18 +12,21 @@ export interface JudgeStatistics {
   records: DebateRecord[];
 }
 
-export const emptyDebateRecord = (room: Room, data: Tournament): DebateRecord => ({
-  id: 'record-' + room.id,
-  roundId: room.roundId,
-  roomId: room.id,
-  teamFavorId: room.teamFavorId,
-  teamContraId: room.teamContraId,
-  judgeIds: [...room.judgeIds],
-  scores: [],
-  faults: [],
-  notes: '',
-  updatedAt: Date.now(),
-});
+/** Statistics use explicit organizer-entered debate records, never timer logs. */
+export function emptyDebateRecord(room: Room): DebateRecord {
+  return {
+    id: 'record-' + room.id,
+    roundId: room.roundId,
+    roomId: room.id,
+    teamFavorId: room.teamFavorId,
+    teamContraId: room.teamContraId,
+    judgeIds: [...room.judgeIds],
+    scores: [],
+    faults: [],
+    notes: '',
+    updatedAt: Date.now(),
+  };
+}
 
 export function normalizeDebateRecord(record: DebateRecord): DebateRecord {
   return {
@@ -60,7 +34,7 @@ export function normalizeDebateRecord(record: DebateRecord): DebateRecord {
     judgeIds: [...new Set(record.judgeIds ?? [])],
     scores: (record.scores ?? []).map((score) => ({
       teamId: score.teamId,
-      points: score.points === null || score.points === undefined || score.points === ('' as unknown as number)
+      points: score.points === null || score.points === undefined || !Number.isFinite(Number(score.points))
         ? null
         : Number(score.points),
     })),
@@ -80,15 +54,14 @@ export function validateDebateRecords(data: Tournament, records: DebateRecord[])
   const rounds = new Set(data.rounds.map((round) => round.id));
   const ids = new Set<string>();
 
-  for (const raw of records) {
-    const record = normalizeDebateRecord(raw);
+  for (const record of records.map(normalizeDebateRecord)) {
     if (!record.id || ids.has(record.id)) errors.push('Las actas deben tener IDs únicos.');
     ids.add(record.id);
-    if (!rounds.has(record.roundId) || !rooms.has(record.roomId)) {
+    const room = rooms.get(record.roomId);
+    if (!rounds.has(record.roundId) || !room) {
       errors.push('Cada acta debe referenciar una ronda y sala existentes.');
       continue;
     }
-    const room = rooms.get(record.roomId)!;
     if (room.roundId !== record.roundId) errors.push('El acta no pertenece a la ronda de su sala.');
     if (!record.teamFavorId || !teams.has(record.teamFavorId) ||
         !record.teamContraId || !teams.has(record.teamContraId) ||
