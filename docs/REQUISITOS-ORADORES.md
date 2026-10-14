@@ -53,7 +53,7 @@ Este documento define requisitos; no implementa código ni modifica el esquema e
 - Crear perfiles globales de personas, compartir un orador entre varios equipos o añadir campos como apellidos, DNI, correo, universidad o teléfono.
 - Imponer restricciones por rondas, incompatibilidades entre oradores o un número fijo de personas por equipo.
 
-La exclusión es deliberada: actualmente las fases utilizan un texto `speaker` para describir la intervención. La vinculación entre fases y personas registradas requerirá una decisión funcional adicional, y no debe inferirse de forma automática.
+La exclusión es deliberada: actualmente las fases utilizan un texto `speaker` para describir la intervención. Las fases y rondas permanecen agnósticas a la identidad de las personas: su campo de interviniente describe el rol de la intervención (por ejemplo, “Equipo a favor”), no el nombre de un orador concreto. Los nombres se registran posteriormente desde Equipos según la información que reciba el gestor; esta PR no los asigna a fases.
 
 ## Criterios de aceptación
 
