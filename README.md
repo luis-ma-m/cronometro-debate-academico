@@ -55,7 +55,7 @@ El esquema v3 usa Config, Rondas, Equipos, Jueces, Salas, SalasFisicas, Formatos
 
 ## Incompatibilidades (esquema v3)
 
-Se pueden buscar y configurar incompatibilidades de equipo–juez y juez–juez. Las institucionales siguen siendo obligatorias; las relaciones entre jueces son recíprocas y se validan por sala.
+En las pestañas Equipos y Jueces se pueden buscar y configurar incompatibilidades por IDs estables. Las institucionales siguen siendo obligatorias; las relaciones entre jueces se mantienen recíprocas. Gestión, validación de guardado y API de inicio del cronómetro utilizan las mismas reglas para institución, equipo–juez y juez–juez. Las incompatibilidades que afecten a asignaciones ya existentes se muestran para revisión, sin retirar asignaciones automáticamente.
 
 **Migración destructiva:** el primer acceso a Production sin `schemaVersion=3` reinicializa las pestañas de la hoja, incluyendo equipos, jueces, asignaciones, cronómetros e historial, y crea una ronda y el preset LEDU. Preview no puede ejecutar la migración. Exporta previamente los datos necesarios y acepta explícitamente la pérdida antes del despliegue.
 
