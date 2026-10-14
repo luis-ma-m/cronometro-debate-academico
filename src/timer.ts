@@ -141,6 +141,9 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
     judges: tournament.judges.map((judge) => ({ ...judge, active: true, incompatibleJudgeIds: (judge as typeof judge & { incompatibleJudgeIds?: string[] }).incompatibleJudgeIds ?? [] })),
     rooms: tournament.rooms,
   } as unknown as Parameters<typeof findAssignmentConflicts>[0];
-  for (const conflict of findAssignmentConflicts(conflictInput)) if (conflict.type !== 'institution') errors.push(conflict.roomName + ': ' + conflict.message);
+  const conflictLabels = { institution: 'Conflicto de institución', 'team-judge': 'Incompatibilidad equipo–juez', 'judge-judge': 'Incompatibilidad juez–juez' } as const;
+  for (const conflict of findAssignmentConflicts(conflictInput)) {
+    errors.push(`${conflict.roomName}: ${conflictLabels[conflict.type]}. ${conflict.message}`);
+  }
   return [...new Set(errors)];
 }
