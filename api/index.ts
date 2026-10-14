@@ -368,6 +368,8 @@ async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
       ["activeRoundId", ""],
       ["activationRevision", "0"],
       ["activatedAt", "0"],
+      ["roundTypes", JSON.stringify({ "round-1": "qualifying" })],
+      ["scoring", JSON.stringify(emptyScoringConfig())],
     ];
     for (const name of SHEET_NAMES) {
       const sheet = (metadata.sheets || []).find((item) => item.properties.title === name);
