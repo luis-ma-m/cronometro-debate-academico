@@ -22,14 +22,14 @@ El esquema v3 utiliza las pestañas `Config`, `Rondas`, `Equipos`, `Jueces`, `Sa
 
 **Migración destructiva del esquema v3:** en la primera petición al backend en el entorno `Production`, si `Config` no contiene `schemaVersion=3`, la API crea las pestañas que falten, reinicializa el contenido de las pestañas de datos y crea una ronda inicial y el preset LEDU. Se perderán deliberadamente las rondas, equipos, jueces, salas, cronómetros, instituciones e historial anteriores. No conserva ni convierte los datos del esquema previo; esa decisión se tomó para evitar asignaciones ambiguas durante el cambio al modelo de salas permanentes.
 
-La migración solo se ejecuta cuando `VERCEL_ENV=production`. Un despliegue `Preview` contra la misma hoja compartida recibe `SCHEMA_MIGRATION_PRODUCTION_ONLY` y no borra los datos existentes. Después de que Production haya completado la migración, los previews pueden leer el esquema v2. Si se va a reutilizar la hoja para otro torneo, exporta antes cualquier información que quieras conservar.
+La migración solo se ejecuta cuando `VERCEL_ENV=production`. Un despliegue `Preview` contra la misma hoja compartida recibe `SCHEMA_MIGRATION_PRODUCTION_ONLY` y no borra los datos existentes. Después de que Production haya completado la migración, los previews pueden leer el esquema v3. Si se va a reutilizar la hoja para otro torneo, exporta antes cualquier información que quieras conservar.
 
 
-## Incompatibilidades (esquema v3)
+## Incompatibilidades
 
-El esquema v3 añade `incompatibleJudgeIds` a `Equipos` y `Jueces` (listas JSON de IDs). Las reglas de institución, equipo–juez y juez–juez se validan tanto en el gestor como en la API; las relaciones juez–juez se guardan recíprocamente.
+`Equipos` y `Jueces` contienen `incompatibleJudgeIds` serializado como JSON. Las reglas de institución, equipo–juez y juez–juez se validan tanto en el gestor como en la API; las relaciones juez–juez se guardan recíprocamente.
 
-**Aviso:** la primera petición de Production cuando `Config` no contenga `schemaVersion=3` borra y reinicializa los datos de torneo de las pestañas existentes, y crea la ronda inicial y el formato LEDU. La operación no preserva los datos v2. No despliegues esta versión sobre Production hasta aceptar esa pérdida; exporta previamente cualquier información que necesites. Preview continúa bloqueado para esta migración destructiva y no debe inicializar la hoja compartida.
+**Aviso:** la primera petición de Production cuando `Config` no contenga `schemaVersion=3` borra y reinicializa los datos de torneo de las pestañas existentes, y crea la ronda inicial y el formato LEDU. La operación no preserva los datos del esquema anterior. No despliegues esta versión sobre Production hasta aceptar esa pérdida; exporta previamente cualquier información que necesites. Preview continúa bloqueado para esta migración destructiva y no debe inicializar la hoja compartida.
 
 ## 2. Preparar coordinación en Upstash Redis
 
