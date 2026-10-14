@@ -579,10 +579,9 @@ export default function App() {
     setServerError('');
   };
   const updateRoundScoreType = (roundId: string, scoreType: 'qualifying' | 'elimination') => {
-    updateData((current) => ({
-      ...current,
-      rounds: current.rounds.map((round) => round.id === roundId ? { ...round, scoreType } : round),
-    }));
+    const candidate = { ...data, rounds: data.rounds.map((round) => round.id === roundId ? { ...round, scoreType } : round) };
+    setData(candidate);
+    void persistTournamentMetadata(candidate);
   };
   const updateRoom = (id: string, patch: Partial<Room>) => {
     const currentRoom = data.rooms.find((room) => room.id === id);
