@@ -7,6 +7,9 @@ Aplicación web para coordinar un torneo de debate académico LEDU desde un pane
 - Panel de organización con acceso por contraseña y sesión temporal.
 - Resumen de salas con estados, ronda activa, incidencias y hora de última sincronización.
 - Gestión de equipos y jueces: alta, edición de nombre e institución y activación/desactivación sin borrar el historial.
+- Rondas clasificatorias y eliminatorias; las clasificatorias admiten puntuaciones después de finalizar cada debate, mientras que las eliminatorias no ofrecen actas.
+- Registro de actas por ronda: categorías de puntuación editables, sumatorio automático por equipo, faltas leves y graves, hasta ocho puntuaciones individuales de orador y jueces vinculados al acta.
+- Historial por equipo y orador, con pendientes de puntuación visibles únicamente para debates finalizados de la ronda activa.
 - Rondas dinámicas con activación confirmada: si hay debates sin finalizar, el panel enumera sala, equipos, fase, estado y tiempo restante antes de permitir forzar el cambio.
 - Salas físicas con URL pública permanente; cada ronda guarda una asignación independiente de equipos, jueces y estado de cronómetro.
 - Presets de formato editables desde Configuración, seleccionables como formato predeterminado de ronda y con excepción por sala.
@@ -25,7 +28,7 @@ Aplicación web para coordinar un torneo de debate académico LEDU desde un pane
 
 - **Frontend:** React + TypeScript + Vite.
 - **Backend:** funciones de servidor de Vercel en el directorio api/.
-- **Persistencia:** Google Sheets API, autenticada desde el servidor mediante una cuenta de servicio.
+- **Persistencia:** Google Sheets API, autenticada desde el servidor mediante una cuenta de servicio. Las categorías de puntuación, actas e IDs de tipo de ronda se conservan como JSON en `Config` para no exigir una migración destructiva ni cambiar encabezados.
 - **Coordinación compartida:** Upstash Redis para sesiones revocables, claves de control por sala y bloqueo distribuido de las escrituras.
 - **Seguridad:** los secretos solo viven en variables privadas de Vercel y nunca se envían al bundle del navegador.
 
