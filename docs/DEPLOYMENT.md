@@ -83,7 +83,7 @@ La API valida la sesión en el servidor, limita intentos fallidos de acceso, exc
 - GOOGLE_AUTH_FAILED: comprueba que el JSON de cuenta de servicio es válido y que la clave no se ha revocado.
 - SHEETS_PERMISSION_DENIED: comparte el documento con el correo client_email de la cuenta de servicio y dale permiso de editor.
 - SCHEMA_MISMATCH: revisa las pestañas y los encabezados sin reordenarlos manualmente.
-- SCHEMA_MIGRATION_PRODUCTION_ONLY: la hoja aún requiere la migración destructiva del esquema v2; no se permite ejecutarla desde Preview. Una vez confirmada la transición, deja que la primera petición en Production la complete.
+- SCHEMA_MIGRATION_PRODUCTION_ONLY: la hoja aún requiere la migración destructiva al esquema v3 (incluye las columnas JSON de incompatibilidades); Preview no puede ejecutarla. La primera petición en Production la completa una sola vez cuando Config no contiene schemaVersion=3.
 - COORDINATION_UNAVAILABLE: verifica que Redis responde y que el REST URL y token están bien configurados.
 - UNAUTHORIZED: vuelve a iniciar sesión o genera un enlace de control nuevo.
 - REVISION_CONFLICT: actualiza los datos desde el servidor y vuelve a guardar o aplicar la transición.
