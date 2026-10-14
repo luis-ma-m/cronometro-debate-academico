@@ -472,11 +472,14 @@ function timerRowMap(rows: SheetRow[]): Map<string, TimerState> {
 function tournamentFromData(data: SheetData): Tournament {
   const config = data.rows.Config;
   const activeRoundId = configValue(config, "activeRoundId");
+  // Keep round classification in Config so existing Rondas headers remain unchanged.
+  // Legacy tournaments default to qualifying without a schema migration.
+  const roundTypes = parseJson<Record<string, unknown>>(configValue(config, "roundTypes"), {});
   const rounds = data.rows.Rondas.map((row) => ({
     id: str(row.id), number: num(row.number), name: str(row.name),
     active: activeRoundId ? str(row.id) === activeRoundId : bool(row.active),
     defaultFormatId: str(row.defaultFormatId),
-    scoreType: str(row.scoreType) === "elimination" ? "elimination" : "qualifying",
+    scoreType: str(roundTypes[str(row.id)] ?? row.scoreType) === "elimination" ? "elimination" : "qualifying",
   }));
   const teams = data.rows.Equipos.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
@@ -858,6 +861,9 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
     setConfig(configRows, "speakers", JSON.stringify(tournament.speakers ?? []));
     setConfig(configRows, "scoring", JSON.stringify(tournament.scoring ?? current.scoring ?? emptyScoringConfig()));
+    setConfig(configRows, "roundTypes", JSON.stringify(Object.fromEntries(
+      tournament.rounds.map((round) => [round.id, round.scoreType ?? current.rounds.find((item) => item.id === round.id)?.scoreType ?? "qualifying"]),
+    )));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
     setConfig(configRows, "schemaVersion", "3");
     // Only activateRound may change the globally active round or activation revision.
