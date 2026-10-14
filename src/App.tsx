@@ -1108,6 +1108,18 @@ function ScoringView({
       speakerId: speaker.id, speakerName: speaker.name, teamId: speaker.teamId, position: "introductor", score: 0,
     }] });
   };
+  const chooseSpeakerScore = (index: number, speakerId: string) => {
+    if (!draft) return;
+    const selected = (data.speakers ?? []).find((speaker) => speaker.id === speakerId);
+    if (!selected || ![draft.teamFavorId, draft.teamContraId].includes(selected.teamId)) return;
+    if (draft.speakers.some((speaker, i) => i !== index && speaker.speakerId === speakerId)) return;
+    setDraft((current) => current ? ({
+      ...current,
+      speakers: current.speakers.map((speaker, i) => i === index ? {
+        ...speaker, speakerId: selected.id, speakerName: selected.name, teamId: selected.teamId,
+      } : speaker),
+    }) : current);
+  };
   const persist = async () => {
     if (!currentRoom || !draft) return;
     const saved = await onSaveScorecard(currentRoom, draft);
@@ -1156,7 +1168,7 @@ function ScoringView({
       </section>)}
       <section className="team-score-editor"><div className="team-score-heading"><div><h3>Puntuación de oradores</h3><p>Hasta ocho oradores; cada uno debe pertenecer a uno de los equipos del debate.</p></div><button type="button" className="button secondary" disabled={draft.speakers.length >= 8 || (data.speakers ?? []).every((speaker) => ![draft.teamFavorId, draft.teamContraId].includes(speaker.teamId) || draft.speakers.some((row) => row.speakerId === speaker.id))} onClick={addSpeakerScore}><Plus size={14} /> Añadir orador</button></div>
         {draft.speakers.map((speaker, index) => <div className="speaker-score-row" key={speaker.speakerId}>
-          <div><b>{speaker.speakerName}</b><small>{data.teams.find((team) => team.id === speaker.teamId)?.name ?? ""}</small></div>
+          <label>Orador/a<select value={speaker.speakerId} onChange={(event) => chooseSpeakerScore(index, event.target.value)}>{(data.speakers ?? []).filter((item) => [draft.teamFavorId, draft.teamContraId].includes(item.teamId) && (item.id === speaker.speakerId || !draft.speakers.some((other, i) => i !== index && other.speakerId === item.id))).map((item) => <option key={item.id} value={item.id}>{item.name} · {data.teams.find((team) => team.id === item.teamId)?.name ?? ""}</option>)}</select></label>
           <label>Posición<select value={speaker.position} onChange={(event) => updateSpeakerScore(index, { position: event.target.value as SpeakerScore["position"] })}>{SPEAKER_POSITIONS.map((position) => <option key={position.value} value={position.value}>{position.label}</option>)}</select></label>
           <label>Nota /10<input type="number" min={0} max={10} step={0.5} value={speaker.score} onChange={(event) => updateSpeakerScore(index, { score: Math.max(0, Math.min(10, Number(event.target.value) || 0)) })} /></label>
           <button type="button" className="icon-button danger-action" aria-label={"Quitar puntuación de " + speaker.speakerName} onClick={() => setDraft({ ...draft, speakers: draft.speakers.filter((item) => item.speakerId !== speaker.speakerId) })}><Trash2 size={14} /></button>
