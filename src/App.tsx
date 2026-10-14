@@ -347,12 +347,6 @@ export default function App() {
 
   const scoring = data.scoring ?? emptyScoringConfig();
   const scorecards = scoring.scorecards ?? [];
-  const pendingScoreRooms = rooms.filter((room) => {
-    const round = data.rounds.find((item) => item.id === room.roundId);
-    const hasTeams = Boolean(room.teamFavorId && room.teamContraId && room.teamFavorId !== room.teamContraId);
-    return (round?.scoreType ?? 'qualifying') === 'qualifying' && hasTeams &&
-      room.timer.status === 'finished' && !scorecards.some((card) => card.roomId === room.id);
-  });
   const overviewPendingScoreRooms = data.rooms.filter((room) => {
     const round = data.rounds.find((item) => item.id === room.roundId);
     return room.roundId === (data.activeRoundId || data.rounds.find((item) => item.active)?.id) &&
