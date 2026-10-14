@@ -285,17 +285,19 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
     }
     const inRoom = new Set<string>();
     if (!Array.isArray(room.judgeIds)) throw new ApiError("INVALID_ASSIGNMENT", "La lista de jueces de una sala no es válida.");
+    // Evaluate all incompatibility types for this room without mutating assignments.
     const roomConflicts = findAssignmentConflicts({ teams: tournament.teams, judges: tournament.judges, rooms: [room] });
-    const incompatibleConflict = roomConflicts.find((conflict) => conflict.type === "team-judge" || conflict.type === "judge-judge");
-    if (incompatibleConflict) {
-      throw new ApiError(
-        incompatibleConflict.type === "team-judge" ? "TEAM_JUDGE_CONFLICT" : "JUDGE_JUDGE_CONFLICT",
-        incompatibleConflict.roomName + ": " + incompatibleConflict.message,
-      );
-    }
     const institutionalConflict = roomConflicts.find((conflict) => conflict.type === "institution");
-    if (institutionalConflict) {
-      throw new ApiError("INSTITUTION_CONFLICT", institutionalConflict.roomName + ": " + institutionalConflict.message);
+    if (institutionalConflict) throw new ApiError("INSTITUTION_CONFLICT", institutionalConflict.roomName + ": " + institutionalConflict.message);
+    const incompatibleConflict = roomConflicts.find((conflict) => conflict.type === "team-judge" || conflict.type === "judge-judge");
+    if (incompatibleConflict) throw new ApiError(incompatibleConflict.type === "team-judge" ? "TEAM_JUDGE_CONFLICT" : "JUDGE_JUDGE_CONFLICT", incompatibleConflict.roomName + ": " + incompatibleConflict.message);
+    for (const judgeId of room.judgeIds) {
+      if (!judgeIds.has(str(judgeId))) throw new ApiError("INVALID_ASSIGNMENT", "La sala " + str(room.name) + " referencia un juez inexistente.");
+      if (inRoom.has(str(judgeId))) throw new ApiError("DUPLICATE_JUDGE_ASSIGNMENT", "Un juez no puede estar asignado dos veces a la misma sala.");
+      inRoom.add(str(judgeId));
+      const bookingKey = str(room.roundId) + ":" + str(judgeId);
+      if (judgeBookings.has(bookingKey)) throw new ApiError("JUDGE_DOUBLE_BOOKED", "Un juez está asignado a dos salas de la misma ronda.");
+      judgeBookings.add(bookingKey);
     }
     validatePhases(room.phases);
   }
