@@ -10,7 +10,7 @@ Crear una aplicación web para organizar un torneo académico LEDU. Se compone d
 4. Google Sheets como almacenamiento mediante Google Apps Script.
 5. Cada cronómetro se controla desde su propia pantalla de sala; el panel de gestión es de consulta y asignación.
 6. Cronómetros accesibles mediante enlaces públicos del tipo /sala/:id.
-7. Sincronización automática de datos cada 8 segundos, sin recarga de página.
+7. Sincronización automática de datos cada 30 segundos, sin recarga de página; el intervalo se centraliza en `src/config.ts`.
 
 ## Arquitectura
 - Interfaz: React, TypeScript y Vite.
@@ -33,7 +33,7 @@ Los vínculos se realizan mediante IDs, no por nombres. Un equipo y un juez no p
 - Cada sala mantiene su propio timer.
 - Acciones disponibles en sala: iniciar/reanudar, pausar, reiniciar debate y siguiente fase.
 - El reloj se basa en marcas temporales, no en el número de ejecuciones de setInterval.
-- El estado visible se refresca con frecuencia local y el estado del torneo se consulta a los ocho segundos.
+- El estado visible se refresca con frecuencia local y el estado del torneo se consulta cada 30 segundos mediante el intervalo compartido de `src/config.ts`.
 - Al avanzar desde la última fase, el timer queda finalizado.
 - El preset no pretende sustituir el reglamento; los tiempos deben comprobarse y ajustarse por edición.
 

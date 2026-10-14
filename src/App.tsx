@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Team, Tournament } from './domain';
+import { DATA_REFRESH_INTERVAL_MS } from './config';
 import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
 import type { RoundActivationPreview } from './api';
 import { readDemo, writeDemo } from './demo';
@@ -10,7 +11,6 @@ import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibil
 import type { TimerAction } from './timer';
 
 const SESSION_KEY = 'ledu-admin-session';
-const POLL_MS = 10000;
 type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'settings';
 
 function makeSlug(value: string): string {
@@ -175,12 +175,12 @@ export default function App() {
   useEffect(() => {
     if (roomId) {
       void reloadRoom();
-      const id = window.setInterval(() => void reloadRoom(), POLL_MS);
+      const id = window.setInterval(() => void reloadRoom(), DATA_REFRESH_INTERVAL_MS);
       return () => window.clearInterval(id);
     }
     if (session) {
       void reloadAdmin();
-      const id = window.setInterval(() => void reloadAdmin(), POLL_MS);
+      const id = window.setInterval(() => void reloadAdmin(), DATA_REFRESH_INTERVAL_MS);
       return () => window.clearInterval(id);
     }
   }, [roomId, session, reloadAdmin, reloadRoom]);
