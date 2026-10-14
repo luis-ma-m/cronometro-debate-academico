@@ -24,6 +24,7 @@ export interface TimerState {
 }
 
 export interface Team { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }
+export interface Speaker { id: string; teamId: string; name: string }
 export interface Judge { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }
 export interface Round {
   id: string;
@@ -71,6 +72,7 @@ export interface Tournament {
   tournamentName: string;
   rounds: Round[];
   teams: Team[];
+  speakers?: Speaker[];
   judges: Judge[];
   rooms: Room[];
   physicalRooms: PhysicalRoom[];
