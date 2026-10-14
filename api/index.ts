@@ -534,6 +534,7 @@ function tournamentFromData(data: SheetData): Tournament {
     tournamentName: str(configValue(config, "tournamentName")) || "Torneo LEDU",
     rounds,
     teams,
+    speakers: parseJson<Array<{ id: string; teamId: string; name: string }>>(configValue(config, "speakers"), []).filter((speaker) => teams.some((team) => team.id === speaker.teamId)),
     judges,
     rooms,
     physicalRooms,
@@ -844,6 +845,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "tournamentName", tournament.tournamentName || "Torneo LEDU");
     setConfig(configRows, "formatPhases", JSON.stringify(phases));
     setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
+    setConfig(configRows, "speakers", JSON.stringify(tournament.speakers ?? []));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
     setConfig(configRows, "schemaVersion", "3");
     // Only activateRound may change the globally active round or activation revision.
