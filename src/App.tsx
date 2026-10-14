@@ -59,7 +59,7 @@ function IncompatibilityPicker({label,options,value,onChange}:{label:string;opti
   const filtered=options.filter((option)=>selected.has(option.id)||option.active).filter((option)=>!normalized||option.name.toLocaleLowerCase('es-ES').includes(normalized));
   return <div className="incompatibility-editor">
     <input type="search" aria-label={'Buscar '+label} placeholder="Buscar juez…" value={query} onChange={(event)=>setQuery(event.target.value)} />
-    <div className="incompatibility-options">{filtered.map((option)=><label key={option.id} className="incompatibility-option"><input type="checkbox" checked={selected.has(option.id)} onChange={(event)=>onChange(event.target.checked?[...value,option.id]:value.filter((id)=>id!==option.id)}/><span>{option.name}{option.active?'':' · Inactivo'}</span></label>)}{!filtered.length&&<small>No hay coincidencias.</small>}</div>
+    <div className="incompatibility-options">{filtered.map((option)=><label key={option.id} className="incompatibility-option"><input type="checkbox" checked={selected.has(option.id)} onChange={(event)=>onChange(event.target.checked?[...value,option.id]:value.filter((id)=>id!==option.id))}/><span>{option.name}{option.active?'':' · Inactivo'}</span></label>)}{!filtered.length&&<small>No hay coincidencias.</small>}</div>
     <div className="incompatibility-selected">{value.map((id)=><button key={id} type="button" className="incompatibility-chip" title={'Retirar '+(options.find(o=>o.id===id)?.name??id)} onClick={()=>onChange(value.filter((item)=>item!==id))}>{options.find(o=>o.id===id)?.name??id}<span aria-hidden="true"> ×</span></button>)}{!value.length&&<small>Sin incompatibilidades</small>}</div>
   </div>;
 }
