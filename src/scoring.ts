@@ -121,6 +121,12 @@ export function validateScorecard(
   if (!Array.isArray(scorecard.teams) || scorecard.teams.length !== 2) issues.push("El acta debe puntuar a ambos equipos.");
   const teamIds = new Set(context.teams.map((item) => item.id));
   const categoryIds = new Set(categories.map((item) => item.id));
+  const scoredTeamIds = (scorecard.teams ?? []).map((item) => item.teamId);
+  if (new Set(scoredTeamIds).size !== 2 ||
+      !scoredTeamIds.includes(scorecard.teamFavorId) ||
+      !scoredTeamIds.includes(scorecard.teamContraId)) {
+    issues.push("El acta debe incluir una puntuación distinta para cada uno de los dos equipos enfrentados.");
+  }
   for (const item of scorecard.teams ?? []) {
     if (!teamIds.has(item.teamId)) issues.push("La puntuación referencia un equipo inexistente.");
     const expected = item.teamId === scorecard.teamFavorId || item.teamId === scorecard.teamContraId;
@@ -144,7 +150,7 @@ export function validateScorecard(
   const speakerIds = new Set<string>();
   for (const item of scorecard.speakers ?? []) {
     const speaker = context.speakers.find((candidate) => candidate.id === item.speakerId);
-    if (!speaker || speaker.teamId !== item.teamId || speaker.name !== item.speakerName) issues.push("Cada orador debe coincidir con el registro de su equipo.");
+    if (!speaker || speaker.teamId !== item.teamId) issues.push("Cada orador debe coincidir con el registro de su equipo.");
     if (item.teamId !== scorecard.teamFavorId && item.teamId !== scorecard.teamContraId) issues.push("El orador no pertenece a ninguno de los equipos enfrentados.");
     if (speakerIds.has(item.speakerId)) issues.push("No se puede puntuar dos veces al mismo orador en una ronda.");
     speakerIds.add(item.speakerId);
