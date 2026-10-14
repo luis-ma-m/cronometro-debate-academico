@@ -1082,26 +1082,33 @@ async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tourna
       categoryNames.add(normalizedName);
     }
     if (candidate.scorecards.length > 10000) throw new ApiError("INVALID_SCORING", "Se ha superado el límite de actas.");
-    const ids = new Set<string>();
-    const roomIds = new Set<string>();
+    const previous = current.scoring ?? emptyScoringConfig();
+    const savedIds = new Set<string>();
+    const savedRoomIds = new Set<string>();
+    if (candidate.scorecards.length !== scorecards.length) {
+      throw new ApiError("INVALID_SCORING", "Una o más actas tienen una estructura inválida.");
+    }
     for (const card of candidate.scorecards) {
-      if (!card.id || ids.has(card.id) || !card.roomId || roomIds.has(card.roomId)) {
+      if (!card.id || savedIds.has(card.id) || !card.roomId || savedRoomIds.has(card.roomId)) {
         throw new ApiError("INVALID_SCORECARD", "Debe existir como máximo un acta por asignación, con identificadores únicos.");
       }
-      ids.add(card.id);
-      roomIds.add(card.roomId);
-      const issues = validateScorecard(card, candidate.categories, {
-        rounds: current.rounds,
-        rooms: current.rooms,
-        teams: current.teams,
-        judges: current.judges,
-        speakers: current.speakers ?? [],
-      });
-      if (issues.length) throw new ApiError("INVALID_SCORECARD", issues.slice(0, 5).join(" "));
+      savedIds.add(card.id);
+      savedRoomIds.add(card.roomId);
+      const previousCard = previous.scorecards.find((item) => item.id === card.id);
+      const changed = !previousCard || previousCard.updatedAt !== card.updatedAt;
+      if (changed) {
+        const issues = validateScorecard(card, candidate.categories, {
+          rounds: current.rounds,
+          rooms: current.rooms,
+          teams: current.teams,
+          judges: current.judges,
+          speakers: current.speakers ?? [],
+        });
+        if (issues.length) throw new ApiError("INVALID_SCORECARD", issues.slice(0, 5).join(" "));
+      }
     }
     // Category IDs are immutable links. Removing one still referenced by an act
     // would make historical totals and criteria impossible to interpret.
-    const previous = current.scoring ?? emptyScoringConfig();
     const removedInUse = previous.categories.filter((category) =>
       !categoryIds.has(category.id) && previous.scorecards.some((card) =>
         card.teams.some((team) => Object.prototype.hasOwnProperty.call(team.categoryScores, category.id))));
