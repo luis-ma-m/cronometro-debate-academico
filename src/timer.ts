@@ -89,7 +89,7 @@ export function withRoomStatus<T extends { status: string; timer: TimerState; te
   return { ...room, status };
 }
 
-export function validateAssignments(tournament: { rounds: { id: string; name: string }[]; teams: { id: string; name: string; institution?: string }[]; judges: { id: string; name: string; institution?: string }[]; rooms: { id: string; name: string; roundId: string; teamFavorId: string; teamContraId: string; judgeIds: string[]; phases: Phase[] }[] }): string[] {
+export function validateAssignments(tournament: { rounds: { id: string; name: string; [key: string]: unknown }[]; teams: { id: string; name: string; institution?: string; [key: string]: unknown }[]; judges: { id: string; name: string; institution?: string; [key: string]: unknown }[]; rooms: { id: string; name: string; roundId: string; teamFavorId: string; teamContraId: string; judgeIds: string[]; phases: Phase[] }[] }): string[] {
   const errors: string[] = [];
   const roundIds = new Set(tournament.rounds.map((round) => round.id));
   const teamIds = new Map(tournament.teams.map((team) => [team.id, team.name]));
