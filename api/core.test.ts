@@ -180,6 +180,49 @@ describe("Vercel API core", () => {
     expect(() => validateTournamentInput(tournament)).not.toThrow();
   });
 
+
+  it("rejects a team-judge incompatibility against either side", () => {
+    for (const teamId of ["t1", "t2"]) {
+      const tournament = makeTournament();
+      tournament.teams.find((team) => team.id === teamId)!.incompatibleJudgeIds = ["j1"];
+      expect(() => validateTournamentInput(tournament)).toThrow("es incompatible con el equipo");
+    }
+  });
+
+  it("normalizes judge relations symmetrically and rejects an incompatible panel", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({ id:"j2", name:"Juez 2", institution:"LEDU", active:true, incompatibleJudgeIds:[] });
+    tournament.rooms[0].judgeIds = [];
+    tournament.judges[0].incompatibleJudgeIds = ["j2"];
+    validateTournamentInput(tournament);
+    expect(tournament.judges[1].incompatibleJudgeIds).toEqual(["j1"]);
+    tournament.rooms[0].judgeIds = ["j1","j2"];
+    expect(() => validateTournamentInput(tournament)).toThrow("son incompatibles");
+  });
+
+  it("rejects dangling IDs, duplicate references and judge self-reference", () => {
+    const dangling = makeTournament();
+    dangling.teams[0].incompatibleJudgeIds = ["missing"];
+    expect(() => validateTournamentInput(dangling)).toThrow("juez inexistente");
+    const duplicate = makeTournament();
+    duplicate.teams[0].incompatibleJudgeIds = ["j1","j1"];
+    expect(() => validateTournamentInput(duplicate)).toThrow("duplicados");
+    const self = makeTournament();
+    self.judges[0].incompatibleJudgeIds = ["j1"];
+    expect(() => validateTournamentInput(self)).toThrow("consigo mismo");
+  });
+
+  it("allows incompatible judges in separate rooms of the same round", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({id:"j2",name:"Juez 2",institution:"",active:true,incompatibleJudgeIds:["j1"]});
+    tournament.judges[0].incompatibleJudgeIds = ["j2"];
+    tournament.teams.push({id:"t3",name:"Equipo C",institution:"",active:true,incompatibleJudgeIds:[]});
+    tournament.teams.push({id:"t4",name:"Equipo D",institution:"",active:true,incompatibleJudgeIds:[]});
+    tournament.physicalRooms.push({id:"physical-a2",slug:"sala-a2",name:"Sala A2",active:true,createdAt:1,updatedAt:1});
+    tournament.rooms.push({...tournament.rooms[0],id:"a2",name:"Sala A2",physicalRoomId:"physical-a2",teamFavorId:"t3",teamContraId:"t4",judgeIds:["j2"]});
+    expect(() => validateTournamentInput(tournament)).not.toThrow();
+  });
+
   it("preserves timer revision and timestamp-based state transitions", () => {
     const phases = defaultPhases();
     const started = transitionTimer(initialTimer(phases), phases, "start", 1000);
