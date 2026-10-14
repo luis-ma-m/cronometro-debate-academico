@@ -1000,6 +1000,164 @@ export default function App() {
   </div>;
 }
 
+
+function ScoringView({
+  data, scoring, rooms, selectedRoundId, onSelectRound, scoreCategoryDraft,
+  onCategoryDraftChange, onAddCategory, onUpdateCategory, onRemoveCategory,
+  onSaveCategories, onSaveScorecard, saving,
+}: {
+  data: Tournament;
+  scoring: { categories: ScoreCategory[]; scorecards: RoundScorecard[] };
+  rooms: Room[];
+  selectedRoundId: string;
+  onSelectRound: (id: string) => void;
+  scoreCategoryDraft: string;
+  onCategoryDraftChange: (value: string) => void;
+  onAddCategory: () => void;
+  onUpdateCategory: (id: string, patch: Partial<ScoreCategory>) => void;
+  onRemoveCategory: (category: ScoreCategory) => void;
+  onSaveCategories: () => void;
+  onSaveScorecard: (room: Room, card: RoundScorecard) => void;
+  saving: boolean;
+}) {
+  const [editingRoomId, setEditingRoomId] = useState("");
+  const categories = [...scoring.categories].sort((a, b) => a.order - b.order);
+  const round = data.rounds.find((item) => item.id === selectedRoundId);
+  const elimination = (round?.scoreType ?? "qualifying") === "elimination";
+  const relevantRooms = rooms.filter((room) => Boolean(room.teamFavorId && room.teamContraId && room.teamFavorId !== room.teamContraId));
+  const eligible = relevantRooms.filter((room) => room.timer.status === "finished");
+  const pending = elimination ? [] : eligible.filter((room) => !scoring.scorecards.some((card) => card.roomId === room.id));
+  const history = scoring.scorecards.filter((card) => card.roundId === selectedRoundId);
+  const [draft, setDraft] = useState<RoundScorecard | null>(null);
+  const currentRoom = rooms.find((room) => room.id === editingRoomId);
+
+  const beginEdit = (room: Room) => {
+    const existing = scoring.scorecards.find((card) => card.roomId === room.id);
+    const teamIds = [room.teamFavorId, room.teamContraId];
+    const teams = teamIds.map((teamId) => {
+      const team = data.teams.find((item) => item.id === teamId);
+      const previous = existing?.teams.find((item) => item.teamId === teamId);
+      const categoryScores = Object.fromEntries(categories.map((category) => [category.id, previous?.categoryScores?.[category.id] ?? 0]));
+      return { teamId, teamName: team?.name ?? "Equipo", categoryScores, total: sumCategoryScores(categoryScores, categories), minorFaults: previous?.minorFaults ?? 0, majorFaults: previous?.majorFaults ?? 0 };
+    }) as RoundScorecard["teams"];
+    setDraft(existing ? {
+      ...existing,
+      teams,
+      judges: room.judgeIds.map((judgeId) => ({ judgeId, judgeName: data.judges.find((judge) => judge.id === judgeId)?.name ?? judgeId })),
+    } : {
+      id: "scorecard-" + room.id,
+      roundId: room.roundId,
+      roundName: round?.name ?? "Ronda",
+      roomId: room.id,
+      roomName: room.name,
+      teamFavorId: room.teamFavorId,
+      teamContraId: room.teamContraId,
+      judges: room.judgeIds.map((judgeId) => ({ judgeId, judgeName: data.judges.find((judge) => judge.id === judgeId)?.name ?? judgeId })),
+      teams,
+      speakers: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    setEditingRoomId(room.id);
+  };
+  const updateTeamScore = (teamId: string, patch: Partial<TeamScore>) => {
+    setDraft((current) => current ? {
+      ...current,
+      teams: current.teams.map((team) => team.teamId === teamId ? { ...team, ...patch,
+        total: sumCategoryScores({ ...team.categoryScores, ...(patch.categoryScores ?? {}) }, categories) } : team) as RoundScorecard["teams"],
+    } : current);
+  };
+  const updateCategoryScore = (teamId: string, categoryId: string, value: number) => {
+    setDraft((current) => current ? {
+      ...current,
+      teams: current.teams.map((team) => team.teamId === teamId ? {
+        ...team, categoryScores: { ...team.categoryScores, [categoryId]: value },
+        total: sumCategoryScores({ ...team.categoryScores, [categoryId]: value }, categories),
+      } : team) as RoundScorecard["teams"],
+    } : current);
+  };
+  const updateSpeakerScore = (index: number, patch: Partial<SpeakerScore>) => setDraft((current) => current ? ({
+    ...current, speakers: current.speakers.map((speaker, i) => i === index ? { ...speaker, ...patch } : speaker),
+  }) : current);
+  const addSpeakerScore = () => {
+    if (!draft || draft.speakers.length >= 8) return;
+    const used = new Set(draft.speakers.map((speaker) => speaker.speakerId));
+    const speaker = (data.speakers ?? []).find((item) =>
+      [draft.teamFavorId, draft.teamContraId].includes(item.teamId) && !used.has(item.id));
+    if (!speaker) return;
+    setDraft({ ...draft, speakers: [...draft.speakers, {
+      speakerId: speaker.id, speakerName: speaker.name, teamId: speaker.teamId, position: "introductor", score: 0,
+    }] });
+  };
+  const persist = () => {
+    if (!currentRoom || !draft) return;
+    onSaveScorecard(currentRoom, draft);
+    setEditingRoomId("");
+    setDraft(null);
+  };
+
+  return <>
+    <div className="page-heading"><div><p className="eyebrow">EVALUACIÓN</p><h2>Puntuaciones de ronda</h2><p className="muted">Actas de debates finalizados, historial por equipo y puntuación individual de oradores.</p></div></div>
+    <section className="panel scoring-panel">
+      <div className="panel-title"><div><h3>Ronda y tipo de competición</h3><p>Las rondas se consideran clasificatorias por defecto; cambia a eliminatoria cuando corresponda.</p></div></div>
+      <div className="scoring-round-selector"><label>Ronda<select value={selectedRoundId} onChange={(event) => { onSelectRound(event.target.value); setEditingRoomId(""); setDraft(null); }}>{data.rounds.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Tipo<select value={round?.scoreType ?? "qualifying"} onChange={(event) => {
+        const scoreType = event.target.value as "qualifying" | "elimination";
+        // Parent receives the updated tournament through its ordinary persistence path.
+        window.dispatchEvent(new CustomEvent("ledu:round-type-change", { detail: { roundId: selectedRoundId, scoreType } }));
+      }}><option value="qualifying">Clasificatoria</option><option value="elimination">Eliminatoria</option></select></label></div>
+      {elimination ? <div className="notice warning-notice"><CircleHelp size={17} /><span>Esta ronda es eliminatoria. No se permite registrar puntuaciones ni aparecerá como pendiente.</span></div> : <>
+        <div className="stat-grid scoring-stats"><Stat label="Debates finalizados" value={eligible.length} icon={<Check />} /><Stat label="Actas registradas" value={history.length} icon={<BookOpen />} /><Stat label="Pendientes de puntuación" value={pending.length} icon={<Clock3 />} /></div>
+        <div className="score-category-settings">
+          <div className="panel-title"><div><h3>Categorías de puntuación de equipo</h3><p>Las categorías activas definen el sumatorio total. Las categorías usadas en el historial no se pueden borrar.</p></div><button className="button secondary" onClick={onSaveCategories} disabled={saving}><Save size={15} /> Guardar categorías</button></div>
+          <form className="institution-create" onSubmit={(event) => { event.preventDefault(); onAddCategory(); }}>
+            <input className="table-input" value={scoreCategoryDraft} onChange={(event) => onCategoryDraftChange(event.target.value)} placeholder="Nombre de categoría (p. ej., Evidencias)" maxLength={100} aria-label="Nueva categoría de puntuación" />
+            <button className="button secondary" disabled={saving || !scoreCategoryDraft.trim()}><Plus size={15} /> Añadir categoría</button>
+          </form>
+          <div className="score-category-list">{categories.map((category) => <div className="score-category-row" key={category.id}><span>{category.order + 1}</span><input className="table-input" aria-label="Nombre de categoría" value={category.name} onChange={(event) => onUpdateCategory(category.id, { name: event.target.value })} /><button type="button" className="icon-button danger-action" aria-label={"Eliminar categoría " + category.name} title="Eliminar categoría" onClick={() => onRemoveCategory(category)}><Trash2 size={14} /></button></div>)}</div>
+        </div>
+        <div className="scoring-room-list"><div className="panel-title"><div><h3>Actas por sala</h3><p>Solo se puede introducir puntuación cuando el debate figure como finalizado.</p></div></div>
+          {relevantRooms.map((room) => {
+            const card = scoring.scorecards.find((item) => item.roomId === room.id);
+            const editable = room.timer.status === "finished";
+            return <article className="score-room-row" key={room.id}>
+              <div><b>{room.name}</b><p>{data.teams.find((team) => team.id === room.teamFavorId)?.name ?? "Equipo"} <span>vs.</span> {data.teams.find((team) => team.id === room.teamContraId)?.name ?? "Equipo"}</p><small>{room.timer.status === "finished" ? (card ? "Acta registrada" : "Pendiente de puntuación") : room.timer.status === "running" ? "Debate en curso" : room.timer.status === "paused" ? "Debate pausado" : room.status === "ready" ? "Preparada · sin finalizar" : "Sin finalizar"}</small></div>
+              <span className={"state-pill " + (card ? "ready" : editable ? "paused" : "unassigned")}>{card ? "Registrada" : editable ? "Pendiente" : "No finalizada"}</span>
+              <button className="button secondary" disabled={!editable || saving} onClick={() => beginEdit(room)}>{card ? "Editar puntuación" : "Registrar puntuación"}</button>
+            </article>;
+          })}
+          {!relevantRooms.length && <Empty text="No hay enfrentamientos con dos equipos asignados en esta ronda." />}
+        </div>
+      </>}
+    </section>
+    {draft && currentRoom && <div className="activation-backdrop" role="presentation"><section className="activation-dialog scorecard-dialog" role="dialog" aria-modal="true" aria-labelledby="scorecard-title">
+      <div className="activation-dialog-top"><span className="eyebrow">ACTA DE EVALUACIÓN</span><button className="icon-button" onClick={() => { setEditingRoomId(""); setDraft(null); }} aria-label="Cerrar acta"><X size={16} /></button></div>
+      <h2 id="scorecard-title">{currentRoom.name} · {round?.name}</h2><p>Las puntuaciones se registrarán por equipo. Cada juez asignado queda vinculado a la misma acta para que conste su evaluación de ambos equipos.</p>
+      <div className="score-judges"><b>Jueces evaluadores</b><div>{draft.judges.map((judge) => <span key={judge.judgeId}>{judge.judgeName}</span>)}</div></div>
+      {draft.teams.map((team) => <section className="team-score-editor" key={team.teamId}><div className="team-score-heading"><div><h3>{team.teamName}</h3><p>La puntuación total se calcula automáticamente.</p></div><div className="team-score-total"><small>TOTAL</small><b>{team.total}</b></div></div>
+        <div className="score-category-inputs">{categories.map((category) => <label key={category.id}>{category.name}<input type="number" min={0} max={1000} step={0.5} value={team.categoryScores[category.id] ?? 0} onChange={(event) => updateCategoryScore(team.teamId, category.id, Number(event.target.value))} /></label>)}</div>
+        <div className="fault-inputs"><label>Faltas leves<input type="number" min={0} max={100} step={1} value={team.minorFaults} onChange={(event) => updateTeamScore(team.teamId, { minorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label><label>Faltas graves<input type="number" min={0} max={100} step={1} value={team.majorFaults} onChange={(event) => updateTeamScore(team.teamId, { majorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label></div>
+      </section>)}
+      <section className="team-score-editor"><div className="team-score-heading"><div><h3>Puntuación de oradores</h3><p>Hasta ocho oradores; cada uno debe pertenecer a uno de los equipos del debate.</p></div><button type="button" className="button secondary" disabled={draft.speakers.length >= 8 || (data.speakers ?? []).every((speaker) => ![draft.teamFavorId, draft.teamContraId].includes(speaker.teamId) || draft.speakers.some((row) => row.speakerId === speaker.id))} onClick={addSpeakerScore}><Plus size={14} /> Añadir orador</button></div>
+        {draft.speakers.map((speaker, index) => <div className="speaker-score-row" key={speaker.speakerId}>
+          <div><b>{speaker.speakerName}</b><small>{data.teams.find((team) => team.id === speaker.teamId)?.name ?? ""}</small></div>
+          <label>Posición<select value={speaker.position} onChange={(event) => updateSpeakerScore(index, { position: event.target.value as SpeakerScore["position"] })}>{SPEAKER_POSITIONS.map((position) => <option key={position.value} value={position.value}>{position.label}</option>)}</select></label>
+          <label>Nota /10<input type="number" min={0} max={10} step={0.5} value={speaker.score} onChange={(event) => updateSpeakerScore(index, { score: Math.max(0, Math.min(10, Number(event.target.value) || 0)) })} /></label>
+          <button type="button" className="icon-button danger-action" aria-label={"Quitar puntuación de " + speaker.speakerName} onClick={() => setDraft({ ...draft, speakers: draft.speakers.filter((item) => item.speakerId !== speaker.speakerId) })}><Trash2 size={14} /></button>
+        </div>)}
+        {!draft.speakers.length && <p className="muted">No se han añadido puntuaciones de orador.</p>}
+      </section>
+      <div className="activation-dialog-actions"><button className="button secondary" onClick={() => { setEditingRoomId(""); setDraft(null); }}>Cancelar</button><button className="button primary" disabled={saving} onClick={persist}><Save size={15} /> {saving ? "Guardando…" : "Guardar acta completa"}</button></div>
+    </section></div>}
+    <section className="panel team-history-panel"><div className="panel-title"><div><h3>Historial de equipos</h3><p>Las actas conservan la ronda, el rival y las entidades evaluadoras mediante referencias estables.</p></div></div>
+      {data.teams.map((team) => {
+        const teamHistory = scoring.scorecards.filter((card) => card.teams.some((item) => item.teamId === team.id)).sort((a, b) => a.createdAt - b.createdAt);
+        if (!teamHistory.length) return null;
+        return <details className="team-history-item" key={team.id}><summary>{team.name} · {teamHistory.length} ronda(s)</summary><div>{teamHistory.map((card) => { const own = card.teams.find((item) => item.teamId === team.id)!; const opponentId = card.teams.find((item) => item.teamId !== team.id)?.teamId; const opponent = data.teams.find((item) => item.id === opponentId)?.name ?? "Rival histórico"; return <article key={card.id}><b>{card.roundName}</b><span>vs. {opponent}</span><strong>Total: {own.total}</strong><small>Faltas leves: {own.minorFaults} · graves: {own.majorFaults}</small></article>; })}</div></details>;
+      })}
+    </section>
+  </>;
+}
+
 function NavButton({ icon, label, selected, onClick }: { icon: React.ReactNode; label: string; selected: boolean; onClick: () => void }) {
   return <button className={'nav-button ' + (selected ? 'selected' : '')} onClick={onClick}>{icon}<span>{label}</span><ChevronRight size={15} /></button>;
 }
