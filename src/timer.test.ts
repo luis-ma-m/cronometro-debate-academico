@@ -14,7 +14,7 @@ describe('preset LEDU general', () => {
 
 describe('resolve room interventions', () => {
   it('falls back to the LEDU preset when neither the global format nor rooms have phases', () => {
-    const phases = resolvePhases(undefined, [{ phases: [] }, {}]);
+    const phases = resolvePhases(undefined, [{ phases: [] as Phase[] }, {}]);
     expect(phases).toHaveLength(12);
     expect(phases.map((phase) => phase.durationSeconds).reduce((sum, value) => sum + value, 0)).toBe(41 * 60);
   });
