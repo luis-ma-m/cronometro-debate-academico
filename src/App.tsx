@@ -614,7 +614,7 @@ export default function App() {
     const name = window.prompt('Nombre de la ronda', 'Ronda ' + (data.rounds.length + 1));
     if (!name?.trim()) return;
     const timestamp = Date.now();
-    const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false, defaultFormatId: data.formats[0]?.id ?? '' };
+    const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false, defaultFormatId: data.formats[0]?.id ?? '', scoreType: 'qualifying' };
     const defaultFormat = data.formats.find((format) => format.id === newRound.defaultFormatId);
     const phases = (defaultFormat?.phases?.length ? defaultFormat.phases : resolvePhases(data.formatPhases, data.rooms)).map((phase) => ({ ...phase }));
     const newAssignments: Room[] = data.physicalRooms.map((physical) => ({
