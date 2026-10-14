@@ -262,8 +262,6 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
   const symmetric=new Map<string,Set<string>>(tournament.judges.map(j=>[j.id,new Set(j.incompatibleJudgeIds)]));
   for(const judge of tournament.judges) for(const id of judge.incompatibleJudgeIds) symmetric.get(id)?.add(judge.id);
   for(const judge of tournament.judges) judge.incompatibleJudgeIds=[...(symmetric.get(judge.id)??[])].sort();
-  const relationConflict=findAssignmentConflicts(tournament).find(item=>item.type!=="institution");
-  if(relationConflict) throw new ApiError(relationConflict.type==="team-judge"?"TEAM_JUDGE_CONFLICT":"JUDGE_JUDGE_CONFLICT",relationConflict.roomName+": "+relationConflict.message);
   const teamBookings = new Set<string>();
   const judgeBookings = new Set<string>();
   const physicalRoundBookings = new Set<string>();
@@ -287,37 +285,17 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
     }
     const inRoom = new Set<string>();
     if (!Array.isArray(room.judgeIds)) throw new ApiError("INVALID_ASSIGNMENT", "La lista de jueces de una sala no es válida.");
-    for (const judgeId of room.judgeIds) {
-      if (!judgeIds.has(str(judgeId))) throw new ApiError("INVALID_ASSIGNMENT", "Una sala contiene un juez inexistente.");
-      if (inRoom.has(str(judgeId))) throw new ApiError("INVALID_ASSIGNMENT", "Un juez aparece más de una vez en la misma sala.");
-      inRoom.add(str(judgeId));
-      const bookingKey = str(room.roundId) + ":" + str(judgeId);
-      if (judgeBookings.has(bookingKey)) throw new ApiError("JUDGE_DOUBLE_BOOKED", "Un juez está asignado a dos salas de la misma ronda.");
-      judgeBookings.add(bookingKey);
+    const roomConflicts = findAssignmentConflicts({ teams: tournament.teams, judges: tournament.judges, rooms: [room] });
+    const incompatibleConflict = roomConflicts.find((conflict) => conflict.type === "team-judge" || conflict.type === "judge-judge");
+    if (incompatibleConflict) {
+      throw new ApiError(
+        incompatibleConflict.type === "team-judge" ? "TEAM_JUDGE_CONFLICT" : "JUDGE_JUDGE_CONFLICT",
+        incompatibleConflict.roomName + ": " + incompatibleConflict.message,
+      );
     }
-    for (const judgeId of room.judgeIds) {
-      const judge = tournament.judges.find((item) => str(item.id) === str(judgeId));
-      for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
-        const team = tournament.teams.find((item) => str(item.id) === str(teamId));
-        if (team?.incompatibleJudgeIds.includes(judgeId)) throw new ApiError("TEAM_JUDGE_CONFLICT", "El juez " + str(judge?.name) + " es incompatible con el equipo " + str(team?.name) + " asignado a " + str(room.name) + ".");
-      }
-      const judgeInstitution = str(judge?.institution).trim().toLocaleLowerCase("es-ES");
-      if (!judgeInstitution) continue;
-      for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
-        const team = tournament.teams.find((item) => str(item.id) === str(teamId));
-        const teamInstitution = str(team?.institution).trim().toLocaleLowerCase("es-ES");
-        if (team && teamInstitution && teamInstitution === judgeInstitution) {
-          throw new ApiError(
-            "INSTITUTION_CONFLICT",
-            "El juez " + str(judge?.name) + " y el equipo " + str(team.name) + " comparten institución y no pueden coincidir en la misma sala."
-          );
-        }
-      }
-    }
-    for(let i=0;i<room.judgeIds.length;i++) for(let j=i+1;j<room.judgeIds.length;j++) {
-      const leftId=room.judgeIds[i], rightId=room.judgeIds[j];
-      const left=tournament.judges.find(item=>item.id===leftId), right=tournament.judges.find(item=>item.id===rightId);
-      if(left?.incompatibleJudgeIds.includes(rightId)||right?.incompatibleJudgeIds.includes(leftId)) throw new ApiError("JUDGE_JUDGE_CONFLICT","Los jueces "+str(left?.name)+" y "+str(right?.name)+" son incompatibles y no pueden coincidir en "+str(room.name)+".");
+    const institutionalConflict = roomConflicts.find((conflict) => conflict.type === "institution");
+    if (institutionalConflict) {
+      throw new ApiError("INSTITUTION_CONFLICT", institutionalConflict.roomName + ": " + institutionalConflict.message);
     }
     validatePhases(room.phases);
   }
