@@ -481,7 +481,7 @@ function tournamentFromData(data: SheetData): Tournament {
     id: str(row.id), number: num(row.number), name: str(row.name),
     active: activeRoundId ? str(row.id) === activeRoundId : bool(row.active),
     defaultFormatId: str(row.defaultFormatId),
-    scoreType: str(roundTypes[str(row.id)] ?? row.scoreType) === "elimination" ? "elimination" : "qualifying",
+    scoreType: (str(roundTypes[str(row.id)] ?? row.scoreType) === "elimination" ? "elimination" : "qualifying") as Round["scoreType"],
   }));
   const teams = data.rows.Equipos.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
