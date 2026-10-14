@@ -1,3 +1,4 @@
+import type { ScoringConfig } from './scoring';
 export type TimerStatus = 'idle' | 'running' | 'paused' | 'finished';
 export type RoomStatus = 'unassigned' | 'ready' | 'running' | 'paused' | 'finished' | 'issue';
 export type PhaseType = 'opening' | 'cross-examination' | 'rebuttal' | 'cross-rebuttal' | 'conclusion' | 'other';
@@ -69,8 +70,6 @@ export interface Room {
   notes: string;
   updatedAt: number;
 }
-
-import type { ScoringConfig } from './scoring';
 
 export interface Tournament {
   tournamentName: string;
