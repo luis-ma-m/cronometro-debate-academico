@@ -140,7 +140,7 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
     teams: tournament.teams.map((team) => ({ ...team, active: true, incompatibleJudgeIds: (team as typeof team & { incompatibleJudgeIds?: string[] }).incompatibleJudgeIds ?? [] })),
     judges: tournament.judges.map((judge) => ({ ...judge, active: true, incompatibleJudgeIds: (judge as typeof judge & { incompatibleJudgeIds?: string[] }).incompatibleJudgeIds ?? [] })),
     rooms: tournament.rooms,
-  } as Parameters<typeof findAssignmentConflicts>[0];
+  } as unknown as Parameters<typeof findAssignmentConflicts>[0];
   for (const conflict of findAssignmentConflicts(conflictInput)) if (conflict.type !== 'institution') errors.push(conflict.roomName + ': ' + conflict.message);
   return [...new Set(errors)];
 }
