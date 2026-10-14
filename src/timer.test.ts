@@ -100,7 +100,7 @@ describe('LEDU timer state machine', () => {
   it('validates duplicate assignments and room completeness', () => {
     const room = (id: string, favor: string, judges: string[]) => ({ id, name: id.toUpperCase(), roundId: 'r1', teamFavorId: favor, teamContraId: 't2', judgeIds: judges, phases: LEDU_PHASES });
     const errors = validateAssignments({
-      rounds: [{ id: 'r1', number: 1, name: 'Ronda 1' }],
+      rounds: [{ id: 'r1', name: 'Ronda 1' }],
       teams: [{ id: 't1', name: 'Equipo 1' }, { id: 't2', name: 'Equipo 2' }],
       judges: [{ id: 'j1', name: 'Juez 1' }],
       rooms: [room('a1', 't1', ['j1']), room('a2', 't1', ['j1'])],
