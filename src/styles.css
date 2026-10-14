@@ -192,6 +192,8 @@
 .transition-countdown b { font-size: clamp(40px, 6vw, 66px); font-variant-numeric: tabular-nums; line-height: 1; }
 .transition-countdown span { font-size: 13px; color: #cbd8ff; }
 .transition-help { margin: 0; max-width: 500px; color: #cbd5e1; font-size: 13px; }
+/* Searchable incompatibility relation pickers and removable relation chips. */
+.incompatibility-editor{min-width:180px;display:grid;gap:7px}.incompatibility-editor>input[type=search]{width:100%;min-width:0;border:1px solid var(--border,#d8dee8);border-radius:7px;padding:7px 9px;font:inherit;font-size:12px}.incompatibility-options{display:grid;gap:4px;max-height:112px;overflow:auto;padding:5px 7px;border:1px solid var(--border,#d8dee8);border-radius:7px}.incompatibility-option{display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer}.incompatibility-option input{margin:0}.incompatibility-selected{display:flex;flex-wrap:wrap;align-items:center;gap:4px}.incompatibility-chip{display:inline-flex;align-items:center;gap:3px;max-width:100%;border:1px solid #f0c36d;border-radius:999px;background:#fff7e6;color:#85530b;padding:3px 7px;font-size:11px;cursor:pointer}.incompatibility-editor small{color:var(--muted,#64748b);font-size:11px}
 @media (max-width: 620px) {
   .activation-dialog { padding: 18px; border-radius: 15px; }
   .activation-dialog-actions { flex-direction: column-reverse; align-items: stretch; }
