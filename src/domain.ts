@@ -23,8 +23,8 @@ export interface TimerState {
   updatedAt: number;
 }
 
-export interface Team { id: string; name: string; institution: string; active: boolean }
-export interface Judge { id: string; name: string; institution: string; active: boolean }
+export interface Team { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }
+export interface Judge { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }
 export interface Round {
   id: string;
   number: number;

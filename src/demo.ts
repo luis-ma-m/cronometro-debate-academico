@@ -11,19 +11,19 @@ export const demoTournament: Tournament = {
   tournamentName: 'Torneo LEDU · Demo',
   rounds: [{ id: 'r1', number: 1, name: 'Ronda 1', active: true, defaultFormatId: 'format-ledu' }, { id: 'r2', number: 2, name: 'Ronda 2', active: false, defaultFormatId: 'format-ledu' }],
   teams: [
-    { id: 't1', name: 'Málaga A', institution: 'Universidad de Málaga', active: true },
-    { id: 't2', name: 'Sevilla B', institution: 'Universidad de Sevilla', active: true },
-    { id: 't3', name: 'Granada A', institution: 'Universidad de Granada', active: true },
-    { id: 't4', name: 'Córdoba B', institution: 'Universidad de Córdoba', active: true },
-    { id: 't5', name: 'Madrid A', institution: 'Universidad Complutense', active: true },
-    { id: 't6', name: 'Murcia B', institution: 'Universidad de Murcia', active: true },
+    { id: 't1', name: 'Málaga A', institution: 'Universidad de Málaga', active: true, incompatibleJudgeIds: [] },
+    { id: 't2', name: 'Sevilla B', institution: 'Universidad de Sevilla', active: true, incompatibleJudgeIds: [] },
+    { id: 't3', name: 'Granada A', institution: 'Universidad de Granada', active: true, incompatibleJudgeIds: [] },
+    { id: 't4', name: 'Córdoba B', institution: 'Universidad de Córdoba', active: true, incompatibleJudgeIds: [] },
+    { id: 't5', name: 'Madrid A', institution: 'Universidad Complutense', active: true, incompatibleJudgeIds: [] },
+    { id: 't6', name: 'Murcia B', institution: 'Universidad de Murcia', active: true, incompatibleJudgeIds: [] },
   ],
   judges: [
-    { id: 'j1', name: 'Ana García', institution: 'LEDU', active: true },
-    { id: 'j2', name: 'Luis Pérez', institution: 'LEDU', active: true },
-    { id: 'j3', name: 'María Ruiz', institution: 'LEDU', active: true },
-    { id: 'j4', name: 'Pablo Díaz', institution: 'LEDU', active: true },
-    { id: 'j5', name: 'Elena Martín', institution: 'LEDU', active: true },
+    { id: 'j1', name: 'Ana García', institution: 'LEDU', active: true, incompatibleJudgeIds: [] },
+    { id: 'j2', name: 'Luis Pérez', institution: 'LEDU', active: true, incompatibleJudgeIds: [] },
+    { id: 'j3', name: 'María Ruiz', institution: 'LEDU', active: true, incompatibleJudgeIds: [] },
+    { id: 'j4', name: 'Pablo Díaz', institution: 'LEDU', active: true, incompatibleJudgeIds: [] },
+    { id: 'j5', name: 'Elena Martín', institution: 'LEDU', active: true, incompatibleJudgeIds: [] },
   ],
   rooms: [
     room('a1', 'Sala A1', 't1', 't2', ['j1', 'j2']),
@@ -57,6 +57,13 @@ export function readDemo(): Tournament {
       const parsed = JSON.parse(raw) as Tournament;
       if (!Array.isArray(parsed.physicalRooms) || !Array.isArray(parsed.formats)) return demoTournament;
       if (!parsed.formatPhases?.length) parsed.formatPhases = parsed.rooms[0]?.phases?.length ? parsed.rooms[0].phases : LEDU_PHASES;
+      parsed.teams=(parsed.teams??[]).map((team)=>({...team,incompatibleJudgeIds:Array.isArray(team.incompatibleJudgeIds)?[...new Set(team.incompatibleJudgeIds)]:[]}));
+      parsed.judges=(parsed.judges??[]).map((judge)=>({...judge,incompatibleJudgeIds:Array.isArray(judge.incompatibleJudgeIds)?[...new Set(judge.incompatibleJudgeIds.filter((id)=>id!==judge.id))]:[]}));
+      const judgeIds=new Set(parsed.judges.map((judge)=>judge.id));
+      parsed.teams=parsed.teams.map((team)=>({...team,incompatibleJudgeIds:team.incompatibleJudgeIds.filter((id)=>judgeIds.has(id))}));
+      const relationMap=new Map(parsed.judges.map((judge)=>[judge.id,new Set(judge.incompatibleJudgeIds.filter((id)=>judgeIds.has(id)))]));
+      for(const judge of parsed.judges)for(const id of judge.incompatibleJudgeIds)relationMap.get(id)?.add(judge.id);
+      parsed.judges=parsed.judges.map((judge)=>({...judge,incompatibleJudgeIds:[...(relationMap.get(judge.id)??[])].sort()}));
       return parsed;
     }
   } catch { /* Use fresh demo below. */ }

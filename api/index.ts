@@ -1,6 +1,7 @@
 import { createHash, createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
+import { findAssignmentConflicts } from "../src/incompatibilities.js";
 import {
   ApiError,
   DEFAULT_SPREADSHEET_ID,
@@ -13,6 +14,7 @@ import {
   num,
   objectsFromRows,
   parseJson,
+  parseStringArray,
   publicRoomPayload,
   remainingSeconds,
   str,
@@ -299,7 +301,7 @@ async function ensureSchema(): Promise<SpreadsheetMetadata> {
 }
 
 async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
-  // Version 2 is intentionally a destructive reset: the product decision allows
+  // Version 3 is intentionally a destructive reset: the product decision allows
   // the old tournament data to be discarded instead of being ambiguously mapped
   // onto permanent physical rooms and per-round assignments.
   return withLock("ledu:lock:schema-migration", async () => {
@@ -307,7 +309,7 @@ async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
     // can otherwise both decide to migrate and the second can erase new data.
     const current = await sheetsRequest<{ values?: unknown[][] }>("/values/Config!A:B?majorDimension=ROWS");
     const configRows = objectsFromRows(current.values);
-    if (configRows.some((row) => str(row.key) === "schemaVersion" && str(row.value) === "2")) {
+    if (configRows.some((row) => str(row.key) === "schemaVersion" && str(row.value) === "3")) {
       return spreadsheetMetadata(true);
     }
     if (env("VERCEL_ENV") !== "production") {
@@ -361,7 +363,7 @@ async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
       ["minimumJudgesPerRoom", "1"],
       ["revision", "1"],
       ["updatedAt", String(now)],
-      ["schemaVersion", "2"],
+      ["schemaVersion", "3"],
       ["activeRoundId", ""],
       ["activationRevision", "0"],
       ["activatedAt", "0"],
@@ -476,9 +478,11 @@ function tournamentFromData(data: SheetData): Tournament {
   }));
   const teams = data.rows.Equipos.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
+    incompatibleJudgeIds: parseStringArray(row.incompatibleJudgeIds),
   }));
   const judges = data.rows.Jueces.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
+    incompatibleJudgeIds: parseStringArray(row.incompatibleJudgeIds),
   }));
   const institutionsMap = new Map<string, string>();
   for (const rawName of [
@@ -841,7 +845,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "formatPhases", JSON.stringify(phases));
     setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
-    setConfig(configRows, "schemaVersion", "2");
+    setConfig(configRows, "schemaVersion", "3");
     // Only activateRound may change the globally active round or activation revision.
     setConfig(configRows, "activeRoundId", current.activeRoundId || "");
     setConfig(configRows, "activationRevision", String(current.activationRevision || 0));
@@ -856,8 +860,8 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
         active: round.id === current.activeRoundId,
         defaultFormatId: round.defaultFormatId || tournament.formats[0]?.id || "",
       })),
-      Equipos: tournament.teams.map((team) => ({ id: team.id, name: team.name, institution: team.institution, active: team.active })),
-      Jueces: tournament.judges.map((judge) => ({ id: judge.id, name: judge.name, institution: judge.institution, active: judge.active })),
+      Equipos: tournament.teams.map((team) => ({ id: team.id, name: team.name, institution: team.institution, active: team.active, incompatibleJudgeIds: JSON.stringify(team.incompatibleJudgeIds ?? []) })),
+      Jueces: tournament.judges.map((judge) => ({ id: judge.id, name: judge.name, institution: judge.institution, active: judge.active, incompatibleJudgeIds: JSON.stringify(judge.incompatibleJudgeIds ?? []) })),
       Salas: finalRooms.map((room) => rowObjectForRoom(room, minimumJudges, now)),
       Cronometros: finalRooms.map((room) => rowObjectForTimer(room.id, room.timer)),
       SalasFisicas: tournament.physicalRooms.map((room) => ({ ...room, updatedAt: now })),
@@ -1045,17 +1049,18 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
       if (!room.teamFavorId || !room.teamContraId || room.teamFavorId === room.teamContraId || room.judgeIds.length < (tournament.minimumJudgesPerRoom || 1)) {
         throw new ApiError("INVALID_ASSIGNMENT", "Asigna dos equipos distintos y al menos " + (tournament.minimumJudgesPerRoom || 1) + " juez(es) antes de iniciar.");
       }
-      for (const judgeId of room.judgeIds) {
-        const judge = tournament.judges.find((item) => item.id === judgeId);
-        const judgeInstitution = str(judge?.institution).trim().toLocaleLowerCase("es-ES");
-        if (!judgeInstitution) continue;
-        for (const teamId of [room.teamFavorId, room.teamContraId]) {
-          const team = tournament.teams.find((item) => item.id === teamId);
-          const teamInstitution = str(team?.institution).trim().toLocaleLowerCase("es-ES");
-          if (teamInstitution && teamInstitution === judgeInstitution) {
-            throw new ApiError("INSTITUTION_CONFLICT", "El juez " + str(judge?.name) + " y el equipo " + str(team?.name) + " comparten institución y no pueden coincidir en la misma sala.");
-          }
-        }
+      const conflicts = findAssignmentConflicts({
+        teams: tournament.teams,
+        judges: tournament.judges,
+        rooms: [room],
+      });
+      if (conflicts.length) {
+        const code = conflicts.some((conflict) => conflict.type === "institution")
+          ? "INSTITUTION_CONFLICT"
+          : conflicts.some((conflict) => conflict.type === "team-judge")
+            ? "TEAM_JUDGE_CONFLICT"
+            : "JUDGE_JUDGE_CONFLICT";
+        throw new ApiError(code, room.name + ": " + [...new Set(conflicts.map((conflict) => conflict.message))].join(" "));
       }
       validatePhases(room.phases);
     }

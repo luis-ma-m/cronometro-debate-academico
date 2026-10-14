@@ -2,6 +2,35 @@ import { describe, expect, it } from 'vitest';
 import type { Phase } from './domain';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 
+describe('incompatibility domain rules', () => {
+  const room = { id:'r1', name:'Sala 1', roundId:'r1', physicalRoomId:'p1', formatId:'f1', teamFavorId:'t1', teamContraId:'t2', judgeIds:['j1'], status:'ready' as const, phases:LEDU_PHASES, timer:createTimer(), notes:'', updatedAt:1 };
+  // Empty array literals otherwise infer as never[] in this mutable fixture.
+  const base = (): {
+    rounds: { id: string; name: string }[];
+    teams: { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }[];
+    judges: { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }[];
+    rooms: typeof room[];
+  } => ({
+    rounds:[{id:'r1',name:'Ronda 1'}],
+    teams:[{id:'t1',name:'Equipo A',institution:'Uni A',active:true,incompatibleJudgeIds:[]},{id:'t2',name:'Equipo B',institution:'Uni B',active:true,incompatibleJudgeIds:[]}],
+    judges:[{id:'j1',name:'Juez 1',institution:'Otra',active:true,incompatibleJudgeIds:[]},{id:'j2',name:'Juez 2',institution:'Otra',active:true,incompatibleJudgeIds:[]}],
+    rooms:[{...room,judgeIds:['j1','j2']}],
+  });
+  it('blocks institution, team-judge and judge-judge conflicts while preserving the empty-list behavior', () => {
+    const value=base();
+    expect(validateAssignments(value)).toEqual([]);
+    value.judges[0].institution='Uni A';
+    expect(validateAssignments(value).some((message)=>message.includes('comparten institución'))).toBe(true);
+    value.judges[0].institution='Otra';
+    value.teams[1].incompatibleJudgeIds=['j1'];
+    expect(validateAssignments(value).some((message)=>message.includes('incompatible con el equipo Equipo B'))).toBe(true);
+    value.teams[1].incompatibleJudgeIds=[];
+    value.judges[0].incompatibleJudgeIds=['j2'];
+    expect(validateAssignments(value).some((message)=>message.includes('Juez 1 y Juez 2 son incompatibles'))).toBe(true);
+  });
+});
+
+
 describe('preset LEDU general', () => {
   it('matches the reference turn sequence and duration from the project specification', () => {
     expect(LEDU_PHASES.map((phase) => phase.durationSeconds)).toEqual([240, 120, 240, 120, 300, 300, 300, 300, 90, 90, 180, 180]);

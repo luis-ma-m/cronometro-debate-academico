@@ -1,4 +1,5 @@
 import type { Phase, TimerState } from './domain';
+import { findAssignmentConflicts } from './incompatibilities';
 
 export const LEDU_PHASES: Phase[] = [
   { id: 'ledu-01', name: 'Exposición inicial', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
@@ -88,7 +89,7 @@ export function withRoomStatus<T extends { status: string; timer: TimerState; te
   return { ...room, status };
 }
 
-export function validateAssignments(tournament: { rounds: { id: string; name: string }[]; teams: { id: string; name: string; institution?: string }[]; judges: { id: string; name: string; institution?: string }[]; rooms: { id: string; name: string; roundId: string; teamFavorId: string; teamContraId: string; judgeIds: string[]; phases: Phase[] }[] }): string[] {
+export function validateAssignments(tournament: { rounds: { id: string; name: string }[]; teams: { id: string; name: string; institution?: string; incompatibleJudgeIds?: string[] }[]; judges: { id: string; name: string; institution?: string; incompatibleJudgeIds?: string[] }[]; rooms: { id: string; name: string; roundId: string; teamFavorId: string; teamContraId: string; judgeIds: string[]; phases: Phase[] }[] }): string[] {
   const errors: string[] = [];
   const roundIds = new Set(tournament.rounds.map((round) => round.id));
   const teamIds = new Map(tournament.teams.map((team) => [team.id, team.name]));
@@ -134,6 +135,15 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
         break;
       }
     }
+  }
+  const conflictInput = {
+    teams: tournament.teams.map((team) => ({ ...team, active: true, incompatibleJudgeIds: (team as typeof team & { incompatibleJudgeIds?: string[] }).incompatibleJudgeIds ?? [] })),
+    judges: tournament.judges.map((judge) => ({ ...judge, active: true, incompatibleJudgeIds: (judge as typeof judge & { incompatibleJudgeIds?: string[] }).incompatibleJudgeIds ?? [] })),
+    rooms: tournament.rooms,
+  } as unknown as Parameters<typeof findAssignmentConflicts>[0];
+  const conflictLabels = { institution: 'Conflicto de institución', 'team-judge': 'Incompatibilidad equipo–juez', 'judge-judge': 'Incompatibilidad juez–juez' } as const;
+  for (const conflict of findAssignmentConflicts(conflictInput)) {
+    errors.push(`${conflict.roomName}: ${conflictLabels[conflict.type]}. ${conflict.message}`);
   }
   return [...new Set(errors)];
 }

@@ -1,5 +1,6 @@
 import type { Phase, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
+import { findAssignmentConflicts } from "../src/incompatibilities.js";
 
 export const DEFAULT_SPREADSHEET_ID = "1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI";
 export const SESSION_TTL_SECONDS = 8 * 60 * 60;
@@ -7,8 +8,8 @@ export const SESSION_TTL_SECONDS = 8 * 60 * 60;
 export const SHEET_HEADERS = {
   Config: ["key", "value"],
   Rondas: ["id", "number", "name", "active", "defaultFormatId"],
-  Equipos: ["id", "name", "institution", "active"],
-  Jueces: ["id", "name", "institution", "active"],
+  Equipos: ["id", "name", "institution", "active", "incompatibleJudgeIds"],
+  Jueces: ["id", "name", "institution", "active", "incompatibleJudgeIds"],
   Salas: ["id", "name", "roundId", "teamFavorId", "teamContraId", "judgeIds", "status", "phases", "notes", "updatedAt", "physicalRoomId", "formatId"],
   SalasFisicas: ["id", "slug", "name", "active", "createdAt", "updatedAt"],
   Formatos: ["id", "name", "phases", "version", "createdAt", "updatedAt"],
@@ -45,6 +46,12 @@ export function parseJson<T>(value: unknown, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+export function parseStringArray(value: unknown): string[] {
+  const parsed = parseJson<unknown>(value, []);
+  if (!Array.isArray(parsed)) return [];
+  return [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0))];
 }
 
 export function objectsFromRows(values: unknown[][] | undefined): SheetRow[] {
@@ -244,6 +251,23 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
   }
   const teamIds = new Set(tournament.teams.map((item) => str(item.id)).filter(Boolean));
   const judgeIds = new Set(tournament.judges.map((item) => str(item.id)).filter(Boolean));
+  for (const team of tournament.teams) {
+    const raw=(team as typeof team & {incompatibleJudgeIds?:unknown}).incompatibleJudgeIds;
+    if(raw===undefined) team.incompatibleJudgeIds=[];
+    else if(!Array.isArray(raw)||raw.some(id=>typeof id!=="string")) throw new ApiError("INVALID_INCOMPATIBILITIES","La lista de jueces incompatibles del equipo "+str(team.name)+" no es válida.");
+    if(new Set(team.incompatibleJudgeIds).size!==team.incompatibleJudgeIds.length) throw new ApiError("INVALID_INCOMPATIBILITIES","Hay jueces incompatibles duplicados en el equipo "+str(team.name)+".");
+    for(const id of team.incompatibleJudgeIds) if(!judgeIds.has(id)) throw new ApiError("INVALID_INCOMPATIBILITIES","El equipo "+str(team.name)+" referencia un juez inexistente.");
+  }
+  for (const judge of tournament.judges) {
+    const raw=(judge as typeof judge & {incompatibleJudgeIds?:unknown}).incompatibleJudgeIds;
+    if(raw===undefined) judge.incompatibleJudgeIds=[];
+    else if(!Array.isArray(raw)||raw.some(id=>typeof id!=="string")) throw new ApiError("INVALID_INCOMPATIBILITIES","La lista de jueces incompatibles de "+str(judge.name)+" no es válida.");
+    if(new Set(judge.incompatibleJudgeIds).size!==judge.incompatibleJudgeIds.length) throw new ApiError("INVALID_INCOMPATIBILITIES","Hay jueces incompatibles duplicados en "+str(judge.name)+".");
+    for(const id of judge.incompatibleJudgeIds){if(!judgeIds.has(id)) throw new ApiError("INVALID_INCOMPATIBILITIES","El juez "+str(judge.name)+" referencia un juez inexistente.");if(id===judge.id) throw new ApiError("INVALID_INCOMPATIBILITIES","Un juez no puede ser incompatible consigo mismo.");}
+  }
+  const symmetric=new Map<string,Set<string>>(tournament.judges.map(j=>[j.id,new Set(j.incompatibleJudgeIds)]));
+  for(const judge of tournament.judges) for(const id of judge.incompatibleJudgeIds) symmetric.get(id)?.add(judge.id);
+  for(const judge of tournament.judges) judge.incompatibleJudgeIds=[...(symmetric.get(judge.id)??[])].sort();
   const teamBookings = new Set<string>();
   const judgeBookings = new Set<string>();
   const physicalRoundBookings = new Set<string>();
@@ -267,28 +291,23 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
     }
     const inRoom = new Set<string>();
     if (!Array.isArray(room.judgeIds)) throw new ApiError("INVALID_ASSIGNMENT", "La lista de jueces de una sala no es válida.");
+    // Evaluate every rule for the room and report every blocking reason in one response.
+    const roomConflicts = findAssignmentConflicts({ teams: tournament.teams, judges: tournament.judges, rooms: [room] });
+    if (roomConflicts.length) {
+      const code = roomConflicts.some((conflict) => conflict.type === "institution")
+        ? "INSTITUTION_CONFLICT"
+        : roomConflicts.some((conflict) => conflict.type === "team-judge")
+          ? "TEAM_JUDGE_CONFLICT"
+          : "JUDGE_JUDGE_CONFLICT";
+      throw new ApiError(code, room.name + ": " + [...new Set(roomConflicts.map((conflict) => conflict.message))].join(" "));
+    }
     for (const judgeId of room.judgeIds) {
-      if (!judgeIds.has(str(judgeId))) throw new ApiError("INVALID_ASSIGNMENT", "Una sala contiene un juez inexistente.");
-      if (inRoom.has(str(judgeId))) throw new ApiError("INVALID_ASSIGNMENT", "Un juez aparece más de una vez en la misma sala.");
+      if (!judgeIds.has(str(judgeId))) throw new ApiError("INVALID_ASSIGNMENT", "La sala " + str(room.name) + " referencia un juez inexistente.");
+      if (inRoom.has(str(judgeId))) throw new ApiError("DUPLICATE_JUDGE_ASSIGNMENT", "Un juez no puede estar asignado dos veces a la misma sala.");
       inRoom.add(str(judgeId));
       const bookingKey = str(room.roundId) + ":" + str(judgeId);
       if (judgeBookings.has(bookingKey)) throw new ApiError("JUDGE_DOUBLE_BOOKED", "Un juez está asignado a dos salas de la misma ronda.");
       judgeBookings.add(bookingKey);
-    }
-    for (const judgeId of room.judgeIds) {
-      const judge = tournament.judges.find((item) => str(item.id) === str(judgeId));
-      const judgeInstitution = str(judge?.institution).trim().toLocaleLowerCase("es-ES");
-      if (!judgeInstitution) continue;
-      for (const teamId of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
-        const team = tournament.teams.find((item) => str(item.id) === str(teamId));
-        const teamInstitution = str(team?.institution).trim().toLocaleLowerCase("es-ES");
-        if (team && teamInstitution && teamInstitution === judgeInstitution) {
-          throw new ApiError(
-            "INSTITUTION_CONFLICT",
-            "El juez " + str(judge?.name) + " y el equipo " + str(team.name) + " comparten institución y no pueden coincidir en la misma sala."
-          );
-        }
-      }
     }
     validatePhases(room.phases);
   }

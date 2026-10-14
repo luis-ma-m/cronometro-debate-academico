@@ -11,7 +11,7 @@ Aplicación web para coordinar un torneo de debate académico LEDU desde un pane
 - Salas físicas con URL pública permanente; cada ronda guarda una asignación independiente de equipos, jueces y estado de cronómetro.
 - Presets de formato editables desde Configuración, seleccionables como formato predeterminado de ronda y con excepción por sala.
 - Aviso visual de 20 segundos en las pantallas públicas tras activar una ronda, con los equipos y jueces recién asignados.
-- Validación de equipos y jueces duplicados en una misma ronda; validación de rondas, IDs y secuencias.
+- Validación de equipos y jueces duplicados en una misma ronda; incompatibilidades por institución, equipo–juez y juez–juez, con relaciones entre jueces simétricas.
 - Editor del formato del debate: nombre de la intervención, tipo, postura, interviniente, duración, avisos, exceso de tiempo, orden, alta y baja de intervenciones.
 - Preset LEDU general editable con 12 intervenciones y duración teórica de 41 minutos. Comprueba siempre el reglamento de la edición concreta antes del torneo.
 - Cronómetro local basado en marcas temporales para evitar deriva acumulada.
@@ -50,7 +50,14 @@ La hoja configurada para el proyecto es:
 
 https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI/edit
 
-El esquema v2 usa Config, Rondas, Equipos, Jueces, Salas, SalasFisicas, Formatos, Cronometros y Registro. En el primer acceso a Production con una hoja que no tenga `schemaVersion=2`, la API reinicializa los datos de torneo y crea una ronda y el preset LEDU. **Esta migración es destructiva y no conserva el torneo anterior.** Los previews no pueden ejecutarla para evitar que un despliegue de prueba borre la hoja de producción compartida. Consulta docs/DEPLOYMENT.md antes del despliegue.
+El esquema v3 usa Config, Rondas, Equipos, Jueces, Salas, SalasFisicas, Formatos, Cronometros y Registro. Equipos y Jueces guardan `incompatibleJudgeIds` como JSON. En el primer acceso a Production sin `schemaVersion=3`, la API reinicializa los datos y crea la ronda inicial y el preset LEDU. Esta migración v3 es destructiva una sola vez; Preview sigue bloqueado para no borrar la hoja compartida. **Esta migración es destructiva y no conserva el torneo anterior.** Los previews no pueden ejecutarla para evitar que un despliegue de prueba borre la hoja de producción compartida. Consulta docs/DEPLOYMENT.md antes del despliegue.
+
+
+## Incompatibilidades (esquema v3)
+
+En las pestañas Equipos y Jueces se pueden buscar y configurar incompatibilidades por IDs estables. Las institucionales siguen siendo obligatorias; las relaciones entre jueces se mantienen recíprocas. Gestión, validación de guardado y API de inicio del cronómetro utilizan las mismas reglas para institución, equipo–juez y juez–juez. Las incompatibilidades que afecten a asignaciones ya existentes se muestran para revisión, sin retirar asignaciones automáticamente.
+
+**Migración destructiva:** el primer acceso a Production sin `schemaVersion=3` reinicializa las pestañas de la hoja, incluyendo equipos, jueces, asignaciones, cronómetros e historial, y crea una ronda y el preset LEDU. Preview no puede ejecutar la migración. Exporta previamente los datos necesarios y acepta explícitamente la pérdida antes del despliegue.
 
 ## Seguridad y límites
 

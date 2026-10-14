@@ -8,6 +8,7 @@ import {
   objectsFromRows,
   publicRoomPayload,
   rowsToValues,
+  parseStringArray,
   transitionTimer,
   validateTournamentInput,
 } from "./core.js";
@@ -34,10 +35,10 @@ function makeTournament(): Tournament {
     tournamentName: "Torneo de prueba",
     rounds: [{ id: "r1", number: 1, name: "Ronda 1", active: true, defaultFormatId: "format-ledu" }],
     teams: [
-      { id: "t1", name: "Equipo A", institution: "Universidad A", active: true },
-      { id: "t2", name: "Equipo B", institution: "Universidad B", active: true },
+      { id: "t1", name: "Equipo A", institution: "Universidad A", active: true, incompatibleJudgeIds: [] },
+      { id: "t2", name: "Equipo B", institution: "Universidad B", active: true, incompatibleJudgeIds: [] },
     ],
-    judges: [{ id: "j1", name: "Juez 1", institution: "LEDU", active: true }],
+    judges: [{ id: "j1", name: "Juez 1", institution: "LEDU", active: true, incompatibleJudgeIds: [] }],
     rooms: [room],
     physicalRooms: [{ id: "physical-a1", slug: "sala-a1", name: "Sala A1", active: true, createdAt: now, updatedAt: now }],
     formats: [{ id: "format-ledu", name: "LEDU", phases, version: 1, createdAt: now, updatedAt: now }],
@@ -67,9 +68,9 @@ describe("Vercel API core", () => {
   });
 
   it("clears stale cells when a table is rewritten with fewer rows", () => {
-    expect(rowsToValues("Equipos", [{ id: "t1", name: "A", institution: "", active: true }], 2)).toEqual([
-      ["t1", "A", "", true],
-      ["", "", "", ""],
+    expect(rowsToValues("Equipos", [{ id: "t1", name: "A", institution: "", active: true, incompatibleJudgeIds: "[]" }], 2)).toEqual([
+      ["t1", "A", "", true, "[]"],
+      ["", "", "", "", ""],
     ]);
   });
 
@@ -122,7 +123,7 @@ describe("Vercel API core", () => {
 
   it("rejects duplicate judge assignment across simultaneous rooms", () => {
     const tournament = makeTournament();
-    tournament.teams.push({ id: "t3", name: "Equipo C", institution: "", active: true });
+    tournament.teams.push({ id: "t3", name: "Equipo C", institution: "", active: true, incompatibleJudgeIds: [] });
     tournament.physicalRooms.push({ id: "physical-a2", slug: "sala-a2", name: "Sala A2", active: true, createdAt: 1, updatedAt: 1 });
     tournament.rooms.push({
       ...tournament.rooms[0],
@@ -134,6 +135,58 @@ describe("Vercel API core", () => {
       judgeIds: ["j1"],
     });
     expect(() => validateTournamentInput(tournament)).toThrow("juez está asignado a dos salas");
+  });
+
+
+  it("rejects a team-judge incompatibility against either side of the debate", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({ id: "j2", name: "Juez 2", institution: "", active: true, incompatibleJudgeIds: [] });
+    for (const teamId of ["t1", "t2"]) {
+      const changed = { ...tournament, teams: tournament.teams.map((team) => ({ ...team, incompatibleJudgeIds: team.id === teamId ? ["j2"] : [] })), rooms: tournament.rooms.map((room) => ({ ...room, judgeIds: ["j2"] })) };
+      expect(() => validateTournamentInput(changed)).toThrow("es incompatible con el equipo");
+    }
+  });
+
+  it("normalizes judge-judge relations as reciprocal and rejects co-assignment in one room", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({ id: "j2", name: "Juez 2", institution: "LEDU", active: true, incompatibleJudgeIds: [] });
+    tournament.rooms[0].judgeIds = [];
+    tournament.judges[0].incompatibleJudgeIds = ["j2"];
+    validateTournamentInput(tournament);
+    expect(tournament.judges[1].incompatibleJudgeIds).toEqual(["j1"]);
+    tournament.rooms[0].judgeIds = ["j2", "j1"];
+    expect(() => validateTournamentInput(tournament)).toThrow("son incompatibles");
+  });
+
+  it("rejects dangling, duplicate and self-referential incompatibility IDs", () => {
+    const dangling = makeTournament();
+    dangling.teams[0].incompatibleJudgeIds = ["missing-judge"];
+    expect(() => validateTournamentInput(dangling)).toThrow("juez inexistente");
+    const duplicate = makeTournament();
+    duplicate.judges.push({ id: "j2", name: "Juez 2", institution: "", active: true, incompatibleJudgeIds: [] });
+    duplicate.teams[0].incompatibleJudgeIds = ["j1", "j1"];
+    expect(() => validateTournamentInput(duplicate)).toThrow("duplicados");
+    const self = makeTournament();
+    self.judges[0].incompatibleJudgeIds = ["j1"];
+    expect(() => validateTournamentInput(self)).toThrow("consigo mismo");
+  });
+
+  it("allows incompatible judges in separate rooms in the same round", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({ id: "j2", name: "Juez 2", institution: "", active: true, incompatibleJudgeIds: ["j1"] });
+    tournament.judges[0].incompatibleJudgeIds = ["j2"];
+    tournament.teams.push({ id: "t3", name: "Equipo C", institution: "", active: true, incompatibleJudgeIds: [] });
+    tournament.teams.push({ id: "t4", name: "Equipo D", institution: "", active: true, incompatibleJudgeIds: [] });
+    tournament.physicalRooms.push({ id: "physical-a2", slug: "sala-a2", name: "Sala A2", active: true, createdAt: 1, updatedAt: 1 });
+    tournament.rooms.push({ ...tournament.rooms[0], id: "a2", name: "Sala A2", physicalRoomId: "physical-a2", teamFavorId: "t3", teamContraId: "t4", judgeIds: ["j2"] });
+    expect(() => validateTournamentInput(tournament)).not.toThrow();
+  });
+
+
+  it("parses malformed incompatibility JSON as an empty list", () => {
+    expect(parseStringArray("{bad json")).toEqual([]);
+    expect(parseStringArray('{"unexpected":"object"}')).toEqual([]);
+    expect(parseStringArray('["j1", 2, "", "j1"]')).toEqual(["j1"]);
   });
 
   it("preserves timer revision and timestamp-based state transitions", () => {
