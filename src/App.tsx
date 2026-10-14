@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer } from './api';
 import type { RoundActivationPreview } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
@@ -353,7 +353,6 @@ export default function App() {
     return (round?.scoreType ?? 'qualifying') === 'qualifying' && hasTeams &&
       room.timer.status === 'finished' && !scorecards.some((card) => card.roomId === room.id);
   });
-  const completedScoreCount = rooms.filter((room) => scorecards.some((card) => card.roomId === room.id)).length;
 
   const updateScoring = (next: typeof scoring) => updateData((current) => ({ ...current, scoring: next }));
   const addScoreCategory = () => {
@@ -379,25 +378,7 @@ export default function App() {
     if (!window.confirm('¿Eliminar la categoría "' + category.name + '"?')) return;
     updateScoring({ ...scoring, categories: scoring.categories.filter((item) => item.id !== category.id).map((item, index) => ({ ...item, order: index })) });
   };
-  const makeScorecard = (room: Room): RoundScorecard => {
-    const round = data.rounds.find((item) => item.id === room.roundId);
-    const teamIds = [room.teamFavorId, room.teamContraId];
-    const old = scorecards.find((card) => card.roomId === room.id);
-    const makeTeamScore = (teamId: string): TeamScore => {
-      const team = data.teams.find((item) => item.id === teamId);
-      const previous = old?.teams.find((item) => item.teamId === teamId);
-      const categoryScores = Object.fromEntries(scoring.categories.map((category) => [category.id, previous?.categoryScores?.[category.id] ?? 0]));
-      return { teamId, teamName: team?.name ?? 'Equipo', categoryScores, total: sumCategoryScores(categoryScores, scoring.categories), minorFaults: previous?.minorFaults ?? 0, majorFaults: previous?.majorFaults ?? 0 };
-    };
-    return old ?? {
-      id: makeId('scorecard'), roundId: room.roundId, roundName: round?.name ?? 'Ronda',
-      roomId: room.id, roomName: room.name, teamFavorId: room.teamFavorId, teamContraId: room.teamContraId,
-      judges: room.judgeIds.map((id) => ({ judgeId: id, judgeName: data.judges.find((judge) => judge.id === id)?.name ?? id })),
-      teams: [makeTeamScore(teamIds[0]), makeTeamScore(teamIds[1])],
-      speakers: [], createdAt: Date.now(), updatedAt: Date.now(),
-    };
-  };
-  const saveScorecard = async (room: Room, formCard: RoundScorecard) => {
+  const saveScorecard = async (room: Room, formCard: RoundScorecard): Promise<boolean> => {
     setSavingScores(true);
     setServerError('');
     try {
@@ -429,8 +410,10 @@ export default function App() {
       setHasUnsavedChanges(false);
       setConnected(true);
       setLastSyncedAt(Date.now());
+      return true;
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se pudo guardar el acta de puntuación.');
+      return false;
     } finally { setSavingScores(false); }
   };
   const persistTournamentMetadata = async (candidate: Tournament) => {
@@ -456,7 +439,23 @@ export default function App() {
   };
 
   const saveScoreCategories = async () => {
-    await persistTournamentMetadata({ ...data, scoring: { ...scoring, scorecards } });
+    setSavingScores(true);
+    setServerError('');
+    try {
+      let saved: Tournament;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        saved = await apiSaveScoreConfig(session.token, data.revision, scoring.categories, scorecards);
+      } else {
+        saved = { ...data, scoring: { ...scoring, scorecards }, revision: data.revision + 1, updatedAt: Date.now() };
+        writeDemo(saved);
+      }
+      setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo guardar la configuración de puntuaciones.');
+    } finally { setSavingScores(false); }
   };
 
   const addInstitution = () => {
@@ -1030,7 +1029,7 @@ function ScoringView({
   onUpdateCategory: (id: string, patch: Partial<ScoreCategory>) => void;
   onRemoveCategory: (category: ScoreCategory) => void;
   onSaveCategories: () => void;
-  onSaveScorecard: (room: Room, card: RoundScorecard) => void;
+  onSaveScorecard: (room: Room, card: RoundScorecard) => Promise<boolean>;
   saving: boolean;
 }) {
   const [editingRoomId, setEditingRoomId] = useState("");
@@ -1102,11 +1101,10 @@ function ScoringView({
       speakerId: speaker.id, speakerName: speaker.name, teamId: speaker.teamId, position: "introductor", score: 0,
     }] });
   };
-  const persist = () => {
+  const persist = async () => {
     if (!currentRoom || !draft) return;
-    onSaveScorecard(currentRoom, draft);
-    setEditingRoomId("");
-    setDraft(null);
+    const saved = await onSaveScorecard(currentRoom, draft);
+    if (saved) { setEditingRoomId(""); setDraft(null); }
   };
 
   return <>
