@@ -27,9 +27,10 @@ La migración solo se ejecuta cuando `VERCEL_ENV=production`. Un despliegue `Pre
 
 ## Incompatibilidades
 
-`Equipos` y `Jueces` contienen `incompatibleJudgeIds` serializado como JSON. Las reglas de institución, equipo–juez y juez–juez se validan tanto en el gestor como en la API; las relaciones juez–juez se guardan recíprocamente.
+Las pestañas `Equipos` y `Jueces` almacenan `incompatibleJudgeIds` como JSON. El guardado normaliza las relaciones juez–juez para que sean recíprocas y rechaza IDs inexistentes, duplicados o autorreferencias. Antes de guardar una asignación y justo antes de iniciar un cronómetro se verifican conjuntamente los conflictos por institución, equipo–juez y juez–juez.
 
-**Aviso:** la primera petición de Production cuando `Config` no contenga `schemaVersion=3` borra y reinicializa los datos de torneo de las pestañas existentes, y crea la ronda inicial y el formato LEDU. La operación no preserva los datos del esquema anterior. No despliegues esta versión sobre Production hasta aceptar esa pérdida; exporta previamente cualquier información que necesites. Preview continúa bloqueado para esta migración destructiva y no debe inicializar la hoja compartida.
+**Migración destructiva v3:** si `Config` no contiene `schemaVersion=3`, la primera petición en Production reinicializa las pestañas de datos y crea la ronda inicial y el preset LEDU. El proceso está bloqueado en Preview y protegido con un bloqueo distribuido para evitar que dos solicitudes ejecuten el reset en paralelo. No preserva los equipos, jueces, instituciones, asignaciones, cronómetros ni historial anteriores. Exporta los datos que quieras conservar y confirma la pérdida antes de permitir que Production ejecute esta versión.
+
 
 ## 2. Preparar coordinación en Upstash Redis
 
