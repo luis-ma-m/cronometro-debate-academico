@@ -862,7 +862,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "formatPhases", JSON.stringify(phases));
     setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
     setConfig(configRows, "speakers", JSON.stringify(tournament.speakers ?? []));
-    setConfig(configRows, "scoring", JSON.stringify(tournament.scoring ?? current.scoring ?? emptyScoringConfig()));
+    setConfig(configRows, "scoring", JSON.stringify(current.scoring ?? emptyScoringConfig()));
     setConfig(configRows, "roundTypes", JSON.stringify(Object.fromEntries(
       tournament.rounds.map((round) => [round.id, round.scoreType ?? current.rounds.find((item) => item.id === round.id)?.scoreType ?? "qualifying"]),
     )));
