@@ -140,7 +140,8 @@ describe("Vercel API core", () => {
   it("rejects a team-judge incompatibility against either side of the debate", () => {
     for (const teamId of ["t1", "t2"]) {
       const tournament = makeTournament();
-      tournament.teams.find((team) => team.id === teamId)!.incompatibleJudgeIds = ["j1"];
+      tournament.judges.push({ id: "j2", name: "Juez 2", institution: "", active: true, incompatibleJudgeIds: [] });
+      tournament.teams.find((team) => team.id === teamId)!.incompatibleJudgeIds = ["j2"];
       expect(() => validateTournamentInput(tournament)).toThrow("es incompatible con el equipo");
     }
   });
