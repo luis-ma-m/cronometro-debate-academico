@@ -345,6 +345,114 @@ export default function App() {
   const rooms = data.rooms.filter((room) => room.roundId === activeRound);
   const counts = { total: rooms.length, running: rooms.filter((room) => room.timer.status === 'running').length, ready: rooms.filter((room) => room.status === 'ready').length, unassigned: rooms.filter((room) => room.status === 'unassigned').length, finished: rooms.filter((room) => room.timer.status === 'finished').length };
 
+  const scoring = data.scoring ?? emptyScoringConfig();
+  const scorecards = scoring.scorecards ?? [];
+  const pendingScoreRooms = rooms.filter((room) => {
+    const round = data.rounds.find((item) => item.id === room.roundId);
+    const hasTeams = Boolean(room.teamFavorId && room.teamContraId && room.teamFavorId !== room.teamContraId);
+    return (round?.scoreType ?? 'qualifying') === 'qualifying' && hasTeams &&
+      room.timer.status === 'finished' && !scorecards.some((card) => card.roomId === room.id);
+  });
+  const completedScoreCount = rooms.filter((room) => scorecards.some((card) => card.roomId === room.id)).length;
+
+  const updateScoring = (next: typeof scoring) => updateData((current) => ({ ...current, scoring: next }));
+  const addScoreCategory = () => {
+    const name = scoreCategoryDraft.trim();
+    if (!name) return;
+    if (scoring.categories.some((item) => item.name.trim().toLocaleLowerCase('es-ES') === name.toLocaleLowerCase('es-ES'))) {
+      setServerError('Ya existe una categoría con ese nombre.');
+      return;
+    }
+    updateScoring({ ...scoring, categories: [...scoring.categories, { id: makeId('scorecat'), name, order: scoring.categories.length }] });
+    setScoreCategoryDraft('');
+  };
+  const updateScoreCategory = (id: string, patch: Partial<ScoreCategory>) => updateScoring({
+    ...scoring,
+    categories: scoring.categories.map((category) => category.id === id ? { ...category, ...patch } : category),
+  });
+  const removeScoreCategory = (category: ScoreCategory) => {
+    if (scoring.categories.length <= 1) { setServerError('Debe existir al menos una categoría de puntuación.'); return; }
+    if (scorecards.some((card) => card.teams.some((team) => Object.prototype.hasOwnProperty.call(team.categoryScores, category.id)))) {
+      setServerError('Esta categoría ya se usa en actas históricas. No se puede eliminar; puedes renombrarla para conservar la trazabilidad.');
+      return;
+    }
+    if (!window.confirm('¿Eliminar la categoría "' + category.name + '"?')) return;
+    updateScoring({ ...scoring, categories: scoring.categories.filter((item) => item.id !== category.id).map((item, index) => ({ ...item, order: index })) });
+  };
+  const makeScorecard = (room: Room): RoundScorecard => {
+    const round = data.rounds.find((item) => item.id === room.roundId);
+    const teamIds = [room.teamFavorId, room.teamContraId];
+    const old = scorecards.find((card) => card.roomId === room.id);
+    const makeTeamScore = (teamId: string): TeamScore => {
+      const team = data.teams.find((item) => item.id === teamId);
+      const previous = old?.teams.find((item) => item.teamId === teamId);
+      const categoryScores = Object.fromEntries(scoring.categories.map((category) => [category.id, previous?.categoryScores?.[category.id] ?? 0]));
+      return { teamId, teamName: team?.name ?? 'Equipo', categoryScores, total: sumCategoryScores(categoryScores, scoring.categories), minorFaults: previous?.minorFaults ?? 0, majorFaults: previous?.majorFaults ?? 0 };
+    };
+    return old ?? {
+      id: makeId('scorecard'), roundId: room.roundId, roundName: round?.name ?? 'Ronda',
+      roomId: room.id, roomName: room.name, teamFavorId: room.teamFavorId, teamContraId: room.teamContraId,
+      judges: room.judgeIds.map((id) => ({ judgeId: id, judgeName: data.judges.find((judge) => judge.id === id)?.name ?? id })),
+      teams: [makeTeamScore(teamIds[0]), makeTeamScore(teamIds[1])],
+      speakers: [], createdAt: Date.now(), updatedAt: Date.now(),
+    };
+  };
+  const saveScorecard = async (room: Room, formCard: RoundScorecard) => {
+    setSavingScores(true);
+    setServerError('');
+    try {
+      const nextCard: RoundScorecard = {
+        ...formCard,
+        roundId: room.roundId, roomId: room.id, roomName: room.name,
+        roundName: data.rounds.find((item) => item.id === room.roundId)?.name ?? formCard.roundName,
+        teamFavorId: room.teamFavorId, teamContraId: room.teamContraId,
+        judges: room.judgeIds.map((id) => ({ judgeId: id, judgeName: data.judges.find((judge) => judge.id === id)?.name ?? id })),
+        teams: formCard.teams.map((team) => ({
+          ...team, teamName: data.teams.find((item) => item.id === team.teamId)?.name ?? team.teamName,
+          total: sumCategoryScores(team.categoryScores, scoring.categories),
+        })) as RoundScorecard['teams'],
+        updatedAt: Date.now(),
+      };
+      const nextCards = scorecards.some((card) => card.roomId === room.id)
+        ? scorecards.map((card) => card.roomId === room.id ? nextCard : card)
+        : [...scorecards, nextCard];
+      let saved: Tournament;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        saved = await apiSaveScoreConfig(session.token, data.revision, scoring.categories, nextCards);
+      } else {
+        saved = { ...data, scoring: { ...scoring, scorecards: nextCards }, revision: data.revision + 1, updatedAt: Date.now() };
+        writeDemo(saved);
+      }
+      setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
+      setConnected(true);
+      setLastSyncedAt(Date.now());
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo guardar el acta de puntuación.');
+    } finally { setSavingScores(false); }
+  };
+  const saveScoreCategories = async () => {
+    setSavingScores(true);
+    setServerError('');
+    try {
+      let saved: Tournament;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        saved = await apiSaveScoreConfig(session.token, data.revision, scoring.categories, scorecards);
+      } else {
+        saved = { ...data, scoring, revision: data.revision + 1, updatedAt: Date.now() };
+        writeDemo(saved);
+      }
+      setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo guardar la configuración de puntuaciones.');
+    } finally { setSavingScores(false); }
+  };
+
   const addInstitution = () => {
     const name = institutionDraft.trim();
     if (!name) return;
