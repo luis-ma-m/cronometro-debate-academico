@@ -11,7 +11,7 @@ describe('incompatibility domain rules', () => {
     judges: { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }[];
     rooms: typeof room[];
   } => ({
-    rounds:[{id:'r1',name:'Ronda 1'}],
+    rounds:[{id:'r1',number:1,name:'Ronda 1',active:true,defaultFormatId:'f1'}],
     teams:[{id:'t1',name:'Equipo A',institution:'Uni A',active:true,incompatibleJudgeIds:[]},{id:'t2',name:'Equipo B',institution:'Uni B',active:true,incompatibleJudgeIds:[]}],
     judges:[{id:'j1',name:'Juez 1',institution:'Otra',active:true,incompatibleJudgeIds:[]},{id:'j2',name:'Juez 2',institution:'Otra',active:true,incompatibleJudgeIds:[]}],
     rooms:[{...room,judgeIds:['j1','j2']}],
