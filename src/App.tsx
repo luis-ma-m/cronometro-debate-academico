@@ -353,6 +353,13 @@ export default function App() {
     return (round?.scoreType ?? 'qualifying') === 'qualifying' && hasTeams &&
       room.timer.status === 'finished' && !scorecards.some((card) => card.roomId === room.id);
   });
+  const overviewPendingScoreRooms = data.rooms.filter((room) => {
+    const round = data.rounds.find((item) => item.id === room.roundId);
+    return room.roundId === (data.activeRoundId || data.rounds.find((item) => item.active)?.id) &&
+      (round?.scoreType ?? 'qualifying') === 'qualifying' &&
+      Boolean(room.teamFavorId && room.teamContraId && room.teamFavorId !== room.teamContraId) &&
+      room.timer.status === 'finished' && !scorecards.some((card) => card.roomId === room.id);
+  });
 
   const updateScoring = (next: typeof scoring) => updateData((current) => ({ ...current, scoring: next }));
   const addScoreCategory = () => {
@@ -968,7 +975,7 @@ export default function App() {
       {view === 'overview' && <><div className="page-heading"><div><p className="eyebrow">VISTA OPERATIVA</p><h2>Estado del torneo</h2><p className="muted">Seguimiento de debates, asignaciones y cronómetros.</p></div><div className="round-badge"><BookOpen size={17} /><span>Ronda activa: <b>{data.rounds.find((round) => round.active)?.name ?? 'Sin ronda activa'}</b></span></div></div>
       {incompatibilityIncidents.length > 0 && <section className="panel warning-notice" role="status" aria-live="polite"><div className="panel-title"><div><h3>Incompatibilidades detectadas ({incompatibilityIncidents.length})</h3><p>Estas asignaciones existentes requieren revisión. No se han eliminado automáticamente.</p></div></div><div className="pending-debates-list">{incompatibilityIncidents.map((incident) => <article className="pending-debate-item" key={[incident.type, incident.roomId, ...incident.teamIds, ...incident.judgeIds].join(':')}><div className="pending-debate-heading"><b>{incident.roomName}</b><span className="state-pill issue">{incident.type === 'institution' ? 'Institución' : incident.type === 'team-judge' ? 'Equipo–juez' : 'Juez–juez'}</span></div><p>{incident.message}</p><div className="pending-debate-meta"><span>{incident.teamIds.map((id) => data.teams.find((team) => team.id === id)?.name ?? id).join(' · ') || 'Sin equipo afectado'}</span><span>{incident.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name ?? id).join(' · ')}</span><button className="text-button" onClick={() => { setSelectedRound(data.rooms.find((room) => room.id === incident.roomId)?.roundId ?? activeRound); setView('rooms'); }}>Revisar asignación <ChevronRight size={14} /></button></div></article>)}</div></section>}
       <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
-      {(data.rounds.find((round) => round.id === activeRound)?.scoreType ?? 'qualifying') === 'qualifying' && pendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{pendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
+      {(data.rounds.find((round) => round.id === activeRound)?.scoreType ?? 'qualifying') === 'qualifying' && overviewPendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{overviewPendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
       <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
 
       {view === 'scoring' && <ScoringView
