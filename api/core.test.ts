@@ -138,11 +138,11 @@ describe("Vercel API core", () => {
 
 
   it("rejects a team-judge incompatibility against either side of the debate", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({ id: "j2", name: "Juez 2", institution: "", active: true, incompatibleJudgeIds: [] });
     for (const teamId of ["t1", "t2"]) {
-      const tournament = makeTournament();
-      tournament.judges.push({ id: "j2", name: "Juez 2", institution: "", active: true, incompatibleJudgeIds: [] });
-      tournament.teams.find((team) => team.id === teamId)!.incompatibleJudgeIds = ["j2"];
-      expect(() => validateTournamentInput(tournament)).toThrow("es incompatible con el equipo");
+      const changed = { ...tournament, teams: tournament.teams.map((team) => ({ ...team, incompatibleJudgeIds: team.id === teamId ? ["j2"] : [] })), rooms: tournament.rooms.map((room) => ({ ...room, judgeIds: ["j2"] })) };
+      expect(() => validateTournamentInput(changed)).toThrow("es incompatible con el equipo");
     }
   });
 
