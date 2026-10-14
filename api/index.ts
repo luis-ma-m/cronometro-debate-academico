@@ -1010,6 +1010,7 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
       remainingSeconds: item.remainingSeconds,
     }));
     const configRows = data.rows.Config.map((row) => ({ ...row }));
+    setConfig(configRows, "roundTypes", JSON.stringify(Object.fromEntries(rounds.map((round) => [round.id, round.scoreType ?? "qualifying"]))));
     setConfig(configRows, "activeRoundId", roundId);
     setConfig(configRows, "activationRevision", String((tournament.activationRevision || 0) + 1));
     setConfig(configRows, "activatedAt", String(now));
