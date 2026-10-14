@@ -306,7 +306,13 @@ function requestIp(req: RequestLike): string {
 }
 function headerValue(req: RequestLike, name: string): string { const value = req.headers?.[name.toLowerCase()]; return Array.isArray(value) ? value[0] || "" : value || ""; }
 function parseRequestBody(body: unknown): { action?: string; payload?: Record<string, unknown> } {
-  if (typeof body === "string") { try { return JSON.parse(body) as { action?: string; payload?: Record<string, unknown> }; catch { throw new ApiError("INVALID_JSON", "El cuerpo de la solicitud no es JSON válido."); } }
+  if (typeof body === "string") {
+    try {
+      return JSON.parse(body) as { action?: string; payload?: Record<string, unknown> };
+    } catch {
+      throw new ApiError("INVALID_JSON", "El cuerpo de la solicitud no es JSON válido.");
+    }
+  }
   if (!body || typeof body !== "object" || Array.isArray(body)) return {}; return body as { action?: string; payload?: Record<string, unknown> };
 }
 async function dispatch(action: string, payload: Record<string, unknown>, req: RequestLike): Promise<unknown> {
@@ -482,7 +488,7 @@ async function health(): Promise<unknown> {
 function statusForError(error: unknown): number { if (error instanceof ApiError) return error.status; return 500; }
 function errorPayload(error: unknown): { ok: false; error: { code: string; message: string } } {
   if (error instanceof ApiError) return { ok: false, error: { code: error.code, message: error.message } };
-  return { ok: false, error: { code: "INTERNAL_ERROR", message: "Se ha producido un error inesperado. No se ha podido confirmar la operación." };
+  return { ok: false, error: { code: "INTERNAL_ERROR", message: "Se ha producido un error inesperado. No se ha podido confirmar la operación." } };
 }
 export default async function handler(req: RequestLike, res: ResponseLike): Promise<void> {
   res.setHeader("Content-Type", "application/json; charset=utf-8"); res.setHeader("Cache-Control", "no-store, max-age=0"); res.setHeader("X-Content-Type-Options", "nosniff");
