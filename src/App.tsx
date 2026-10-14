@@ -991,7 +991,7 @@ export default function App() {
         onUpdateCategory={updateScoreCategory}
         onRemoveCategory={removeScoreCategory}
         onSaveCategories={() => void saveScoreCategories()}
-        onSaveScorecard={(room, card) => void saveScorecard(room, card)}
+        onSaveScorecard={saveScorecard}
         saving={savingScores}
       />}
 
