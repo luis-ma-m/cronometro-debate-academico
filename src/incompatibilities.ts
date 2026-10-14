@@ -1,4 +1,4 @@
-import type { Tournament } from "./domain";
+import type { Tournament } from "./domain.js";
 export type AssignmentConflict = { type: "institution" | "team-judge" | "judge-judge"; roomId: string; roomName: string; teamIds: string[]; judgeIds: string[]; message: string };
 export function findAssignmentConflicts(tournament: Pick<Tournament, "teams" | "judges" | "rooms">): AssignmentConflict[] {
   const conflicts: AssignmentConflict[] = [];
