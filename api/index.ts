@@ -873,6 +873,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
         id: round.id, number: round.number, name: round.name,
         active: round.id === current.activeRoundId,
         defaultFormatId: round.defaultFormatId || tournament.formats[0]?.id || "",
+        scoreType: round.scoreType ?? "qualifying",
       })),
       Equipos: tournament.teams.map((team) => ({ id: team.id, name: team.name, institution: team.institution, active: team.active, incompatibleJudgeIds: JSON.stringify(team.incompatibleJudgeIds ?? []) })),
       Jueces: tournament.judges.map((judge) => ({ id: judge.id, name: judge.name, institution: judge.institution, active: judge.active, incompatibleJudgeIds: JSON.stringify(judge.incompatibleJudgeIds ?? []) })),
