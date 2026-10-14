@@ -3,15 +3,16 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveTournament, saveScoreConfig as apiSaveScoreConfig, updateTimer } from './api';
 import type { RoundActivationPreview } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibilities';
 import type { TimerAction } from './timer';
+import { DEFAULT_SCORE_CATEGORIES, SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundScorecard, type ScoreCategory, type SpeakerScore, type TeamScore } from './scoring';
 
 const SESSION_KEY = 'ledu-admin-session';
-type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'settings';
+type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'settings';
 
 function makeSlug(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
@@ -87,6 +88,8 @@ export default function App() {
   const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
   const [institutionDraft, setInstitutionDraft] = useState('');
   const [selectedFormatId, setSelectedFormatId] = useState('');
+  const [scoreCategoryDraft, setScoreCategoryDraft] = useState('');
+  const [savingScores, setSavingScores] = useState(false);
   const [activationPreview, setActivationPreview] = useState<RoundActivationPreview | null>(null);
   const [activatingRound, setActivatingRound] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => { try { return localStorage.getItem('ledu-timer-sound') === 'true'; } catch { return false; } });
