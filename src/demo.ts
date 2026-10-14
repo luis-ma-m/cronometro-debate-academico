@@ -18,6 +18,7 @@ export const demoTournament: Tournament = {
     { id: 't5', name: 'Madrid A', institution: 'Universidad Complutense', active: true, incompatibleJudgeIds: [] },
     { id: 't6', name: 'Murcia B', institution: 'Universidad de Murcia', active: true, incompatibleJudgeIds: [] },
   ],
+  speakers: [],
   judges: [
     { id: 'j1', name: 'Ana García', institution: 'LEDU', active: true, incompatibleJudgeIds: [] },
     { id: 'j2', name: 'Luis Pérez', institution: 'LEDU', active: true, incompatibleJudgeIds: [] },
@@ -57,6 +58,7 @@ export function readDemo(): Tournament {
       const parsed = JSON.parse(raw) as Tournament;
       if (!Array.isArray(parsed.physicalRooms) || !Array.isArray(parsed.formats)) return demoTournament;
       if (!parsed.formatPhases?.length) parsed.formatPhases = parsed.rooms[0]?.phases?.length ? parsed.rooms[0].phases : LEDU_PHASES;
+      parsed.speakers = Array.isArray(parsed.speakers) ? parsed.speakers.filter((speaker) => speaker && typeof speaker.id === 'string' && typeof speaker.name === 'string' && parsed.teams.some((team) => team.id === speaker.teamId)) : [];
       parsed.teams=(parsed.teams??[]).map((team)=>({...team,incompatibleJudgeIds:Array.isArray(team.incompatibleJudgeIds)?[...new Set(team.incompatibleJudgeIds)]:[]}));
       parsed.judges=(parsed.judges??[]).map((judge)=>({...judge,incompatibleJudgeIds:Array.isArray(judge.incompatibleJudgeIds)?[...new Set(judge.incompatibleJudgeIds.filter((id)=>id!==judge.id))]:[]}));
       const judgeIds=new Set(parsed.judges.map((judge)=>judge.id));

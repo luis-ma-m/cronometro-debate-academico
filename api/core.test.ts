@@ -90,6 +90,26 @@ describe("Vercel API core", () => {
     expect(() => validateTournamentInput(tournament)).toThrow("dos salas de la misma ronda");
   });
 
+  it("accepts speaker entities linked to an existing team and rejects missing team references", () => {
+    const tournament = makeTournament();
+    tournament.speakers = [{ id: "sp1", teamId: "t1", name: "Oradora Uno" }];
+    expect(() => validateTournamentInput(tournament)).not.toThrow();
+    tournament.speakers = [{ id: "sp2", teamId: "missing-team", name: "Orador Huérfano" }];
+    expect(() => validateTournamentInput(tournament)).toThrow("equipo existente");
+  });
+
+  it("rejects blank names and duplicate speaker IDs", () => {
+    const blank = makeTournament();
+    blank.speakers = [{ id: "sp1", teamId: "t1", name: "   " }];
+    expect(() => validateTournamentInput(blank)).toThrow("nombres no vacíos");
+    const duplicate = makeTournament();
+    duplicate.speakers = [
+      { id: "sp1", teamId: "t1", name: "Ana" },
+      { id: "sp1", teamId: "t2", name: "Luis" },
+    ];
+    expect(() => validateTournamentInput(duplicate)).toThrow("IDs únicos");
+  });
+
   it("rejects duplicate team IDs", () => {
     const tournament = makeTournament();
     tournament.teams.push({ ...tournament.teams[0] });

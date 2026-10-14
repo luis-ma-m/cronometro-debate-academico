@@ -480,6 +480,10 @@ function tournamentFromData(data: SheetData): Tournament {
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
     incompatibleJudgeIds: parseStringArray(row.incompatibleJudgeIds),
   }));
+  const parsedSpeakers = parseJson<unknown>(configValue(config, "speakers"), []);
+  const speakers = Array.isArray(parsedSpeakers)
+    ? parsedSpeakers.filter((speaker): speaker is { id: string; teamId: string; name: string } => Boolean(speaker && typeof speaker === "object" && typeof (speaker as { id?: unknown }).id === "string" && typeof (speaker as { teamId?: unknown }).teamId === "string" && typeof (speaker as { name?: unknown }).name === "string" && teams.some((team) => team.id === (speaker as { teamId: string }).teamId)))
+    : [];
   const judges = data.rows.Jueces.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
     incompatibleJudgeIds: parseStringArray(row.incompatibleJudgeIds),
@@ -534,6 +538,7 @@ function tournamentFromData(data: SheetData): Tournament {
     tournamentName: str(configValue(config, "tournamentName")) || "Torneo LEDU",
     rounds,
     teams,
+    speakers,
     judges,
     rooms,
     physicalRooms,
@@ -844,6 +849,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "tournamentName", tournament.tournamentName || "Torneo LEDU");
     setConfig(configRows, "formatPhases", JSON.stringify(phases));
     setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
+    setConfig(configRows, "speakers", JSON.stringify(tournament.speakers ?? []));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
     setConfig(configRows, "schemaVersion", "3");
     // Only activateRound may change the globally active round or activation revision.

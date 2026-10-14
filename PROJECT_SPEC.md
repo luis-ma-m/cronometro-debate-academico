@@ -23,11 +23,12 @@ Crear una aplicación web para organizar un torneo académico LEDU. Se compone d
 - Config: clave, valor; nombre del torneo, revisión global, formato de debate y catálogo normalizado de instituciones compartido por equipos y jueces.
 - Rondas: ID, número, nombre, activa.
 - Equipos: ID, nombre, institución, activo.
+- Oradores: ID estable, ID del equipo al que pertenecen y nombre; se guardan como catálogo JSON en Config para evitar una migración de pestañas destructiva. La lista puede estar vacía en torneos existentes.
 - Jueces: ID, nombre, institución, activo.
 - Salas: ID, nombre, ronda, equipo a favor, equipo en contra, lista de jueces, estado, fases, notas y fecha de actualización.
 - Cronometros: ID de sala, estado, fase, segundos restantes, marca de inicio, última reanudación, revisión y fecha de actualización.
 
-Los vínculos se realizan mediante IDs, no por nombres. Un equipo y un juez no pueden aparecer en dos salas de la misma ronda. Se permite asignar más de un juez a una sala. Las instituciones se eligen de un catálogo compartido; al añadir una institución, queda disponible tanto para equipos como para jueces. Un juez no puede formar parte del panel de una sala cuando comparte institución con cualquiera de los equipos enfrentados.
+Los vínculos se realizan mediante IDs, no por nombres. Los oradores se gestionan desde el desplegable de cada equipo y no se asignan automáticamente a las fases: los formatos describen roles de intervención de forma agnóstica a la identidad concreta de cada persona. Un equipo y un juez no pueden aparecer en dos salas de la misma ronda. Se permite asignar más de un juez a una sala. Las instituciones se eligen de un catálogo compartido; al añadir una institución, queda disponible tanto para equipos como para jueces. Un juez no puede formar parte del panel de una sala cuando comparte institución con cualquiera de los equipos enfrentados.
 
 ## Reglas del cronómetro
 - Cada sala mantiene su propio timer.
