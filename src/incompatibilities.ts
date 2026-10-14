@@ -16,7 +16,13 @@ export function findAssignmentConflicts(tournament: Pick<Tournament, "teams" | "
       if (a.incompatibleJudgeIds?.includes(b.id)||b.incompatibleJudgeIds?.includes(a.id)) conflicts.push({ type:"judge-judge", roomId:room.id, roomName:room.name, teamIds:[], judgeIds:[a.id,b.id], message:a.name+" y "+b.name+" son incompatibles." });
     }
   }
-  return conflicts;
+  const seen = new Set<string>();
+  return conflicts.filter((conflict) => {
+    const key = [conflict.type, conflict.roomId, ...conflict.teamIds, ...conflict.judgeIds].join(":");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 export function setJudgeIncompatibility(judges:Tournament["judges"], judgeId:string, incompatibleId:string, incompatible:boolean):Tournament["judges"] {
   if (judgeId===incompatibleId) throw new Error("Un juez no puede ser incompatible consigo mismo.");
