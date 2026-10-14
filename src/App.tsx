@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveTournament, saveScoreConfig as apiSaveScoreConfig, updateTimer } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
 import type { RoundActivationPreview } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
@@ -433,24 +433,30 @@ export default function App() {
       setServerError(error instanceof Error ? error.message : 'No se pudo guardar el acta de puntuación.');
     } finally { setSavingScores(false); }
   };
-  const saveScoreCategories = async () => {
+  const persistTournamentMetadata = async (candidate: Tournament) => {
     setSavingScores(true);
     setServerError('');
     try {
       let saved: Tournament;
       if (apiConfigured) {
         if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
-        saved = await apiSaveScoreConfig(session.token, data.revision, scoring.categories, scorecards);
+        saved = await saveTournament(session.token, data.revision, candidate);
       } else {
-        saved = { ...data, scoring, revision: data.revision + 1, updatedAt: Date.now() };
+        saved = { ...candidate, revision: data.revision + 1, updatedAt: Date.now() };
         writeDemo(saved);
       }
       setData(saved);
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
+      setConnected(true);
+      setLastSyncedAt(Date.now());
     } catch (error) {
-      setServerError(error instanceof Error ? error.message : 'No se pudo guardar la configuración de puntuaciones.');
+      setServerError(error instanceof Error ? error.message : 'No se pudieron guardar los cambios.');
     } finally { setSavingScores(false); }
+  };
+
+  const saveScoreCategories = async () => {
+    await persistTournamentMetadata({ ...data, scoring: { ...scoring, scorecards } });
   };
 
   const addInstitution = () => {
