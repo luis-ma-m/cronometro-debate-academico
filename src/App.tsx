@@ -580,7 +580,6 @@ export default function App() {
   };
   const updateRoundScoreType = (roundId: string, scoreType: 'qualifying' | 'elimination') => {
     const candidate = { ...data, rounds: data.rounds.map((round) => round.id === roundId ? { ...round, scoreType } : round) };
-    setData(candidate);
     void persistTournamentMetadata(candidate);
   };
   const updateRoom = (id: string, patch: Partial<Room>) => {
