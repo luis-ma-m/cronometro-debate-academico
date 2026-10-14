@@ -4,7 +4,7 @@
 
 Permitir que la organización registre personas concretas que forman parte de cada equipo de debate. Cada orador debe ser una entidad propia, asociada a un único equipo y persistente hasta que se elimine explícitamente desde la pestaña **Equipos**.
 
-Este documento define requisitos; no implementa código ni modifica el esquema en esta PR.
+Este documento define el alcance funcional y los criterios de aceptación de la implementación.
 
 ## Requisitos funcionales
 
