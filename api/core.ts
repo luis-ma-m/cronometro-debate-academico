@@ -1,3 +1,4 @@
+import { validateDebateRecords } from "../src/judgeRecords.js";
 import type { Phase, PublicRoom, Room, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
 
