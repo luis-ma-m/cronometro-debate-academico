@@ -1177,6 +1177,19 @@ function ScoringView({
       </section>
       <div className="activation-dialog-actions"><button className="button secondary" onClick={() => { setEditingRoomId(""); setDraft(null); }}>Cancelar</button><button className="button primary" disabled={saving} onClick={persist}><Save size={15} /> {saving ? "Guardando…" : "Guardar acta completa"}</button></div>
     </section></div>}
+
+    <section className="panel team-history-panel"><div className="panel-title"><div><h3>Historial individual de oradores</h3><p>Consulta las notas de cada orador en las rondas en las que ha participado.</p></div></div>
+      {(data.speakers ?? []).map((speaker) => {
+        const speakerHistory = scoring.scorecards.filter((card) => card.speakers.some((item) => item.speakerId === speaker.id)).sort((a, b) => a.createdAt - b.createdAt);
+        if (!speakerHistory.length) return null;
+        return <details className="team-history-item" key={speaker.id}><summary>{speaker.name} · {speakerHistory.length} intervención(es)</summary><div>{speakerHistory.map((card) => {
+          const item = card.speakers.find((entry) => entry.speakerId === speaker.id)!;
+          const position = SPEAKER_POSITIONS.find((entry) => entry.value === item.position)?.label ?? item.position;
+          return <article key={card.id}><b>{card.roundName}</b><span>{position}</span><strong>{item.score}/10</strong><small>{card.roomName} · {item.teamId === card.teamFavorId ? card.teams[0].teamName : card.teams[1].teamName}</small></article>;
+        })}</div></details>;
+      })}
+      {!(data.speakers ?? []).some((speaker) => scoring.scorecards.some((card) => card.speakers.some((item) => item.speakerId === speaker.id))) && <p className="muted">Todavía no hay puntuaciones individuales de oradores.</p>}
+    </section>
     <section className="panel team-history-panel"><div className="panel-title"><div><h3>Historial de equipos</h3><p>Las actas conservan la ronda, el rival y las entidades evaluadoras mediante referencias estables.</p></div></div>
       {data.teams.map((team) => {
         const teamHistory = scoring.scorecards.filter((card) => card.teams.some((item) => item.teamId === team.id)).sort((a, b) => a.createdAt - b.createdAt);
