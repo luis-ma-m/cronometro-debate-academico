@@ -1,4 +1,4 @@
-import type { Room, Round, Speaker, Team, Judge } from "./domain.js";
+import type { Room, Round, Speaker, Team, Judge } from "./domain";
 
 export type RoundType = "qualifying" | "elimination";
 export type SpeakerPosition = "introductor" | "first_rebuttal" | "second_rebuttal" | "concluder";
