@@ -70,9 +70,12 @@ export interface Room {
   updatedAt: number;
 }
 
+import type { ScoringConfig } from './scoring';
+
 export interface Tournament {
   tournamentName: string;
   rounds: Round[];
+  scoring?: ScoringConfig;
   teams: Team[];
   speakers?: Speaker[];
   judges: Judge[];
