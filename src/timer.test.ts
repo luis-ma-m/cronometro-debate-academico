@@ -27,18 +27,15 @@ describe('incompatibility domain rules', () => {
 
 describe('incompatibility assignment validation', () => {
   it('combines institutional, team-judge and judge-judge rules but accepts empty lists', () => {
-    const tournament: Parameters<typeof validateAssignments>[0] & {
-      teams: { id:string; name:string; institution:string; incompatibleJudgeIds:string[] }[];
-      judges: { id:string; name:string; institution:string; incompatibleJudgeIds:string[] }[];
-    } = {
-      rounds: [{id:'r1',number:1,name:'Ronda 1',active:true,defaultFormatId:'f1'}],
+    const tournament = {
+      rounds: [] as {id:string;name:string}[],
       teams: [
-        {id:'t1',name:'Equipo A',institution:'Uni A',incompatibleJudgeIds:[]},
-        {id:'t2',name:'Equipo B',institution:'Uni B',incompatibleJudgeIds:[]},
+        {id:'t1',name:'Equipo A',institution:'Uni A',incompatibleJudgeIds:[] as string[]},
+        {id:'t2',name:'Equipo B',institution:'Uni B',incompatibleJudgeIds:[] as string[]},
       ],
       judges: [
-        {id:'j1',name:'Juez 1',institution:'Otra',incompatibleJudgeIds:[]},
-        {id:'j2',name:'Juez 2',institution:'Otra',incompatibleJudgeIds:[]},
+        {id:'j1',name:'Juez 1',institution:'Otra',incompatibleJudgeIds:[] as string[]},
+        {id:'j2',name:'Juez 2',institution:'Otra',incompatibleJudgeIds:[] as string[]},
       ],
       rooms: [{id:'a1',name:'Sala 1',roundId:'r1',teamFavorId:'t1',teamContraId:'t2',judgeIds:['j1','j2'],phases:LEDU_PHASES}],
     };
