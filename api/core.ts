@@ -39,6 +39,12 @@ export const num = (value: unknown): number => {
 };
 export const bool = (value: unknown): boolean => value === true || String(value).toLowerCase() === "true";
 
+export function parseStringArray(value: unknown): string[] {
+  const parsed = parseJson<unknown>(value, []);
+  if (!Array.isArray(parsed)) return [];
+  return [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0))];
+}
+
 export function parseJson<T>(value: unknown, fallback: T): T {
   try {
     if (typeof value !== "string") return (value || fallback) as T;
@@ -285,12 +291,16 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
     }
     const inRoom = new Set<string>();
     if (!Array.isArray(room.judgeIds)) throw new ApiError("INVALID_ASSIGNMENT", "La lista de jueces de una sala no es válida.");
-    // Evaluate all incompatibility types for this room without mutating assignments.
+    // Evaluate every rule for the room and report every blocking reason in one response.
     const roomConflicts = findAssignmentConflicts({ teams: tournament.teams, judges: tournament.judges, rooms: [room] });
-    const institutionalConflict = roomConflicts.find((conflict) => conflict.type === "institution");
-    if (institutionalConflict) throw new ApiError("INSTITUTION_CONFLICT", institutionalConflict.roomName + ": " + institutionalConflict.message);
-    const incompatibleConflict = roomConflicts.find((conflict) => conflict.type === "team-judge" || conflict.type === "judge-judge");
-    if (incompatibleConflict) throw new ApiError(incompatibleConflict.type === "team-judge" ? "TEAM_JUDGE_CONFLICT" : "JUDGE_JUDGE_CONFLICT", incompatibleConflict.roomName + ": " + incompatibleConflict.message);
+    if (roomConflicts.length) {
+      const code = roomConflicts.some((conflict) => conflict.type === "institution")
+        ? "INSTITUTION_CONFLICT"
+        : roomConflicts.some((conflict) => conflict.type === "team-judge")
+          ? "TEAM_JUDGE_CONFLICT"
+          : "JUDGE_JUDGE_CONFLICT";
+      throw new ApiError(code, room.name + ": " + [...new Set(roomConflicts.map((conflict) => conflict.message))].join(" "));
+    }
     for (const judgeId of room.judgeIds) {
       if (!judgeIds.has(str(judgeId))) throw new ApiError("INVALID_ASSIGNMENT", "La sala " + str(room.name) + " referencia un juez inexistente.");
       if (inRoom.has(str(judgeId))) throw new ApiError("DUPLICATE_JUDGE_ASSIGNMENT", "Un juez no puede estar asignado dos veces a la misma sala.");
