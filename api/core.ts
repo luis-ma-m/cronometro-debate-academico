@@ -250,6 +250,14 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
       throw new ApiError("INVALID_FORMAT", "La ronda " + str(round.name) + " referencia un formato inexistente.");
     }
   }
+  const roundTypes = new Set(["qualifying", "elimination"]);
+  for (const round of tournament.rounds) {
+    const scoreType = (round as typeof round & { scoreType?: unknown }).scoreType;
+    if (scoreType !== undefined && !roundTypes.has(str(scoreType))) {
+      throw new ApiError("INVALID_ROUND_TYPE", "El tipo de ronda debe ser clasificatoria o eliminatoria.");
+    }
+  }
+
   const speakers = tournament.speakers ?? [];
   if (!Array.isArray(speakers)) throw new ApiError("INVALID_SPEAKERS", "La lista de oradores debe ser una lista.");
   const speakerIds = new Set<string>();
