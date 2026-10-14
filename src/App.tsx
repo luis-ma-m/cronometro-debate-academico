@@ -572,6 +572,12 @@ export default function App() {
     updateData((current) => ({ ...current, rooms: [...current.rooms, room] }));
     setServerError('');
   };
+  const updateRoundScoreType = (roundId: string, scoreType: 'qualifying' | 'elimination') => {
+    updateData((current) => ({
+      ...current,
+      rounds: current.rounds.map((round) => round.id === roundId ? { ...round, scoreType } : round),
+    }));
+  };
   const updateRoom = (id: string, patch: Partial<Room>) => {
     const currentRoom = data.rooms.find((room) => room.id === id);
     if (!currentRoom) return;
@@ -967,6 +973,7 @@ export default function App() {
         rooms={data.rooms.filter((room) => room.roundId === activeRound)}
         selectedRoundId={activeRound}
         onSelectRound={setSelectedRound}
+        onUpdateRoundScoreType={updateRoundScoreType}
         scoreCategoryDraft={scoreCategoryDraft}
         onCategoryDraftChange={setScoreCategoryDraft}
         onAddCategory={addScoreCategory}
@@ -1002,7 +1009,7 @@ export default function App() {
 
 
 function ScoringView({
-  data, scoring, rooms, selectedRoundId, onSelectRound, scoreCategoryDraft,
+  data, scoring, rooms, selectedRoundId, onSelectRound, onUpdateRoundScoreType, scoreCategoryDraft,
   onCategoryDraftChange, onAddCategory, onUpdateCategory, onRemoveCategory,
   onSaveCategories, onSaveScorecard, saving,
 }: {
@@ -1011,6 +1018,7 @@ function ScoringView({
   rooms: Room[];
   selectedRoundId: string;
   onSelectRound: (id: string) => void;
+  onUpdateRoundScoreType: (roundId: string, scoreType: 'qualifying' | 'elimination') => void;
   scoreCategoryDraft: string;
   onCategoryDraftChange: (value: string) => void;
   onAddCategory: () => void;
@@ -1103,7 +1111,7 @@ function ScoringView({
       <div className="scoring-round-selector"><label>Ronda<select value={selectedRoundId} onChange={(event) => { onSelectRound(event.target.value); setEditingRoomId(""); setDraft(null); }}>{data.rounds.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Tipo<select value={round?.scoreType ?? "qualifying"} onChange={(event) => {
         const scoreType = event.target.value as "qualifying" | "elimination";
         // Parent receives the updated tournament through its ordinary persistence path.
-        window.dispatchEvent(new CustomEvent("ledu:round-type-change", { detail: { roundId: selectedRoundId, scoreType } }));
+        onUpdateRoundScoreType(selectedRoundId, scoreType);
       }}><option value="qualifying">Clasificatoria</option><option value="elimination">Eliminatoria</option></select></label></div>
       {elimination ? <div className="notice warning-notice"><CircleHelp size={17} /><span>Esta ronda es eliminatoria. No se permite registrar puntuaciones ni aparecerá como pendiente.</span></div> : <>
         <div className="stat-grid scoring-stats"><Stat label="Debates finalizados" value={eligible.length} icon={<Check />} /><Stat label="Actas registradas" value={history.length} icon={<BookOpen />} /><Stat label="Pendientes de puntuación" value={pending.length} icon={<Clock3 />} /></div>
