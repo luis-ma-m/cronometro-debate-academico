@@ -1040,20 +1040,6 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
 
 
 
-function normalizeScoreConfig(value: unknown, tournament: Tournament): ScoringConfig {
-  const scoring = parseScoringConfig(value ?? tournament.scoring ?? emptyScoringConfig());
-  return {
-    categories: scoring.categories,
-    scorecards: scoring.scorecards.map((card) => ({
-      ...card,
-      teams: card.teams.map((team) => ({
-        ...team,
-        total: sumCategoryScores(team.categoryScores, scoring.categories),
-      })) as RoundScorecard["teams"],
-    })),
-  };
-}
-
 async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tournament> {
   return withLock(WRITE_LOCK, async () => {
     const data = await loadSheetData(true);
