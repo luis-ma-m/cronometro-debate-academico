@@ -203,3 +203,10 @@
   .transition-team-grid > div { min-height: 74px; }
   .round-transition { min-height: calc(100vh - 125px); border-radius: 16px; }
 }
+
+/* Compact removal control for shared institution catalog items. */
+.institution-chips .institution-chip{display:inline-flex;align-items:center;gap:5px;padding:0 4px 0 9px;border-radius:16px;background:#edf5f3;color:#226858;font-size:10px}
+.institution-remove{display:inline-grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:50%;background:transparent;color:#557a70}
+.institution-remove:hover:not(:disabled){background:#d9ebe5;color:#a33a30}
+.institution-remove:focus-visible{outline:2px solid #177e6b;outline-offset:1px}
+.institution-remove:disabled{cursor:wait;opacity:.45}
