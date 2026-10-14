@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import type { Phase } from './domain';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
-
 
 describe('incompatibility domain rules', () => {
   const room = { id:'r1', name:'Sala 1', roundId:'r1', physicalRoomId:'p1', formatId:'f1', teamFavorId:'t1', teamContraId:'t2', judgeIds:['j1'], status:'ready' as const, phases:LEDU_PHASES, timer:createTimer(), notes:'', updatedAt:1 };
@@ -31,7 +31,6 @@ describe('incompatibility domain rules', () => {
 });
 
 
-
 describe('preset LEDU general', () => {
   it('matches the reference turn sequence and duration from the project specification', () => {
     expect(LEDU_PHASES.map((phase) => phase.durationSeconds)).toEqual([240, 120, 240, 120, 300, 300, 300, 300, 90, 90, 180, 180]);
@@ -44,7 +43,7 @@ describe('preset LEDU general', () => {
 
 describe('resolve room interventions', () => {
   it('falls back to the LEDU preset when neither the global format nor rooms have phases', () => {
-    const phases = resolvePhases(undefined, [{ phases: [] }, {}]);
+    const phases = resolvePhases(undefined, [{ phases: [] as Phase[] }, {}]);
     expect(phases).toHaveLength(12);
     expect(phases.map((phase) => phase.durationSeconds).reduce((sum, value) => sum + value, 0)).toBe(41 * 60);
   });
@@ -130,10 +129,10 @@ describe('LEDU timer state machine', () => {
   it('validates duplicate assignments and room completeness', () => {
     const room = (id: string, favor: string, judges: string[]) => ({ id, name: id.toUpperCase(), roundId: 'r1', teamFavorId: favor, teamContraId: 't2', judgeIds: judges, phases: LEDU_PHASES });
     const errors = validateAssignments({
-      // Only the round identity and display name are needed by this validation fixture.
       rounds: [{ id: 'r1', name: 'Ronda 1' }],
       teams: [{ id: 't1', name: 'Equipo 1' }, { id: 't2', name: 'Equipo 2' }],
-      judges: [{ id: 'j1', name: 'Juez 1' }], rooms: [room('a1', 't1', ['j1']), room('a2', 't1', ['j1'])],
+      judges: [{ id: 'j1', name: 'Juez 1' }],
+      rooms: [room('a1', 't1', ['j1']), room('a2', 't1', ['j1'])],
     });
     expect(errors.some((error) => error.includes('misma ronda'))).toBe(true);
   });
