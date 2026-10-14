@@ -6,7 +6,7 @@ describe('incompatibility domain rules', () => {
   const room = { id:'r1', name:'Sala 1', roundId:'r1', physicalRoomId:'p1', formatId:'f1', teamFavorId:'t1', teamContraId:'t2', judgeIds:['j1'], status:'ready' as const, phases:LEDU_PHASES, timer:createTimer(), notes:'', updatedAt:1 };
   // Empty array literals otherwise infer as never[] in this mutable fixture.
   const base = (): {
-    rounds: { id: string; name: string }[];
+    rounds: { id: string; number: number; name: string; active: boolean; defaultFormatId: string }[];
     teams: { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }[];
     judges: { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }[];
     rooms: typeof room[];
