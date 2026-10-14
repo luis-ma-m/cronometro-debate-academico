@@ -1,4 +1,5 @@
 import type { Phase, TimerState } from './domain';
+import { findAssignmentConflicts } from './incompatibilities';
 
 export const LEDU_PHASES: Phase[] = [
   { id: 'ledu-01', name: 'Exposición inicial', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
@@ -135,5 +136,6 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
       }
     }
   }
+  for(const conflict of findAssignmentConflicts(tournament as Parameters<typeof findAssignmentConflicts>[0])) if(conflict.type!=='institution') errors.push(conflict.roomName+': '+conflict.message);
   return [...new Set(errors)];
 }
