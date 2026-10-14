@@ -249,6 +249,21 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
       throw new ApiError("INVALID_FORMAT", "La ronda " + str(round.name) + " referencia un formato inexistente.");
     }
   }
+  const speakers = tournament.speakers ?? [];
+  if (!Array.isArray(speakers)) throw new ApiError("INVALID_SPEAKERS", "La lista de oradores debe ser una lista.");
+  const speakerIds = new Set<string>();
+  for (const speaker of speakers) {
+    const id = str(speaker?.id).trim();
+    const name = str(speaker?.name).trim();
+    const teamId = str(speaker?.teamId).trim();
+    if (!id || id.length > 100 || !name || name.length > 200 || speakerIds.has(id)) {
+      throw new ApiError("INVALID_SPEAKERS", "Los oradores deben tener IDs únicos y nombres no vacíos de hasta 200 caracteres.");
+    }
+    if (!teamId || !tournament.teams.some((team) => team.id === teamId)) {
+      throw new ApiError("INVALID_SPEAKERS", "Cada orador debe estar asociado a un equipo existente.");
+    }
+    speakerIds.add(id);
+  }
   const teamIds = new Set(tournament.teams.map((item) => str(item.id)).filter(Boolean));
   const judgeIds = new Set(tournament.judges.map((item) => str(item.id)).filter(Boolean));
   for (const team of tournament.teams) {
