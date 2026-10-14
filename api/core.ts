@@ -39,12 +39,6 @@ export const num = (value: unknown): number => {
 };
 export const bool = (value: unknown): boolean => value === true || String(value).toLowerCase() === "true";
 
-export function parseStringArray(value: unknown): string[] {
-  const parsed = parseJson<unknown>(value, []);
-  if (!Array.isArray(parsed)) return [];
-  return [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0))];
-}
-
 export function parseJson<T>(value: unknown, fallback: T): T {
   try {
     if (typeof value !== "string") return (value || fallback) as T;
@@ -52,6 +46,12 @@ export function parseJson<T>(value: unknown, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+export function parseStringArray(value: unknown): string[] {
+  const parsed = parseJson<unknown>(value, []);
+  if (!Array.isArray(parsed)) return [];
+  return [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0))];
 }
 
 export function objectsFromRows(values: unknown[][] | undefined): SheetRow[] {
