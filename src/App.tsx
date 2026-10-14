@@ -1110,7 +1110,6 @@ function ScoringView({
       <div className="panel-title"><div><h3>Ronda y tipo de competición</h3><p>Las rondas se consideran clasificatorias por defecto; cambia a eliminatoria cuando corresponda.</p></div></div>
       <div className="scoring-round-selector"><label>Ronda<select value={selectedRoundId} onChange={(event) => { onSelectRound(event.target.value); setEditingRoomId(""); setDraft(null); }}>{data.rounds.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Tipo<select value={round?.scoreType ?? "qualifying"} onChange={(event) => {
         const scoreType = event.target.value as "qualifying" | "elimination";
-        // Parent receives the updated tournament through its ordinary persistence path.
         onUpdateRoundScoreType(selectedRoundId, scoreType);
       }}><option value="qualifying">Clasificatoria</option><option value="elimination">Eliminatoria</option></select></label></div>
       {elimination ? <div className="notice warning-notice"><CircleHelp size={17} /><span>Esta ronda es eliminatoria. No se permite registrar puntuaciones ni aparecerá como pendiente.</span></div> : <>
