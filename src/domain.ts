@@ -32,6 +32,8 @@ export interface Round {
   name: string;
   active: boolean;
   defaultFormatId: string;
+  /** Missing legacy values are interpreted as qualifying. */
+  scoreType?: 'qualifying' | 'elimination';
 }
 
 export interface FormatPreset {
