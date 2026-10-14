@@ -1,7 +1,8 @@
 import { createHash, createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
-import type { FormatPreset, Phase, PhysicalRoom, Room, TimerState, Tournament } from "../src/domain.js";
+import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
+import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
 import {
   ApiError,
   DEFAULT_SPREADSHEET_ID,
@@ -367,6 +368,8 @@ async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
       ["activeRoundId", ""],
       ["activationRevision", "0"],
       ["activatedAt", "0"],
+      ["roundTypes", JSON.stringify({ "round-1": "qualifying" })],
+      ["scoring", JSON.stringify(emptyScoringConfig())],
     ];
     for (const name of SHEET_NAMES) {
       const sheet = (metadata.sheets || []).find((item) => item.properties.title === name);
@@ -471,15 +474,20 @@ function timerRowMap(rows: SheetRow[]): Map<string, TimerState> {
 function tournamentFromData(data: SheetData): Tournament {
   const config = data.rows.Config;
   const activeRoundId = configValue(config, "activeRoundId");
+  // Keep round classification in Config so existing Rondas headers remain unchanged.
+  // Legacy tournaments default to qualifying without a schema migration.
+  const roundTypes = parseJson<Record<string, unknown>>(configValue(config, "roundTypes"), {});
   const rounds = data.rows.Rondas.map((row) => ({
     id: str(row.id), number: num(row.number), name: str(row.name),
     active: activeRoundId ? str(row.id) === activeRoundId : bool(row.active),
     defaultFormatId: str(row.defaultFormatId),
+    scoreType: (str(roundTypes[str(row.id)] ?? row.scoreType) === "elimination" ? "elimination" : "qualifying") as Round["scoreType"],
   }));
   const teams = data.rows.Equipos.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
     incompatibleJudgeIds: parseStringArray(row.incompatibleJudgeIds),
   }));
+  const scoring = parseScoringConfig(parseJson<unknown>(configValue(config, "scoring"), emptyScoringConfig()));
   const parsedSpeakers = parseJson<unknown>(configValue(config, "speakers"), []);
   const speakers = Array.isArray(parsedSpeakers)
     ? parsedSpeakers.filter((speaker): speaker is { id: string; teamId: string; name: string } => Boolean(speaker && typeof speaker === "object" && typeof (speaker as { id?: unknown }).id === "string" && typeof (speaker as { teamId?: unknown }).teamId === "string" && typeof (speaker as { name?: unknown }).name === "string" && teams.some((team) => team.id === (speaker as { teamId: string }).teamId)))
@@ -537,6 +545,7 @@ function tournamentFromData(data: SheetData): Tournament {
   return {
     tournamentName: str(configValue(config, "tournamentName")) || "Torneo LEDU",
     rounds,
+    scoring,
     teams,
     speakers,
     judges,
@@ -788,6 +797,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "saveTournament":
       await requireSession(payload.token);
       return saveTournament(payload);
+    case "saveScoreConfig":
+      await requireSession(payload.token);
+      return saveScoreConfig(payload);
     case "getRoundActivationPreview":
       await requireSession(payload.token);
       return getRoundActivationPreview(str(payload.roundId));
@@ -850,6 +862,10 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "formatPhases", JSON.stringify(phases));
     setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
     setConfig(configRows, "speakers", JSON.stringify(tournament.speakers ?? []));
+    setConfig(configRows, "scoring", JSON.stringify(current.scoring ?? emptyScoringConfig()));
+    setConfig(configRows, "roundTypes", JSON.stringify(Object.fromEntries(
+      tournament.rounds.map((round) => [round.id, round.scoreType ?? current.rounds.find((item) => item.id === round.id)?.scoreType ?? "qualifying"]),
+    )));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
     setConfig(configRows, "schemaVersion", "3");
     // Only activateRound may change the globally active round or activation revision.
@@ -865,6 +881,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
         id: round.id, number: round.number, name: round.name,
         active: round.id === current.activeRoundId,
         defaultFormatId: round.defaultFormatId || tournament.formats[0]?.id || "",
+        scoreType: round.scoreType ?? "qualifying",
       })),
       Equipos: tournament.teams.map((team) => ({ id: team.id, name: team.name, institution: team.institution, active: team.active, incompatibleJudgeIds: JSON.stringify(team.incompatibleJudgeIds ?? []) })),
       Jueces: tournament.judges.map((judge) => ({ id: judge.id, name: judge.name, institution: judge.institution, active: judge.active, incompatibleJudgeIds: JSON.stringify(judge.incompatibleJudgeIds ?? []) })),
@@ -993,6 +1010,7 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
       remainingSeconds: item.remainingSeconds,
     }));
     const configRows = data.rows.Config.map((row) => ({ ...row }));
+    setConfig(configRows, "roundTypes", JSON.stringify(Object.fromEntries(rounds.map((round) => [round.id, round.scoreType ?? "qualifying"]))));
     setConfig(configRows, "activeRoundId", roundId);
     setConfig(configRows, "activationRevision", String((tournament.activationRevision || 0) + 1));
     setConfig(configRows, "activatedAt", String(now));
@@ -1011,11 +1029,117 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
     ];
     const replacements: Partial<Record<SheetName, SheetRow[]>> = {
       Config: configRows,
-      Rondas: rounds.map((round) => ({ id: round.id, number: round.number, name: round.name, active: round.id === roundId, defaultFormatId: round.defaultFormatId })),
+      Rondas: rounds.map((round) => ({ id: round.id, number: round.number, name: round.name, active: round.id === roundId, defaultFormatId: round.defaultFormatId, scoreType: round.scoreType ?? "qualifying" })),
       Salas: nextRooms.map((room) => rowObjectForRoom(room, minimumJudges, now)),
       Cronometros: nextRooms.map((room) => rowObjectForTimer(room.id, room.timer)),
     };
     await writeTables(data, replacements, event);
+    return tournamentFromData(await loadSheetData(true));
+  });
+}
+
+
+
+async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tournament> {
+  return withLock(WRITE_LOCK, async () => {
+    const data = await loadSheetData(true);
+    const current = tournamentFromData(data);
+    if (num(payload.expectedRevision) !== current.revision) {
+      throw new ApiError("REVISION_CONFLICT", "El torneo cambió en otro dispositivo. Actualiza antes de registrar puntuaciones.", 409);
+    }
+
+    const categories = payload.categories;
+    const scorecards = payload.scorecards;
+    if (!Array.isArray(categories) || !Array.isArray(scorecards)) {
+      throw new ApiError("INVALID_SCORING", "Las categorías y actas deben ser listas válidas.");
+    }
+    const candidate = parseScoringConfig({ categories, scorecards });
+    if (!candidate.categories.length || candidate.categories.length > 30) {
+      throw new ApiError("INVALID_SCORE_CATEGORIES", "Debe haber entre 1 y 30 categorías de puntuación.");
+    }
+    const categoryIds = new Set<string>();
+    const categoryNames = new Set<string>();
+    for (const category of candidate.categories) {
+      const id = str(category.id).trim();
+      const name = str(category.name).trim();
+      const normalizedName = name.toLocaleLowerCase("es-ES");
+      if (!id || !name || name.length > 100 || categoryIds.has(id) || categoryNames.has(normalizedName) ||
+          !Number.isInteger(category.order) || category.order < 0) {
+        throw new ApiError("INVALID_SCORE_CATEGORIES", "Las categorías deben tener IDs y nombres únicos, nombres no vacíos y orden válido.");
+      }
+      categoryIds.add(id);
+      categoryNames.add(normalizedName);
+    }
+    if (candidate.scorecards.length > 10000) throw new ApiError("INVALID_SCORING", "Se ha superado el límite de actas.");
+    const previous = current.scoring ?? emptyScoringConfig();
+    const savedIds = new Set<string>();
+    const savedRoomIds = new Set<string>();
+    if (candidate.scorecards.length !== scorecards.length) {
+      throw new ApiError("INVALID_SCORING", "Una o más actas tienen una estructura inválida.");
+    }
+    for (const card of candidate.scorecards) {
+      if (!card.id || savedIds.has(card.id) || !card.roomId || savedRoomIds.has(card.roomId)) {
+        throw new ApiError("INVALID_SCORECARD", "Debe existir como máximo un acta por asignación, con identificadores únicos.");
+      }
+      savedIds.add(card.id);
+      savedRoomIds.add(card.roomId);
+      const previousCard = previous.scorecards.find((item) => item.id === card.id);
+      const changed = !previousCard || previousCard.updatedAt !== card.updatedAt;
+      if (changed) {
+        const issues = validateScorecard(card, candidate.categories, {
+          rounds: current.rounds,
+          rooms: current.rooms,
+          teams: current.teams,
+          judges: current.judges,
+          speakers: current.speakers ?? [],
+        });
+        if (issues.length) throw new ApiError("INVALID_SCORECARD", issues.slice(0, 5).join(" "));
+      }
+    }
+    // Category IDs are immutable links. Removing one still referenced by an act
+    // would make historical totals and criteria impossible to interpret.
+    const removedInUse = previous.categories.filter((category) =>
+      !categoryIds.has(category.id) && previous.scorecards.some((card) =>
+        card.teams.some((team) => Object.prototype.hasOwnProperty.call(team.categoryScores, category.id))));
+    if (removedInUse.length) {
+      throw new ApiError("SCORE_CATEGORY_IN_USE", "No se puede eliminar una categoría usada por actas históricas (" +
+        removedInUse.map((item) => item.name).join(", ") + "). Renómbrala o consérvala para proteger el historial.");
+    }
+
+    const now = Date.now();
+    const savedScorecards = candidate.scorecards.map((card) => {
+      const existing = previous.scorecards.find((item) => item.id === card.id);
+      return {
+        ...card,
+        createdAt: existing?.createdAt ?? card.createdAt ?? now,
+        updatedAt: now,
+        teams: card.teams.map((team) => ({
+          ...team,
+          teamName: current.teams.find((item) => item.id === team.teamId)?.name ?? team.teamName,
+          total: sumCategoryScores(team.categoryScores, candidate.categories),
+        })) as RoundScorecard["teams"],
+        roundName: current.rounds.find((item) => item.id === card.roundId)?.name ?? card.roundName,
+        roomName: current.rooms.find((item) => item.id === card.roomId)?.name ?? card.roomName,
+        judges: card.judges.map((judge) => ({
+          judgeId: judge.judgeId,
+          judgeName: current.judges.find((item) => item.id === judge.judgeId)?.name ?? judge.judgeName,
+        })),
+        speakers: card.speakers.map((speaker) => ({
+          ...speaker,
+          speakerName: (current.speakers ?? []).find((item) => item.id === speaker.speakerId)?.name ?? speaker.speakerName,
+        })),
+      };
+    });
+    const scoring: ScoringConfig = { categories: candidate.categories, scorecards: savedScorecards };
+    const configRows = data.rows.Config.map((row) => ({ ...row }));
+    setConfig(configRows, "scoring", JSON.stringify(scoring));
+    const nextRevision = current.revision + 1;
+    setConfig(configRows, "revision", String(nextRevision));
+    setConfig(configRows, "updatedAt", String(now));
+    await writeTables(data, { Config: configRows }, [
+      randomBytes(16).toString("hex"), new Date(now).toISOString(), "scoring", "",
+      "", "", "scorecard_saved", "", JSON.stringify({ scorecards: savedScorecards.length, categories: candidate.categories.length }),
+    ]);
     return tournamentFromData(await loadSheetData(true));
   });
 }

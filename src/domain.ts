@@ -1,3 +1,4 @@
+import type { ScoringConfig } from './scoring';
 export type TimerStatus = 'idle' | 'running' | 'paused' | 'finished';
 export type RoomStatus = 'unassigned' | 'ready' | 'running' | 'paused' | 'finished' | 'issue';
 export type PhaseType = 'opening' | 'cross-examination' | 'rebuttal' | 'cross-rebuttal' | 'conclusion' | 'other';
@@ -32,6 +33,8 @@ export interface Round {
   name: string;
   active: boolean;
   defaultFormatId: string;
+  /** Missing legacy values are interpreted as qualifying. */
+  scoreType?: 'qualifying' | 'elimination';
 }
 
 export interface FormatPreset {
@@ -71,6 +74,7 @@ export interface Room {
 export interface Tournament {
   tournamentName: string;
   rounds: Round[];
+  scoring?: ScoringConfig;
   teams: Team[];
   speakers?: Speaker[];
   judges: Judge[];

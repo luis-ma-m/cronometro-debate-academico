@@ -3,15 +3,16 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveTournament, updateTimer } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer } from './api';
 import type { RoundActivationPreview } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibilities';
 import type { TimerAction } from './timer';
+import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundScorecard, type ScoreCategory, type SpeakerScore, type TeamScore } from './scoring';
 
 const SESSION_KEY = 'ledu-admin-session';
-type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'settings';
+type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'settings';
 
 function makeSlug(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
@@ -87,6 +88,8 @@ export default function App() {
   const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
   const [institutionDraft, setInstitutionDraft] = useState('');
   const [selectedFormatId, setSelectedFormatId] = useState('');
+  const [scoreCategoryDraft, setScoreCategoryDraft] = useState('');
+  const [savingScores, setSavingScores] = useState(false);
   const [activationPreview, setActivationPreview] = useState<RoundActivationPreview | null>(null);
   const [activatingRound, setActivatingRound] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => { try { return localStorage.getItem('ledu-timer-sound') === 'true'; } catch { return false; } });
@@ -342,6 +345,120 @@ export default function App() {
   const rooms = data.rooms.filter((room) => room.roundId === activeRound);
   const counts = { total: rooms.length, running: rooms.filter((room) => room.timer.status === 'running').length, ready: rooms.filter((room) => room.status === 'ready').length, unassigned: rooms.filter((room) => room.status === 'unassigned').length, finished: rooms.filter((room) => room.timer.status === 'finished').length };
 
+  const scoring = data.scoring ?? emptyScoringConfig();
+  const scorecards = scoring.scorecards ?? [];
+  const overviewPendingScoreRooms = data.rooms.filter((room) => {
+    const round = data.rounds.find((item) => item.id === room.roundId);
+    return room.roundId === (data.activeRoundId || data.rounds.find((item) => item.active)?.id) &&
+      (round?.scoreType ?? 'qualifying') === 'qualifying' &&
+      Boolean(room.teamFavorId && room.teamContraId && room.teamFavorId !== room.teamContraId) &&
+      room.timer.status === 'finished' && !scorecards.some((card) => card.roomId === room.id);
+  });
+
+  const updateScoring = (next: typeof scoring) => updateData((current) => ({ ...current, scoring: next }));
+  const addScoreCategory = () => {
+    const name = scoreCategoryDraft.trim();
+    if (!name) return;
+    if (scoring.categories.some((item) => item.name.trim().toLocaleLowerCase('es-ES') === name.toLocaleLowerCase('es-ES'))) {
+      setServerError('Ya existe una categoría con ese nombre.');
+      return;
+    }
+    updateScoring({ ...scoring, categories: [...scoring.categories, { id: makeId('scorecat'), name, order: scoring.categories.length }] });
+    setScoreCategoryDraft('');
+  };
+  const updateScoreCategory = (id: string, patch: Partial<ScoreCategory>) => updateScoring({
+    ...scoring,
+    categories: scoring.categories.map((category) => category.id === id ? { ...category, ...patch } : category),
+  });
+  const removeScoreCategory = (category: ScoreCategory) => {
+    if (scoring.categories.length <= 1) { setServerError('Debe existir al menos una categoría de puntuación.'); return; }
+    if (scorecards.some((card) => card.teams.some((team) => Object.prototype.hasOwnProperty.call(team.categoryScores, category.id)))) {
+      setServerError('Esta categoría ya se usa en actas históricas. No se puede eliminar; puedes renombrarla para conservar la trazabilidad.');
+      return;
+    }
+    if (!window.confirm('¿Eliminar la categoría "' + category.name + '"?')) return;
+    updateScoring({ ...scoring, categories: scoring.categories.filter((item) => item.id !== category.id).map((item, index) => ({ ...item, order: index })) });
+  };
+  const saveScorecard = async (room: Room, formCard: RoundScorecard): Promise<boolean> => {
+    setSavingScores(true);
+    setServerError('');
+    try {
+      const nextCard: RoundScorecard = {
+        ...formCard,
+        roundId: room.roundId, roomId: room.id, roomName: room.name,
+        roundName: data.rounds.find((item) => item.id === room.roundId)?.name ?? formCard.roundName,
+        teamFavorId: room.teamFavorId, teamContraId: room.teamContraId,
+        judges: room.judgeIds.map((id) => ({ judgeId: id, judgeName: data.judges.find((judge) => judge.id === id)?.name ?? id })),
+        teams: formCard.teams.map((team) => ({
+          ...team, teamName: data.teams.find((item) => item.id === team.teamId)?.name ?? team.teamName,
+          total: sumCategoryScores(team.categoryScores, scoring.categories),
+        })) as RoundScorecard['teams'],
+        updatedAt: Date.now(),
+      };
+      const nextCards = scorecards.some((card) => card.roomId === room.id)
+        ? scorecards.map((card) => card.roomId === room.id ? nextCard : card)
+        : [...scorecards, nextCard];
+      let saved: Tournament;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        saved = await apiSaveScoreConfig(session.token, data.revision, scoring.categories, nextCards);
+      } else {
+        saved = { ...data, scoring: { ...scoring, scorecards: nextCards }, revision: data.revision + 1, updatedAt: Date.now() };
+        writeDemo(saved);
+      }
+      setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
+      setConnected(true);
+      setLastSyncedAt(Date.now());
+      return true;
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo guardar el acta de puntuación.');
+      return false;
+    } finally { setSavingScores(false); }
+  };
+  const persistTournamentMetadata = async (candidate: Tournament) => {
+    setSavingScores(true);
+    setServerError('');
+    try {
+      let saved: Tournament;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        saved = await saveTournament(session.token, data.revision, candidate);
+      } else {
+        saved = { ...candidate, revision: data.revision + 1, updatedAt: Date.now() };
+        writeDemo(saved);
+      }
+      setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
+      setConnected(true);
+      setLastSyncedAt(Date.now());
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudieron guardar los cambios.');
+    } finally { setSavingScores(false); }
+  };
+
+  const saveScoreCategories = async () => {
+    setSavingScores(true);
+    setServerError('');
+    try {
+      let saved: Tournament;
+      if (apiConfigured) {
+        if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
+        saved = await apiSaveScoreConfig(session.token, data.revision, scoring.categories, scorecards);
+      } else {
+        saved = { ...data, scoring: { ...scoring, scorecards }, revision: data.revision + 1, updatedAt: Date.now() };
+        writeDemo(saved);
+      }
+      setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo guardar la configuración de puntuaciones.');
+    } finally { setSavingScores(false); }
+  };
+
   const addInstitution = () => {
     const name = institutionDraft.trim();
     if (!name) return;
@@ -461,6 +578,10 @@ export default function App() {
     updateData((current) => ({ ...current, rooms: [...current.rooms, room] }));
     setServerError('');
   };
+  const updateRoundScoreType = (roundId: string, scoreType: 'qualifying' | 'elimination') => {
+    const candidate = { ...data, rounds: data.rounds.map((round) => round.id === roundId ? { ...round, scoreType } : round) };
+    void persistTournamentMetadata(candidate);
+  };
   const updateRoom = (id: string, patch: Partial<Room>) => {
     const currentRoom = data.rooms.find((room) => room.id === id);
     if (!currentRoom) return;
@@ -487,7 +608,7 @@ export default function App() {
     const name = window.prompt('Nombre de la ronda', 'Ronda ' + (data.rounds.length + 1));
     if (!name?.trim()) return;
     const timestamp = Date.now();
-    const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false, defaultFormatId: data.formats[0]?.id ?? '' };
+    const newRound: Round = { id: makeId('r'), number: data.rounds.length + 1, name: name.trim(), active: false, defaultFormatId: data.formats[0]?.id ?? '', scoreType: 'qualifying' };
     const defaultFormat = data.formats.find((format) => format.id === newRound.defaultFormatId);
     const phases = (defaultFormat?.phases?.length ? defaultFormat.phases : resolvePhases(data.formatPhases, data.rooms)).map((phase) => ({ ...phase }));
     const newAssignments: Room[] = data.physicalRooms.map((physical) => ({
@@ -818,6 +939,7 @@ export default function App() {
       <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => setView('rooms')} />
       <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
       <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
+      <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
       <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
     </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Google Sheets conectado' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · cada 10 s' : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
@@ -847,7 +969,25 @@ export default function App() {
       {view === 'overview' && <><div className="page-heading"><div><p className="eyebrow">VISTA OPERATIVA</p><h2>Estado del torneo</h2><p className="muted">Seguimiento de debates, asignaciones y cronómetros.</p></div><div className="round-badge"><BookOpen size={17} /><span>Ronda activa: <b>{data.rounds.find((round) => round.active)?.name ?? 'Sin ronda activa'}</b></span></div></div>
       {incompatibilityIncidents.length > 0 && <section className="panel warning-notice" role="status" aria-live="polite"><div className="panel-title"><div><h3>Incompatibilidades detectadas ({incompatibilityIncidents.length})</h3><p>Estas asignaciones existentes requieren revisión. No se han eliminado automáticamente.</p></div></div><div className="pending-debates-list">{incompatibilityIncidents.map((incident) => <article className="pending-debate-item" key={[incident.type, incident.roomId, ...incident.teamIds, ...incident.judgeIds].join(':')}><div className="pending-debate-heading"><b>{incident.roomName}</b><span className="state-pill issue">{incident.type === 'institution' ? 'Institución' : incident.type === 'team-judge' ? 'Equipo–juez' : 'Juez–juez'}</span></div><p>{incident.message}</p><div className="pending-debate-meta"><span>{incident.teamIds.map((id) => data.teams.find((team) => team.id === id)?.name ?? id).join(' · ') || 'Sin equipo afectado'}</span><span>{incident.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name ?? id).join(' · ')}</span><button className="text-button" onClick={() => { setSelectedRound(data.rooms.find((room) => room.id === incident.roomId)?.roundId ?? activeRound); setView('rooms'); }}>Revisar asignación <ChevronRight size={14} /></button></div></article>)}</div></section>}
       <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
+      {(data.rounds.find((round) => round.id === activeRound)?.scoreType ?? 'qualifying') === 'qualifying' && overviewPendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{overviewPendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
       <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
+
+      {view === 'scoring' && <ScoringView
+        data={data}
+        scoring={scoring}
+        rooms={data.rooms.filter((room) => room.roundId === activeRound)}
+        selectedRoundId={activeRound}
+        onSelectRound={setSelectedRound}
+        onUpdateRoundScoreType={updateRoundScoreType}
+        scoreCategoryDraft={scoreCategoryDraft}
+        onCategoryDraftChange={setScoreCategoryDraft}
+        onAddCategory={addScoreCategory}
+        onUpdateCategory={updateScoreCategory}
+        onRemoveCategory={removeScoreCategory}
+        onSaveCategories={() => void saveScoreCategories()}
+        onSaveScorecard={saveScorecard}
+        saving={savingScores}
+      />}
 
       {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => <section className="panel room-editor" key={room.id}><div className="panel-title"><div><input className="table-input room-name-input" aria-label="Nombre de la sala" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} /><p className="muted">Enlace permanente: /sala/{data.physicalRooms.find((physical) => physical.id === room.physicalRoomId)?.slug ?? room.physicalRoomId}</p></div><div className="room-open-actions"><button className="icon-button" title="Abrir cronómetro" onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button><button className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button><button className="icon-button danger-action" title="Eliminar sala" aria-label={'Eliminar sala ' + room.name} onClick={() => removeRoom(room)}><Trash2 size={15} /></button></div></div><div className="assign-grid"><label className="room-format-select">Formato de esta sala<select value={room.formatId} onChange={(event) => updateRoom(room.id, { formatId: event.target.value })}><option value="">Heredar formato de la ronda</option>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select><small>Se aplicará al activar la ronda.</small></label><label>Equipo a favor<select value={room.teamFavorId} onChange={(event) => updateRoom(room.id, { teamFavorId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label><label>Equipo en contra<select value={room.teamContraId} onChange={(event) => updateRoom(room.id, { teamContraId: event.target.value })}><option value="">Pendiente de asignar</option>{data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => <option key={team.id} value={team.id}>{team.name}{team.active ? '' : ' · Inactivo'}</option>)}</select></label></div><div className="judges-select"><b>Jueces asignados</b><div className="check-grid">{data.judges.filter((judge) => judge.active || room.judgeIds.includes(judge.id)).map((judge) => {
           const assigned = room.judgeIds.includes(judge.id);
@@ -870,6 +1010,196 @@ export default function App() {
       <footer className="footer"><span>LEDU Control · Herramienta de organización</span><span>{connected ? 'Conectado' : 'Conexión no confirmada'} · {lastSyncedAt ? 'Última sincronización: ' + new Date(lastSyncedAt).toLocaleTimeString('es-ES') : 'Sin sincronización confirmada'} · {apiConfigured ? 'Google Sheets' : 'Demo local'}</span></footer>
     </main>
   </div>;
+}
+
+
+function ScoringView({
+  data, scoring, rooms, selectedRoundId, onSelectRound, onUpdateRoundScoreType, scoreCategoryDraft,
+  onCategoryDraftChange, onAddCategory, onUpdateCategory, onRemoveCategory,
+  onSaveCategories, onSaveScorecard, saving,
+}: {
+  data: Tournament;
+  scoring: { categories: ScoreCategory[]; scorecards: RoundScorecard[] };
+  rooms: Room[];
+  selectedRoundId: string;
+  onSelectRound: (id: string) => void;
+  onUpdateRoundScoreType: (roundId: string, scoreType: 'qualifying' | 'elimination') => void;
+  scoreCategoryDraft: string;
+  onCategoryDraftChange: (value: string) => void;
+  onAddCategory: () => void;
+  onUpdateCategory: (id: string, patch: Partial<ScoreCategory>) => void;
+  onRemoveCategory: (category: ScoreCategory) => void;
+  onSaveCategories: () => void;
+  onSaveScorecard: (room: Room, card: RoundScorecard) => Promise<boolean>;
+  saving: boolean;
+}) {
+  const [editingRoomId, setEditingRoomId] = useState("");
+  const categories = [...scoring.categories].sort((a, b) => a.order - b.order);
+  const round = data.rounds.find((item) => item.id === selectedRoundId);
+  const elimination = (round?.scoreType ?? "qualifying") === "elimination";
+  const relevantRooms = rooms.filter((room) => Boolean(room.teamFavorId && room.teamContraId && room.teamFavorId !== room.teamContraId));
+  const eligible = relevantRooms.filter((room) => room.timer.status === "finished");
+  const pending = elimination ? [] : eligible.filter((room) => !scoring.scorecards.some((card) => card.roomId === room.id));
+  const history = scoring.scorecards.filter((card) => card.roundId === selectedRoundId);
+  const [draft, setDraft] = useState<RoundScorecard | null>(null);
+  const currentRoom = rooms.find((room) => room.id === editingRoomId);
+
+  const beginEdit = (room: Room) => {
+    const existing = scoring.scorecards.find((card) => card.roomId === room.id);
+    const teamIds = [room.teamFavorId, room.teamContraId];
+    const teams = teamIds.map((teamId) => {
+      const team = data.teams.find((item) => item.id === teamId);
+      const previous = existing?.teams.find((item) => item.teamId === teamId);
+      const categoryScores = Object.fromEntries(categories.map((category) => [category.id, previous?.categoryScores?.[category.id] ?? 0]));
+      return { teamId, teamName: team?.name ?? "Equipo", categoryScores, total: sumCategoryScores(categoryScores, categories), minorFaults: previous?.minorFaults ?? 0, majorFaults: previous?.majorFaults ?? 0 };
+    }) as RoundScorecard["teams"];
+    setDraft(existing ? {
+      ...existing,
+      teams,
+      judges: room.judgeIds.map((judgeId) => ({ judgeId, judgeName: data.judges.find((judge) => judge.id === judgeId)?.name ?? judgeId })),
+    } : {
+      id: "scorecard-" + room.id,
+      roundId: room.roundId,
+      roundName: round?.name ?? "Ronda",
+      roomId: room.id,
+      roomName: room.name,
+      teamFavorId: room.teamFavorId,
+      teamContraId: room.teamContraId,
+      judges: room.judgeIds.map((judgeId) => ({ judgeId, judgeName: data.judges.find((judge) => judge.id === judgeId)?.name ?? judgeId })),
+      teams,
+      speakers: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    setEditingRoomId(room.id);
+  };
+  const updateTeamScore = (teamId: string, patch: Partial<TeamScore>) => {
+    setDraft((current) => current ? {
+      ...current,
+      teams: current.teams.map((team) => team.teamId === teamId ? { ...team, ...patch,
+        total: sumCategoryScores({ ...team.categoryScores, ...(patch.categoryScores ?? {}) }, categories) } : team) as RoundScorecard["teams"],
+    } : current);
+  };
+  const updateCategoryScore = (teamId: string, categoryId: string, value: number) => {
+    setDraft((current) => current ? {
+      ...current,
+      teams: current.teams.map((team) => team.teamId === teamId ? {
+        ...team, categoryScores: { ...team.categoryScores, [categoryId]: value },
+        total: sumCategoryScores({ ...team.categoryScores, [categoryId]: value }, categories),
+      } : team) as RoundScorecard["teams"],
+    } : current);
+  };
+  const updateSpeakerScore = (index: number, patch: Partial<SpeakerScore>) => setDraft((current) => current ? ({
+    ...current, speakers: current.speakers.map((speaker, i) => i === index ? { ...speaker, ...patch } : speaker),
+  }) : current);
+  const addSpeakerScore = () => {
+    if (!draft || draft.speakers.length >= 8) return;
+    const used = new Set(draft.speakers.map((speaker) => speaker.speakerId));
+    const speaker = (data.speakers ?? []).find((item) =>
+      [draft.teamFavorId, draft.teamContraId].includes(item.teamId) && !used.has(item.id));
+    if (!speaker) return;
+    setDraft({ ...draft, speakers: [...draft.speakers, {
+      speakerId: speaker.id, speakerName: speaker.name, teamId: speaker.teamId, position: "introductor", score: 0,
+    }] });
+  };
+  const chooseSpeakerScore = (index: number, speakerId: string) => {
+    if (!draft) return;
+    const selected = (data.speakers ?? []).find((speaker) => speaker.id === speakerId);
+    if (!selected || ![draft.teamFavorId, draft.teamContraId].includes(selected.teamId)) return;
+    if (draft.speakers.some((speaker, i) => i !== index && speaker.speakerId === speakerId)) return;
+    setDraft((current) => current ? ({
+      ...current,
+      speakers: current.speakers.map((speaker, i) => i === index ? {
+        ...speaker, speakerId: selected.id, speakerName: selected.name, teamId: selected.teamId,
+      } : speaker),
+    }) : current);
+  };
+  const persist = async () => {
+    if (!currentRoom || !draft) return;
+    const saved = await onSaveScorecard(currentRoom, draft);
+    if (saved) { setEditingRoomId(""); setDraft(null); }
+  };
+
+  return <>
+    <div className="page-heading"><div><p className="eyebrow">EVALUACIÓN</p><h2>Puntuaciones de ronda</h2><p className="muted">Actas de debates finalizados, historial por equipo y puntuación individual de oradores.</p></div></div>
+    <section className="panel scoring-panel">
+      <div className="panel-title"><div><h3>Ronda y tipo de competición</h3><p>Las rondas se consideran clasificatorias por defecto; cambia a eliminatoria cuando corresponda.</p></div></div>
+      <div className="scoring-round-selector"><label>Ronda<select value={selectedRoundId} onChange={(event) => { onSelectRound(event.target.value); setEditingRoomId(""); setDraft(null); }}>{data.rounds.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Tipo<select value={round?.scoreType ?? "qualifying"} onChange={(event) => {
+        const scoreType = event.target.value as "qualifying" | "elimination";
+        onUpdateRoundScoreType(selectedRoundId, scoreType);
+      }}><option value="qualifying">Clasificatoria</option><option value="elimination">Eliminatoria</option></select></label></div>
+      {elimination ? <div className="notice warning-notice"><CircleHelp size={17} /><span>Esta ronda es eliminatoria. No se permite registrar puntuaciones ni aparecerá como pendiente.</span></div> : <>
+        <div className="stat-grid scoring-stats"><Stat label="Debates finalizados" value={eligible.length} icon={<Check />} /><Stat label="Actas registradas" value={history.length} icon={<BookOpen />} /><Stat label="Pendientes de puntuación" value={pending.length} icon={<Clock3 />} /></div>
+        <div className="score-category-settings">
+          <div className="panel-title"><div><h3>Categorías de puntuación de equipo</h3><p>Las categorías activas definen el sumatorio total. Las categorías usadas en el historial no se pueden borrar.</p></div><button className="button secondary" onClick={onSaveCategories} disabled={saving}><Save size={15} /> Guardar categorías</button></div>
+          <form className="institution-create" onSubmit={(event) => { event.preventDefault(); onAddCategory(); }}>
+            <input className="table-input" value={scoreCategoryDraft} onChange={(event) => onCategoryDraftChange(event.target.value)} placeholder="Nombre de categoría (p. ej., Evidencias)" maxLength={100} aria-label="Nueva categoría de puntuación" />
+            <button className="button secondary" disabled={saving || !scoreCategoryDraft.trim()}><Plus size={15} /> Añadir categoría</button>
+          </form>
+          <div className="score-category-list">{categories.map((category) => <div className="score-category-row" key={category.id}><span>{category.order + 1}</span><input className="table-input" aria-label="Nombre de categoría" value={category.name} onChange={(event) => onUpdateCategory(category.id, { name: event.target.value })} /><button type="button" className="icon-button danger-action" aria-label={"Eliminar categoría " + category.name} title="Eliminar categoría" onClick={() => onRemoveCategory(category)}><Trash2 size={14} /></button></div>)}</div>
+        </div>
+        <div className="scoring-room-list"><div className="panel-title"><div><h3>Actas por sala</h3><p>Solo se puede introducir puntuación cuando el debate figure como finalizado.</p></div></div>
+          {relevantRooms.map((room) => {
+            const card = scoring.scorecards.find((item) => item.roomId === room.id);
+            const editable = room.timer.status === "finished";
+            return <article className="score-room-row" key={room.id}>
+              <div><b>{room.name}</b><p>{data.teams.find((team) => team.id === room.teamFavorId)?.name ?? "Equipo"} <span>vs.</span> {data.teams.find((team) => team.id === room.teamContraId)?.name ?? "Equipo"}</p><small>{room.timer.status === "finished" ? (card ? "Acta registrada" : "Pendiente de puntuación") : room.timer.status === "running" ? "Debate en curso" : room.timer.status === "paused" ? "Debate pausado" : room.status === "ready" ? "Preparada · sin finalizar" : "Sin finalizar"}</small></div>
+              <span className={"state-pill " + (card ? "ready" : editable ? "paused" : "unassigned")}>{card ? "Registrada" : editable ? "Pendiente" : "No finalizada"}</span>
+              <button className="button secondary" disabled={!editable || saving} onClick={() => beginEdit(room)}>{card ? "Editar puntuación" : "Registrar puntuación"}</button>
+            </article>;
+          })}
+          {!relevantRooms.length && <Empty text="No hay enfrentamientos con dos equipos asignados en esta ronda." />}
+        </div>
+      </>}
+    </section>
+    {draft && currentRoom && <div className="activation-backdrop" role="presentation"><section className="activation-dialog scorecard-dialog" role="dialog" aria-modal="true" aria-labelledby="scorecard-title">
+      <div className="activation-dialog-top"><span className="eyebrow">ACTA DE EVALUACIÓN</span><button className="icon-button" onClick={() => { setEditingRoomId(""); setDraft(null); }} aria-label="Cerrar acta"><X size={16} /></button></div>
+      <h2 id="scorecard-title">{currentRoom.name} · {round?.name}</h2><p>Las puntuaciones se registrarán por equipo. Cada juez asignado queda vinculado a la misma acta para que conste su evaluación de ambos equipos.</p>
+      <div className="score-judges"><b>Jueces evaluadores</b><div>{draft.judges.map((judge) => <span key={judge.judgeId}>{judge.judgeName}</span>)}</div></div>
+      {draft.teams.map((team) => <section className="team-score-editor" key={team.teamId}><div className="team-score-heading"><div><h3>{team.teamName}</h3><p>La puntuación total se calcula automáticamente.</p></div><div className="team-score-total"><small>TOTAL</small><b>{team.total}</b></div></div>
+        <div className="score-category-inputs">{categories.map((category) => <label key={category.id}>{category.name}<input type="number" min={0} max={1000} step={0.5} value={team.categoryScores[category.id] ?? 0} onChange={(event) => updateCategoryScore(team.teamId, category.id, Number(event.target.value))} /></label>)}</div>
+        <div className="fault-inputs"><label>Faltas leves<input type="number" min={0} max={100} step={1} value={team.minorFaults} onChange={(event) => updateTeamScore(team.teamId, { minorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label><label>Faltas graves<input type="number" min={0} max={100} step={1} value={team.majorFaults} onChange={(event) => updateTeamScore(team.teamId, { majorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label></div>
+      </section>)}
+      <section className="team-score-editor"><div className="team-score-heading"><div><h3>Puntuación de oradores</h3><p>Hasta ocho oradores; cada uno debe pertenecer a uno de los equipos del debate.</p></div><button type="button" className="button secondary" disabled={draft.speakers.length >= 8 || (data.speakers ?? []).every((speaker) => ![draft.teamFavorId, draft.teamContraId].includes(speaker.teamId) || draft.speakers.some((row) => row.speakerId === speaker.id))} onClick={addSpeakerScore}><Plus size={14} /> Añadir orador</button></div>
+        {draft.speakers.map((speaker, index) => <div className="speaker-score-row" key={speaker.speakerId}>
+          <label>Orador/a<select value={speaker.speakerId} onChange={(event) => chooseSpeakerScore(index, event.target.value)}>{(data.speakers ?? []).filter((item) => [draft.teamFavorId, draft.teamContraId].includes(item.teamId) && (item.id === speaker.speakerId || !draft.speakers.some((other, i) => i !== index && other.speakerId === item.id))).map((item) => <option key={item.id} value={item.id}>{item.name} · {data.teams.find((team) => team.id === item.teamId)?.name ?? ""}</option>)}</select></label>
+          <label>Posición<select value={speaker.position} onChange={(event) => updateSpeakerScore(index, { position: event.target.value as SpeakerScore["position"] })}>{SPEAKER_POSITIONS.map((position) => <option key={position.value} value={position.value}>{position.label}</option>)}</select></label>
+          <label>Nota /10<input type="number" min={0} max={10} step={0.5} value={speaker.score} onChange={(event) => updateSpeakerScore(index, { score: Math.max(0, Math.min(10, Number(event.target.value) || 0)) })} /></label>
+          <button type="button" className="icon-button danger-action" aria-label={"Quitar puntuación de " + speaker.speakerName} onClick={() => setDraft({ ...draft, speakers: draft.speakers.filter((item) => item.speakerId !== speaker.speakerId) })}><Trash2 size={14} /></button>
+        </div>)}
+        {!draft.speakers.length && <p className="muted">No se han añadido puntuaciones de orador.</p>}
+      </section>
+      <div className="activation-dialog-actions"><button className="button secondary" onClick={() => { setEditingRoomId(""); setDraft(null); }}>Cancelar</button><button className="button primary" disabled={saving} onClick={persist}><Save size={15} /> {saving ? "Guardando…" : "Guardar acta completa"}</button></div>
+    </section></div>}
+
+    <section className="panel team-history-panel"><div className="panel-title"><div><h3>Historial de equipos</h3><p>Las actas conservan la ronda, el rival y las entidades evaluadoras mediante referencias estables.</p></div></div>
+      {data.teams.map((team) => {
+        const teamHistory = scoring.scorecards.filter((card) => card.teams.some((item) => item.teamId === team.id)).sort((a, b) => a.createdAt - b.createdAt);
+        if (!teamHistory.length) return null;
+        return <details className="team-history-item" key={team.id}><summary>{team.name} · {teamHistory.length} ronda(s)</summary><div>{teamHistory.map((card) => { const own = card.teams.find((item) => item.teamId === team.id)!; const opponent = card.teams.find((item) => item.teamId !== team.id)?.teamName ?? "Rival histórico"; return <article key={card.id}><b>{card.roundName}</b><span>vs. {opponent}</span><strong>Total: {own.total}</strong><small>Faltas leves: {own.minorFaults} · graves: {own.majorFaults}</small></article>; })}</div></details>;
+      })}
+    </section>
+
+    <section className="panel team-history-panel"><div className="panel-title"><div><h3>Historial individual de oradores</h3><p>Consulta las notas de cada orador en las rondas en las que ha participado.</p></div></div>
+      {(data.speakers ?? []).map((speaker) => {
+        const speakerHistory = scoring.scorecards.filter((card) => card.speakers.some((item) => item.speakerId === speaker.id)).sort((a, b) => a.createdAt - b.createdAt);
+        if (!speakerHistory.length) return null;
+        return <details className="team-history-item" key={speaker.id}><summary>{speaker.name} · {speakerHistory.length} intervención(es)</summary><div>{speakerHistory.map((card) => {
+          const item = card.speakers.find((entry) => entry.speakerId === speaker.id)!;
+          const position = SPEAKER_POSITIONS.find((entry) => entry.value === item.position)?.label ?? item.position;
+          return <article key={card.id}><b>{card.roundName}</b><span>{position}</span><strong>{item.score}/10</strong><small>{card.roomName} · {item.teamId === card.teamFavorId ? card.teams[0].teamName : card.teams[1].teamName}</small></article>;
+        })}</div></details>;
+      })}
+      {!(data.speakers ?? []).some((speaker) => scoring.scorecards.some((card) => card.speakers.some((item) => item.speakerId === speaker.id))) && <p className="muted">Todavía no hay puntuaciones individuales de oradores.</p>}
+    </section>
+    <section className="panel team-history-panel"><div className="panel-title"><div><h3>Historial de equipos</h3><p>Las actas conservan la ronda, el rival y las entidades evaluadoras mediante referencias estables.</p></div></div>
+      {data.teams.map((team) => {
+        const teamHistory = scoring.scorecards.filter((card) => card.teams.some((item) => item.teamId === team.id)).sort((a, b) => a.createdAt - b.createdAt);
+        if (!teamHistory.length) return null;
+        return <details className="team-history-item" key={team.id}><summary>{team.name} · {teamHistory.length} ronda(s)</summary><div>{teamHistory.map((card) => { const own = card.teams.find((item) => item.teamId === team.id)!; const opponentId = card.teams.find((item) => item.teamId !== team.id)?.teamId; const opponent = data.teams.find((item) => item.id === opponentId)?.name ?? "Rival histórico"; return <article key={card.id}><b>{card.roundName}</b><span>vs. {opponent}</span><strong>Total: {own.total}</strong><small>Faltas leves: {own.minorFaults} · graves: {own.majorFaults}</small></article>; })}</div></details>;
+      })}
+    </section>
+  </>;
 }
 
 function NavButton({ icon, label, selected, onClick }: { icon: React.ReactNode; label: string; selected: boolean; onClick: () => void }) {

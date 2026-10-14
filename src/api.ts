@@ -1,4 +1,5 @@
 import type { PublicRoom, Tournament } from './domain';
+import type { ScoreCategory, RoundScorecard } from './scoring';
 import type { TimerAction } from './timer';
 
 const EXPLICIT_API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? '';
@@ -59,6 +60,8 @@ export const logout = (token: string) => apiCall<{ loggedOut: boolean }>('logout
 export const getTournament = (token: string) => apiCall<Tournament>('getTournament', { token });
 export const saveTournament = (token: string, expectedRevision: number, tournament: Tournament) =>
   apiCall<Tournament>('saveTournament', { token, expectedRevision, tournament });
+export const saveScoreConfig = (token: string, expectedRevision: number, categories: ScoreCategory[], scorecards: RoundScorecard[]) =>
+  apiCall<Tournament>('saveScoreConfig', { token, expectedRevision, categories, scorecards });
 export const getPublicRoom = (roomId: string) => apiCall<PublicRoom>('getPublicRoom', { roomId });
 export const getRoomControllerToken = (token: string, roomId: string, rotate = false) =>
   apiCall<{ token: string }>('getRoomControllerToken', { token, roomId, rotate });
