@@ -1178,6 +1178,14 @@ function ScoringView({
       <div className="activation-dialog-actions"><button className="button secondary" onClick={() => { setEditingRoomId(""); setDraft(null); }}>Cancelar</button><button className="button primary" disabled={saving} onClick={persist}><Save size={15} /> {saving ? "Guardando…" : "Guardar acta completa"}</button></div>
     </section></div>}
 
+    <section className="panel team-history-panel"><div className="panel-title"><div><h3>Historial de equipos</h3><p>Las actas conservan la ronda, el rival y las entidades evaluadoras mediante referencias estables.</p></div></div>
+      {data.teams.map((team) => {
+        const teamHistory = scoring.scorecards.filter((card) => card.teams.some((item) => item.teamId === team.id)).sort((a, b) => a.createdAt - b.createdAt);
+        if (!teamHistory.length) return null;
+        return <details className="team-history-item" key={team.id}><summary>{team.name} · {teamHistory.length} ronda(s)</summary><div>{teamHistory.map((card) => { const own = card.teams.find((item) => item.teamId === team.id)!; const opponent = card.teams.find((item) => item.teamId !== team.id)?.teamName ?? "Rival histórico"; return <article key={card.id}><b>{card.roundName}</b><span>vs. {opponent}</span><strong>Total: {own.total}</strong><small>Faltas leves: {own.minorFaults} · graves: {own.majorFaults}</small></article>; })}</div></details>;
+      })}
+    </section>
+
     <section className="panel team-history-panel"><div className="panel-title"><div><h3>Historial individual de oradores</h3><p>Consulta las notas de cada orador en las rondas en las que ha participado.</p></div></div>
       {(data.speakers ?? []).map((speaker) => {
         const speakerHistory = scoring.scorecards.filter((card) => card.speakers.some((item) => item.speakerId === speaker.id)).sort((a, b) => a.createdAt - b.createdAt);
