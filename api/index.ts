@@ -2,6 +2,7 @@ import { createHash, createHmac, createSign, randomBytes, timingSafeEqual } from
 import type { FormatPreset, Phase, PhysicalRoom, Room, TimerState, Tournament } from "../src/domain.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
+import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
 import {
   ApiError,
   DEFAULT_SPREADSHEET_ID,
@@ -475,11 +476,13 @@ function tournamentFromData(data: SheetData): Tournament {
     id: str(row.id), number: num(row.number), name: str(row.name),
     active: activeRoundId ? str(row.id) === activeRoundId : bool(row.active),
     defaultFormatId: str(row.defaultFormatId),
+    scoreType: str(row.scoreType) === "elimination" ? "elimination" : "qualifying",
   }));
   const teams = data.rows.Equipos.map((row) => ({
     id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active),
     incompatibleJudgeIds: parseStringArray(row.incompatibleJudgeIds),
   }));
+  const scoring = parseScoringConfig(parseJson<unknown>(configValue(config, "scoring"), emptyScoringConfig()));
   const parsedSpeakers = parseJson<unknown>(configValue(config, "speakers"), []);
   const speakers = Array.isArray(parsedSpeakers)
     ? parsedSpeakers.filter((speaker): speaker is { id: string; teamId: string; name: string } => Boolean(speaker && typeof speaker === "object" && typeof (speaker as { id?: unknown }).id === "string" && typeof (speaker as { teamId?: unknown }).teamId === "string" && typeof (speaker as { name?: unknown }).name === "string" && teams.some((team) => team.id === (speaker as { teamId: string }).teamId)))
@@ -537,6 +540,7 @@ function tournamentFromData(data: SheetData): Tournament {
   return {
     tournamentName: str(configValue(config, "tournamentName")) || "Torneo LEDU",
     rounds,
+    scoring,
     teams,
     speakers,
     judges,
@@ -850,6 +854,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "formatPhases", JSON.stringify(phases));
     setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
     setConfig(configRows, "speakers", JSON.stringify(tournament.speakers ?? []));
+    setConfig(configRows, "scoring", JSON.stringify(tournament.scoring ?? current.scoring ?? emptyScoringConfig()));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
     setConfig(configRows, "schemaVersion", "3");
     // Only activateRound may change the globally active round or activation revision.
@@ -1011,7 +1016,7 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
     ];
     const replacements: Partial<Record<SheetName, SheetRow[]>> = {
       Config: configRows,
-      Rondas: rounds.map((round) => ({ id: round.id, number: round.number, name: round.name, active: round.id === roundId, defaultFormatId: round.defaultFormatId })),
+      Rondas: rounds.map((round) => ({ id: round.id, number: round.number, name: round.name, active: round.id === roundId, defaultFormatId: round.defaultFormatId, scoreType: round.scoreType ?? "qualifying" })),
       Salas: nextRooms.map((room) => rowObjectForRoom(room, minimumJudges, now)),
       Cronometros: nextRooms.map((room) => rowObjectForTimer(room.id, room.timer)),
     };
