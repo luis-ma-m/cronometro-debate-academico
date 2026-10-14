@@ -4,7 +4,13 @@ import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, trans
 
 describe('incompatibility domain rules', () => {
   const room = { id:'r1', name:'Sala 1', roundId:'r1', physicalRoomId:'p1', formatId:'f1', teamFavorId:'t1', teamContraId:'t2', judgeIds:['j1'], status:'ready' as const, phases:LEDU_PHASES, timer:createTimer(), notes:'', updatedAt:1 };
-  const base = () => ({
+  // Empty array literals otherwise infer as never[] in this mutable fixture.
+  const base = (): {
+    rounds: { id: string; number: number; name: string; active: boolean; defaultFormatId: string }[];
+    teams: { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }[];
+    judges: { id: string; name: string; institution: string; active: boolean; incompatibleJudgeIds: string[] }[];
+    rooms: typeof room[];
+  } => ({
     rounds:[{id:'r1',number:1,name:'Ronda 1',active:true,defaultFormatId:'f1'}],
     teams:[{id:'t1',name:'Equipo A',institution:'Uni A',active:true,incompatibleJudgeIds:[]},{id:'t2',name:'Equipo B',institution:'Uni B',active:true,incompatibleJudgeIds:[]}],
     judges:[{id:'j1',name:'Juez 1',institution:'Otra',active:true,incompatibleJudgeIds:[]},{id:'j2',name:'Juez 2',institution:'Otra',active:true,incompatibleJudgeIds:[]}],
