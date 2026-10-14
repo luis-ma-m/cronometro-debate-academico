@@ -52,6 +52,13 @@ https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plce
 
 El esquema v3 usa Config, Rondas, Equipos, Jueces, Salas, SalasFisicas, Formatos, Cronometros y Registro. Equipos y Jueces guardan `incompatibleJudgeIds` como JSON. En el primer acceso a Production sin `schemaVersion=3`, la API reinicializa los datos y crea la ronda inicial y el preset LEDU. Esta migración v3 es destructiva una sola vez; Preview sigue bloqueado para no borrar la hoja compartida. **Esta migración es destructiva y no conserva el torneo anterior.** Los previews no pueden ejecutarla para evitar que un despliegue de prueba borre la hoja de producción compartida. Consulta docs/DEPLOYMENT.md antes del despliegue.
 
+
+## Incompatibilidades (esquema v3)
+
+Se pueden buscar y configurar incompatibilidades de equipo–juez y juez–juez. Las institucionales siguen siendo obligatorias; las relaciones entre jueces son recíprocas y se validan por sala.
+
+**Migración destructiva:** el primer acceso a Production sin `schemaVersion=3` reinicializa las pestañas de la hoja, incluyendo equipos, jueces, asignaciones, cronómetros e historial, y crea una ronda y el preset LEDU. Preview no puede ejecutar la migración. Exporta previamente los datos necesarios y acepta explícitamente la pérdida antes del despliegue.
+
 ## Seguridad y límites
 
 - Mantén la hoja privada y compártela como editora únicamente con el correo de la cuenta de servicio.
