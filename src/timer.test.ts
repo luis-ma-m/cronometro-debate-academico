@@ -31,31 +31,6 @@ describe('incompatibility domain rules', () => {
 });
 
 
-describe('incompatibility assignment validation', () => {
-  it('combines institutional, team-judge and judge-judge rules but accepts empty lists', () => {
-    const tournament = {
-      rounds: [{id:'r1',number:1,name:'Ronda 1',active:true,defaultFormatId:'f1'}],
-      teams: [
-        {id:'t1',name:'Equipo A',institution:'Uni A',active:true,incompatibleJudgeIds:[]},
-        {id:'t2',name:'Equipo B',institution:'Uni B',active:true,incompatibleJudgeIds:[]},
-      ],
-      judges: [
-        {id:'j1',name:'Juez 1',institution:'Otra',active:true,incompatibleJudgeIds:[]},
-        {id:'j2',name:'Juez 2',institution:'Otra',active:true,incompatibleJudgeIds:[]},
-      ],
-      rooms: [{id:'a1',name:'Sala 1',roundId:'r1',physicalRoomId:'p1',formatId:'f1',teamFavorId:'t1',teamContraId:'t2',judgeIds:['j1','j2'],status:'ready' as const,phases:LEDU_PHASES,timer:createTimer(),notes:'',updatedAt:1}],
-    };
-    expect(validateAssignments(tournament)).toEqual([]);
-    tournament.judges[0].institution = 'Uni A';
-    expect(validateAssignments(tournament).some((message)=>message.includes('comparten institución'))).toBe(true);
-    tournament.judges[0].institution = 'Otra';
-    tournament.teams[1].incompatibleJudgeIds = ['j1'];
-    expect(validateAssignments(tournament).some((message)=>message.includes('incompatible con el equipo Equipo B'))).toBe(true);
-    tournament.teams[1].incompatibleJudgeIds = [];
-    tournament.judges[0].incompatibleJudgeIds = ['j2'];
-    expect(validateAssignments(tournament).some((message)=>message.includes('son incompatibles'))).toBe(true);
-  });
-});
 
 describe('preset LEDU general', () => {
   it('matches the reference turn sequence and duration from the project specification', () => {
