@@ -1099,9 +1099,6 @@ function ScoringView({
   };
   const updateTeamScoreInput = (teamId: string, categoryId: string, raw: string) => {
     setScoreInputDraft((current) => ({ ...current, teamScores: { ...current.teamScores, [teamId + ":" + categoryId]: raw } }));
-    const normalized = raw.trim().replace(",", ".");
-    if (!normalized || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) return;
-    updateCategoryScore(teamId, categoryId, Number(normalized));
   };
   const commitTeamScoreInput = (teamId: string, categoryId: string) => {
     const key = teamId + ":" + categoryId;
@@ -1111,9 +1108,6 @@ function ScoringView({
   };
   const updateSpeakerScoreInput = (index: number, raw: string) => {
     setScoreInputDraft((current) => ({ ...current, speakerScores: { ...current.speakerScores, [index]: raw } }));
-    const normalized = raw.trim().replace(",", ".");
-    if (!normalized || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) return;
-    updateSpeakerScore(index, { score: Number(normalized) });
   };
   const commitSpeakerScoreInput = (index: number) => {
     setScoreInputDraft((current) => { const next = { ...current, speakerScores: { ...current.speakerScores } }; delete next.speakerScores[index]; return next; });
