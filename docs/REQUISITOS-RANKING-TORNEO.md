@@ -60,11 +60,11 @@ Columnas principales: **Posición · Equipo · Victorias · Derrotas · Puntuaci
 ## 3. Rankings de oradores
 
 Mostrar cinco rankings independientes:
-- **Mejor orador**: media de todas las puntuaciones individuales recibidas por ese orador en actas clasificatorias válidas, sin filtrar por posición.
-- **Mejor introductor**: media únicamente de puntuaciones en las que `position === "introductor"`.
-- **Mejor 1.er refutador**: media únicamente de puntuaciones en las que `position === "first_rebuttal"`.
-- **Mejor 2.º refutador**: media únicamente de puntuaciones en las que `position === "second_rebuttal"`.
-- **Mejor conclusor**: media únicamente de puntuaciones en las que `position === "concluder"`.
+- **Mejor orador**: sumatorio de todas las puntuaciones individuales recibidas por ese orador en actas clasificatorias válidas, sin filtrar por posición.
+- **Mejor introductor**: sumatorio únicamente de puntuaciones en las que `position === "introductor"`.
+- **Mejor 1.er refutador**: sumatorio únicamente de puntuaciones en las que `position === "first_rebuttal"`.
+- **Mejor 2.º refutador**: sumatorio únicamente de puntuaciones en las que `position === "second_rebuttal"`.
+- **Mejor conclusor**: sumatorio únicamente de puntuaciones en las que `position === "concluder"`.
 
 ### Reglas de cálculo
 
@@ -72,12 +72,12 @@ Mostrar cinco rankings independientes:
 - En los rankings por posición, si una persona ha desempeñado otras posiciones en otras rondas, esas notas no entran en la media de esa posición. Por ejemplo, para «Mejor introductor» solo cuentan sus apariciones como introductor.
 - Si un orador no ha recibido ninguna nota para un ranking, no aparece en ese ranking. No calcular una media igual a cero ni inferir puntuaciones a partir de su participación en el roster.
 - No mezclar nombres para identificar personas: agregar por `speakerId`. Utilizar el nombre histórico guardado en la puntuación si existe, con fallback al catálogo actual.
-- Se recomienda mostrar **media**, **número de puntuaciones** y **equipo** junto al nombre. La media se muestra con un máximo de dos decimales, sin redondear los valores usados en el ordenamiento.
-- Para un empate de media, asignar la misma posición competitiva. La cantidad de puntuaciones sirve como contexto, pero no debe romper el empate deportivo salvo decisión explícita futura.
+- Se recomienda mostrar **media**, **número de puntuaciones** y **equipo** junto al nombre. El sumatorio se muestra como puntuación acumulada; se muestra también el número de evaluaciones.
+- Para un empate de sumatorio, asignar la misma posición competitiva. La cantidad de puntuaciones sirve como contexto, pero no debe romper el empate deportivo salvo decisión explícita futura.
 
 ### Nota metodológica y comparabilidad
 
-Los oradores pueden tener distinto número de evaluaciones. El ranking debe reflejar la media solicitada, no la suma de notas, de modo que alguien no quede arriba solo por acumular más participaciones. No introducir de forma silenciosa un mínimo de evaluaciones ni ponderaciones por número de debates: si se desea un mínimo para ser elegible, deberá ser un requisito separado y explícito.
+El ranking refleja el sumatorio de ítems, no la media: la puntuación acumulada representa el total de aportaciones en cada posición. Se muestra el número de evaluaciones para aportar contexto.
 
 ## 4. Datos, arquitectura y persistencia
 
@@ -101,15 +101,15 @@ Los oradores pueden tener distinto número de evaluaciones. El ranking debe refl
 
 ### Rankings de oradores
 8. Se muestran cinco categorías con los nombres indicados.
-9. El ranking global calcula la media de todas las notas clasificatorias del orador, independientemente de su posición.
+9. El ranking global calcula el sumatorio de todas las notas clasificatorias del orador, independientemente de su posición.
 10. Cada ranking posicional filtra exclusivamente por su posición correspondiente; las rondas en las que el orador no tuvo ese papel no afectan a esa media.
-11. Las medias no incluyen actas eliminatorias, puntuaciones ausentes ni oradores sin notas aplicables.
+11. Los sumatorios no incluyen actas eliminatorias, puntuaciones ausentes ni oradores sin notas aplicables.
 12. Se muestran media y número de puntuaciones; las notas repetidas del mismo orador en diferentes actas se cuentan según cada acta válida.
 13. Los agregados se identifican mediante IDs estables y soportan renombres de equipos y oradores.
 
 ### Calidad y usabilidad
 14. La vista tiene estados vacíos claros y es utilizable en escritorio y móvil.
-15. Hay tests unitarios para victorias, derrotas, empates, orden del ranking, actas editadas, exclusión de eliminatorias y medias por posición con número de muestras desigual.
+15. Hay tests unitarios para victorias, derrotas, empates, orden del ranking, actas editadas, exclusión de eliminatorias y sumatorios por posición con número de muestras desigual.
 16. CI pasa `npm test`, `npm run typecheck:api` y `npm run build`.
 17. Se mantiene la cadencia de actualización compartida y no se introducen migraciones destructivas.
 
