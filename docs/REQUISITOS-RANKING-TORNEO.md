@@ -4,7 +4,7 @@
 
 Añadir una pestaña **Torneo** al panel privado de LEDU Control para consultar, en una misma vista, (1) la clasificación de equipos en la fase clasificatoria y (2) cinco rankings individuales de oradores: mejor orador global y mejor orador por posición.
 
-Este documento define el diseño, reglas de cálculo, tratamiento de casos límite y criterios de aceptación. No implica que la funcionalidad esté implementada.
+Este documento recoge el diseño funcional, las reglas de cálculo, el tratamiento de casos límite y los criterios de aceptación de la funcionalidad de ranking.
 
 ## Exploración de la implementación actual
 
