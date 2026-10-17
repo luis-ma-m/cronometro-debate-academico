@@ -266,3 +266,5 @@
  .team-history-item article small{grid-column:auto}
  .team-score-heading{align-items:flex-start}
 }
+
+.tournament-ranking-panel{margin-bottom:20px}.tournament-table-wrap{width:100%;overflow-x:auto}.tournament-table-wrap table{width:100%;border-collapse:collapse;text-align:left}.tournament-table-wrap th{padding:12px 10px;background:var(--surface-subtle,#f8fafc);color:var(--muted,#667085);font-size:10px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}.tournament-table-wrap td{padding:13px 10px;border-top:1px solid var(--border,#e4e7ec);font-size:12px}.tournament-table-wrap td:first-child{color:var(--muted,#667085);width:52px}.speaker-ranking-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.speaker-ranking-panel{min-width:0}.speaker-ranking-panel .panel-title{min-height:55px}.tournament-empty{font-size:12px;line-height:1.5;padding:8px 0}@media(max-width:1000px){.speaker-ranking-grid{grid-template-columns:1fr}}@media(max-width:760px){.tournament-table-wrap table{min-width:520px}.speaker-ranking-panel .panel-title{min-height:0}}
