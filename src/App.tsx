@@ -1091,11 +1091,11 @@ function ScoringView({
     });
     setEditingRoomId(room.id);
   };
-  const parseScoreInput = (raw: string): number => {
+  const parseScoreInput = (raw: string, max: number): number => {
     const normalized = raw.trim().replace(",", ".");
     if (!normalized) return 0;
     const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? Math.max(0, Math.min(max, parsed)) : 0;
   };
   const updateTeamScoreInput = (teamId: string, categoryId: string, raw: string) => {
     setScoreInputDraft((current) => ({ ...current, teamScores: { ...current.teamScores, [teamId + ":" + categoryId]: raw } }));
@@ -1104,7 +1104,7 @@ function ScoringView({
     const key = teamId + ":" + categoryId;
     setScoreInputDraft((current) => { const next = { ...current, teamScores: { ...current.teamScores } }; delete next.teamScores[key]; return next; });
     const raw = scoreInputDraft.teamScores[key];
-    if (raw !== undefined) updateCategoryScore(teamId, categoryId, parseScoreInput(raw));
+    if (raw !== undefined) updateCategoryScore(teamId, categoryId, parseScoreInput(raw, 1000));
   };
   const updateSpeakerScoreInput = (index: number, raw: string) => {
     setScoreInputDraft((current) => ({ ...current, speakerScores: { ...current.speakerScores, [index]: raw } }));
@@ -1112,7 +1112,7 @@ function ScoringView({
   const commitSpeakerScoreInput = (index: number) => {
     setScoreInputDraft((current) => { const next = { ...current, speakerScores: { ...current.speakerScores } }; delete next.speakerScores[index]; return next; });
     const raw = scoreInputDraft.speakerScores[index];
-    if (raw !== undefined) updateSpeakerScore(index, { score: parseScoreInput(raw) });
+    if (raw !== undefined) updateSpeakerScore(index, { score: parseScoreInput(raw, 10) });
   };
   const updateTeamScore = (teamId: string, patch: Partial<TeamScore>) => {
     setDraft((current) => current ? {
@@ -1201,7 +1201,7 @@ function ScoringView({
         <div className="score-category-inputs">{categories.map((category) => <label key={category.id}>{category.name}<input type="text" inputMode="decimal" minLength={0} aria-label={category.name + " de " + team.teamName} value={scoreInputDraft.teamScores[team.teamId + ":" + category.id] ?? String(team.categoryScores[category.id] ?? "")} onChange={(event) => updateTeamScoreInput(team.teamId, category.id, event.target.value)} onBlur={() => commitTeamScoreInput(team.teamId, category.id)} /></label>)}</div>
         <div className="fault-inputs"><label>Faltas leves<input type="number" min={0} max={100} step={1} value={team.minorFaults} onChange={(event) => updateTeamScore(team.teamId, { minorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label><label>Faltas graves<input type="number" min={0} max={100} step={1} value={team.majorFaults} onChange={(event) => updateTeamScore(team.teamId, { majorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label></div>
       </section>)}
-      <section className="team-score-editor"><div className="team-score-heading"><div><h3>Puntuación de oradores</h3><p>Hasta ocho evaluaciones. Cada equipo solo puede asignar una vez cada posición; un orador puede ocupar varias posiciones.</p></div><button type="button" className="button secondary" disabled={draft.speakers.length >= 8 || (data.speakers ?? []).every((speaker) => ![draft.teamFavorId, draft.teamContraId].includes(speaker.teamId))} onClick={addSpeakerScore}><Plus size={14} /> Añadir orador</button></div>
+      <section className="team-score-editor"><div className="team-score-heading"><div><h3>Puntuación de oradores</h3><p>Hasta ocho evaluaciones. Cada equipo solo puede asignar una vez cada posición; un orador puede ocupar varias posiciones.</p></div><button type="button" className="button secondary" disabled={draft.speakers.length >= 8 || (data.speakers ?? []).every((speaker) => ![draft.teamFavorId, draft.teamContraId].includes(speaker.teamId) || draft.speakers.some((row) => row.teamId === speaker.teamId && row.position === "introductor"))} onClick={addSpeakerScore}><Plus size={14} /> Añadir orador</button></div>
         {draft.speakers.map((speaker, index) => <div className="speaker-score-row" key={speaker.speakerId + ":" + speaker.position + ":" + index}>
           <label>Orador/a<select value={speaker.speakerId} onChange={(event) => chooseSpeakerScore(index, event.target.value)}>{(data.speakers ?? []).filter((item) => [draft.teamFavorId, draft.teamContraId].includes(item.teamId) && true).map((item) => <option key={item.id} value={item.id}>{item.name} · {data.teams.find((team) => team.id === item.teamId)?.name ?? ""}</option>)}</select></label>
           <label>Posición<select value={speaker.position} onChange={(event) => { const position = event.target.value as SpeakerScore["position"]; const speakerTeamId = draft.speakers[index]?.teamId; if (draft.speakers.some((other, i) => i !== index && other.teamId === speakerTeamId && other.position === position)) { setServerError("Cada equipo solo puede tener una evaluación por posición."); return; } updateSpeakerScore(index, { position }); }}>{SPEAKER_POSITIONS.map((position) => <option key={position.value} value={position.value}>{position.label}</option>)}</select></label>
