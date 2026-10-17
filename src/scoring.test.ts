@@ -75,6 +75,20 @@ describe("Round scoring", () => {
     expect(validateScorecard(fixture.card, fixture.config.categories, context).join(" ")).toContain("registro de su equipo");
   });
 
+  it("allows the same speaker to be assessed in different positions but rejects duplicate positions per team", () => {
+    const fixture = makeFixture();
+    const context = { rounds: fixture.rounds, rooms: [fixture.room], teams: fixture.teams, judges: fixture.judges, speakers: fixture.speakers };
+    fixture.card.speakers = [
+      { speakerId: "s1", speakerName: "Ana", teamId: "t1", position: "introductor", score: 8 },
+      { speakerId: "s1", speakerName: "Ana", teamId: "t1", position: "concluder", score: 9 },
+      { speakerId: "s2", speakerName: "Luis", teamId: "t2", position: "introductor", score: 7.5 },
+    ];
+    expect(validateScorecard(fixture.card, fixture.config.categories, context)).toEqual([]);
+
+    fixture.card.speakers.push({ speakerId: "s2", speakerName: "Luis", teamId: "t2", position: "introductor", score: 8 });
+    expect(validateScorecard(fixture.card, fixture.config.categories, context).join(" ")).toContain("una evaluación por posición");
+  });
+
   it("parses legacy missing scoring settings without requiring a schema migration", () => {
     expect(parseScoringConfig(undefined).categories).toEqual(DEFAULT_SCORE_CATEGORIES);
     expect(parseScoringConfig({ categories: [], scorecards: [] }).scorecards).toEqual([]);
