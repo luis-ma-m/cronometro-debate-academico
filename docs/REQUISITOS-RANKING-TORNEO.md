@@ -69,10 +69,10 @@ Mostrar cinco rankings independientes:
 ### Reglas de cálculo
 
 - Una puntuación individual se cuenta una única vez, a partir de las entradas `SpeakerScore` guardadas en las actas clasificatorias. La unidad de observación es cada nota de orador en cada acta.
-- En los rankings por posición, si una persona ha desempeñado otras posiciones en otras rondas, esas notas no entran en la media de esa posición. Por ejemplo, para «Mejor introductor» solo cuentan sus apariciones como introductor.
-- Si un orador no ha recibido ninguna nota para un ranking, no aparece en ese ranking. No calcular una media igual a cero ni inferir puntuaciones a partir de su participación en el roster.
+- En los rankings por posición, si una persona ha desempeñado otras posiciones en otras rondas, esas notas no entran en el sumatorio de esa posición. Por ejemplo, para «Mejor introductor» solo cuentan sus apariciones como introductor.
+- Si un orador no ha recibido ninguna nota para un ranking, no aparece en ese ranking. No asignar un sumatorio igual a cero ni inferir puntuaciones a partir de su participación en el roster.
 - No mezclar nombres para identificar personas: agregar por `speakerId`. Utilizar el nombre histórico guardado en la puntuación si existe, con fallback al catálogo actual.
-- Se recomienda mostrar **media**, **número de puntuaciones** y **equipo** junto al nombre. El sumatorio se muestra como puntuación acumulada; se muestra también el número de evaluaciones.
+- Mostrar **sumatorio acumulado**, **número de puntuaciones** y **equipo** junto al nombre.
 - Para un empate de sumatorio, asignar la misma posición competitiva. La cantidad de puntuaciones sirve como contexto, pero no debe romper el empate deportivo salvo decisión explícita futura.
 
 ### Nota metodológica y comparabilidad
@@ -102,9 +102,9 @@ El ranking refleja el sumatorio de ítems, no la media: la puntuación acumulada
 ### Rankings de oradores
 8. Se muestran cinco categorías con los nombres indicados.
 9. El ranking global calcula el sumatorio de todas las notas clasificatorias del orador, independientemente de su posición.
-10. Cada ranking posicional filtra exclusivamente por su posición correspondiente; las rondas en las que el orador no tuvo ese papel no afectan a esa media.
+10. Cada ranking posicional filtra exclusivamente por su posición correspondiente; las rondas en las que el orador no tuvo ese papel no afectan a ese sumatorio.
 11. Los sumatorios no incluyen actas eliminatorias, puntuaciones ausentes ni oradores sin notas aplicables.
-12. Se muestran media y número de puntuaciones; las notas repetidas del mismo orador en diferentes actas se cuentan según cada acta válida.
+12. Se muestran sumatorio acumulado y número de puntuaciones; las notas repetidas del mismo orador en diferentes actas se cuentan según cada acta válida.
 13. Los agregados se identifican mediante IDs estables y soportan renombres de equipos y oradores.
 
 ### Calidad y usabilidad
