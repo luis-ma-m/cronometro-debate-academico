@@ -10,9 +10,10 @@ import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, trans
 import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibilities';
 import type { TimerAction } from './timer';
 import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundScorecard, type ScoreCategory, type SpeakerScore, type TeamScore } from './scoring';
+import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 
 const SESSION_KEY = 'ledu-admin-session';
-type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'settings';
+type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
 
 function makeSlug(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
@@ -940,6 +941,7 @@ export default function App() {
       <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
       <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
       <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
+      <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
       <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
     </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Google Sheets conectado' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · cada 10 s' : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
@@ -971,6 +973,8 @@ export default function App() {
       <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
       {(data.rounds.find((round) => round.id === activeRound)?.scoreType ?? 'qualifying') === 'qualifying' && overviewPendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{overviewPendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
       <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
+
+      {view === 'tournament' && <TournamentView data={data} />}
 
       {view === 'scoring' && <ScoringView
         data={data}
@@ -1012,6 +1016,15 @@ export default function App() {
   </div>;
 }
 
+
+function TournamentView({data}:{data:Tournament}) {
+ const cards=data.scoring?.scorecards??[], teams=buildTeamRanking(data.teams,data.rounds,cards), rankings=buildSpeakerRankings(data.teams,data.speakers??[],data.rounds,cards);
+ const hasScores=cards.some(card=>data.rounds.some(round=>round.id===card.roundId&&(round.scoreType??"qualifying")==="qualifying"));
+ return <><div className="page-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Torneo</h2><p className="muted">Clasificación de equipos y rankings de oradores de las rondas clasificatorias.</p></div></div>
+ {!hasScores&&<div className="notice"><BookOpen size={17}/><span>Aún no hay actas clasificatorias. Los rankings aparecerán cuando se registren puntuaciones.</span></div>}
+ <section className="panel tournament-ranking-panel"><div className="panel-title"><div><h3>Clasificación por equipos</h3><p>Orden: victorias y, a continuación, suma de ítems. Los empates comparten posición.</p></div></div><div className="tournament-table-wrap"><table><thead><tr><th>Pos.</th><th>Equipo</th><th>Victorias</th><th>Derrotas</th><th>Puntuación de ítems</th><th>Debates</th></tr></thead><tbody>{teams.map(row=><tr key={row.teamId}><td><strong>{row.rank}</strong></td><td>{row.teamName}</td><td>{row.wins}</td><td>{row.losses}</td><td>{row.itemTotal}</td><td>{row.debates}</td></tr>)}</tbody></table>{!teams.length&&<Empty text="No hay equipos activos para clasificar."/>}</div></section>
+ <div className="speaker-ranking-grid">{rankings.map(category=><section className="panel speaker-ranking-panel" key={category.key}><div className="panel-title"><div><h3>{category.title}</h3><p>Sumatorio de puntuaciones · {category.rows.length?"ranking disponible":"sin evaluaciones"}</p></div></div>{category.rows.length?<div className="tournament-table-wrap"><table><thead><tr><th>Pos.</th><th>Orador</th><th>Equipo</th><th>Ítems</th><th>Notas</th></tr></thead><tbody>{category.rows.map(row=><tr key={row.speakerId}><td><strong>{row.rank}</strong></td><td>{row.speakerName}</td><td>{row.teamName}</td><td>{row.itemTotal}</td><td>{row.evaluations}</td></tr>)}</tbody></table></div>:<p className="muted tournament-empty">Todavía no hay puntuaciones aplicables a este ranking.</p>}</section>)}</div></>;
+}
 
 function ScoringView({
   data, scoring, rooms, selectedRoundId, onSelectRound, onUpdateRoundScoreType, scoreCategoryDraft,
