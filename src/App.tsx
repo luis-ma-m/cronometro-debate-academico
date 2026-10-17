@@ -1143,12 +1143,19 @@ function ScoringView({
   }) : current);
   const addSpeakerScore = () => {
     if (!draft || draft.speakers.length >= 8) return;
-    const speaker = (data.speakers ?? []).find((item) =>
-      [draft.teamFavorId, draft.teamContraId].includes(item.teamId) &&
-      !draft.speakers.some((row) => row.teamId === item.teamId && row.position === "introductor"));
-    if (!speaker) return;
+    const available = (data.speakers ?? []).flatMap((speaker) => {
+      if (![draft.teamFavorId, draft.teamContraId].includes(speaker.teamId)) return [];
+      const position = SPEAKER_POSITIONS.find((candidate) =>
+        !draft.speakers.some((row) => row.teamId === speaker.teamId && row.position === candidate.value));
+      return position ? [{ speaker, position }] : [];
+    })[0];
+    if (!available) return;
     setDraft({ ...draft, speakers: [...draft.speakers, {
-      speakerId: speaker.id, speakerName: speaker.name, teamId: speaker.teamId, position: "introductor", score: 0,
+      speakerId: available.speaker.id,
+      speakerName: available.speaker.name,
+      teamId: available.speaker.teamId,
+      position: available.position.value,
+      score: 0,
     }] });
   };
   const chooseSpeakerScore = (index: number, speakerId: string) => {
@@ -1209,7 +1216,7 @@ function ScoringView({
         <div className="score-category-inputs">{categories.map((category) => <label key={category.id}>{category.name}<input type="text" inputMode="decimal" minLength={0} aria-label={category.name + " de " + team.teamName} value={scoreInputDraft.teamScores[team.teamId + ":" + category.id] ?? String(team.categoryScores[category.id] ?? "")} onChange={(event) => updateTeamScoreInput(team.teamId, category.id, event.target.value)} onBlur={() => commitTeamScoreInput(team.teamId, category.id)} /></label>)}</div>
         <div className="fault-inputs"><label>Faltas leves<input type="number" min={0} max={100} step={1} value={team.minorFaults} onChange={(event) => updateTeamScore(team.teamId, { minorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label><label>Faltas graves<input type="number" min={0} max={100} step={1} value={team.majorFaults} onChange={(event) => updateTeamScore(team.teamId, { majorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label></div>
       </section>)}
-      <section className="team-score-editor"><div className="team-score-heading"><div><h3>Puntuación de oradores</h3><p>Hasta ocho evaluaciones. Cada equipo solo puede asignar una vez cada posición; un orador puede ocupar varias posiciones.</p></div><button type="button" className="button secondary" disabled={draft.speakers.length >= 8 || (data.speakers ?? []).every((speaker) => ![draft.teamFavorId, draft.teamContraId].includes(speaker.teamId) || draft.speakers.some((row) => row.teamId === speaker.teamId && row.position === "introductor"))} onClick={addSpeakerScore}><Plus size={14} /> Añadir orador</button></div>
+      <section className="team-score-editor"><div className="team-score-heading"><div><h3>Puntuación de oradores</h3><p>Hasta ocho evaluaciones. Cada equipo solo puede asignar una vez cada posición; un orador puede ocupar varias posiciones.</p></div><button type="button" className="button secondary" disabled={draft.speakers.length >= 8 || !(data.speakers ?? []).some((speaker) => [draft.teamFavorId, draft.teamContraId].includes(speaker.teamId) && SPEAKER_POSITIONS.some((position) => !draft.speakers.some((row) => row.teamId === speaker.teamId && row.position === position.value)))} onClick={addSpeakerScore}><Plus size={14} /> Añadir orador</button></div>
         {draft.speakers.map((speaker, index) => <div className="speaker-score-row" key={speaker.speakerId + ":" + speaker.position + ":" + index}>
           <label>Orador/a<select value={speaker.speakerId} onChange={(event) => chooseSpeakerScore(index, event.target.value)}>{(data.speakers ?? []).filter((item) => [draft.teamFavorId, draft.teamContraId].includes(item.teamId)).map((item) => <option key={item.id} value={item.id}>{item.name} · {data.teams.find((team) => team.id === item.teamId)?.name ?? ""}</option>)}</select></label>
           <label>Posición<select value={speaker.position} onChange={(event) => { const position = event.target.value as SpeakerScore["position"]; const speakerTeamId = draft.speakers[index]?.teamId; if (draft.speakers.some((other, i) => i !== index && other.teamId === speakerTeamId && other.position === position)) { window.alert("Cada equipo solo puede tener una evaluación por posición."); return; } updateSpeakerScore(index, { position }); }}>{SPEAKER_POSITIONS.map((position) => <option key={position.value} value={position.value}>{position.label}</option>)}</select></label>
