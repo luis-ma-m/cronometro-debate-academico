@@ -147,14 +147,15 @@ export function validateScorecard(
   if (new Set(scorecard.judges.map((item) => item.judgeId)).size !== scorecard.judges.length ||
       scorecard.judges.some((item) => !judgeIds.has(item.judgeId))) issues.push("La lista de jueces del acta contiene referencias no válidas.");
   if (!Array.isArray(scorecard.speakers) || scorecard.speakers.length > 8) issues.push("El acta admite hasta ocho puntuaciones de orador.");
-  const speakerIds = new Set<string>();
+  const speakerPositionPairs = new Set<string>();
   for (const item of scorecard.speakers ?? []) {
     const speaker = context.speakers.find((candidate) => candidate.id === item.speakerId);
     if (!speaker || speaker.teamId !== item.teamId) issues.push("Cada orador debe coincidir con el registro de su equipo.");
     if (item.teamId !== scorecard.teamFavorId && item.teamId !== scorecard.teamContraId) issues.push("El orador no pertenece a ninguno de los equipos enfrentados.");
-    if (speakerIds.has(item.speakerId)) issues.push("No se puede puntuar dos veces al mismo orador en una ronda.");
-    speakerIds.add(item.speakerId);
     if (!SPEAKER_POSITIONS.some((position) => position.value === item.position)) issues.push("La posición de orador no es válida.");
+    const positionKey = item.teamId + ":" + item.position;
+    if (speakerPositionPairs.has(positionKey)) issues.push("Cada equipo solo puede tener una evaluación por posición de debate.");
+    speakerPositionPairs.add(positionKey);
     if (!Number.isFinite(item.score) || item.score < 0 || item.score > 10 || Math.round(item.score * 2) !== item.score * 2) {
       issues.push("La puntuación de orador debe estar entre 0 y 10 y admitir intervalos de 0,5.");
     }
