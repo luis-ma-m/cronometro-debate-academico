@@ -11,7 +11,7 @@ import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibil
 import type { TimerAction } from './timer';
 import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundScorecard, type ScoreCategory, type SpeakerScore, type TeamScore } from './scoring';
 import { buildSpeakerRankings, buildTeamRanking } from './rankings';
-import { currentPhaseLabel, resolveActiveRoundId } from './overview';
+import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 
 const SESSION_KEY = 'ledu-admin-session';
 type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
@@ -1297,8 +1297,9 @@ function RoomRow({ room, data, onOpen, now }: { room: Room; data: Tournament; on
   const contra = data.teams.find((team) => team.id === room.teamContraId)?.name || 'Equipo pendiente';
   const judges = room.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name).filter(Boolean);
   const phaseLabel = currentPhaseLabel(room);
+  const phaseSideLabel = currentPhaseSideLabel(room);
   const title = room.timer.status === 'running' ? 'En curso' : room.timer.status === 'paused' ? 'Pausada' : room.timer.status === 'finished' ? 'Finalizada' : room.status === 'ready' ? 'Preparada' : 'Pendiente';
-  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small><small><Clock3 size={13} /> {phaseLabel}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer, now))}</strong>}<ChevronRight size={17} /></div></button>;
+  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small><small><Clock3 size={13} /> {phaseLabel}{phaseSideLabel ? ' · ' + phaseSideLabel : ''}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer, now))}</strong>}<ChevronRight size={17} /></div></button>;
 }
 
 function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected, lastSyncedAt }: {
