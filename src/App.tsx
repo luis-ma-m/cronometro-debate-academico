@@ -11,6 +11,7 @@ import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibil
 import type { TimerAction } from './timer';
 import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundScorecard, type ScoreCategory, type SpeakerScore, type TeamScore } from './scoring';
 import { buildSpeakerRankings, buildTeamRanking } from './rankings';
+import { currentPhaseLabel, resolveActiveRoundId } from './overview';
 
 const SESSION_KEY = 'ledu-admin-session';
 type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
@@ -345,15 +346,18 @@ export default function App() {
     </div>;
   }
 
+  // Keep navigation selection separate from the operational round shown in Overview.
   const activeRound = selectedRound || data.rounds[0]?.id || '';
   const rooms = data.rooms.filter((room) => room.roundId === activeRound);
-  const counts = { total: rooms.length, running: rooms.filter((room) => room.timer.status === 'running').length, ready: rooms.filter((room) => room.status === 'ready').length, unassigned: rooms.filter((room) => room.status === 'unassigned').length, finished: rooms.filter((room) => room.timer.status === 'finished').length };
+  const activeTournamentRoundId = resolveActiveRoundId(data);
+  const overviewRooms = activeTournamentRoundId ? data.rooms.filter((room) => room.roundId === activeTournamentRoundId) : [];
+  const overviewCounts = { total: overviewRooms.length, running: overviewRooms.filter((room) => room.timer.status === 'running').length, ready: overviewRooms.filter((room) => room.status === 'ready').length, unassigned: overviewRooms.filter((room) => room.status === 'unassigned').length, finished: overviewRooms.filter((room) => room.timer.status === 'finished').length };
 
   const scoring = data.scoring ?? emptyScoringConfig();
   const scorecards = scoring.scorecards ?? [];
   const overviewPendingScoreRooms = data.rooms.filter((room) => {
     const round = data.rounds.find((item) => item.id === room.roundId);
-    return room.roundId === (data.activeRoundId || data.rounds.find((item) => item.active)?.id) &&
+    return room.roundId === activeTournamentRoundId &&
       (round?.scoreType ?? 'qualifying') === 'qualifying' &&
       Boolean(room.teamFavorId && room.teamContraId && room.teamFavorId !== room.teamContraId) &&
       room.timer.status === 'finished' && !scorecards.some((card) => card.roomId === room.id);
@@ -936,6 +940,9 @@ export default function App() {
 
   const assignmentWarnings = validateAssignments(data);
   const incompatibilityIncidents = findAssignmentConflicts(data);
+  const overviewIncompatibilityIncidents = activeTournamentRoundId
+    ? incompatibilityIncidents.filter((incident) => data.rooms.some((room) => room.id === incident.roomId && room.roundId === activeTournamentRoundId))
+    : [];
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><span className="brand-mark">L</span><span>LEDU <b>Control</b></span></div><div className="sidebar-section">TORNEO</div><nav>
@@ -971,11 +978,11 @@ export default function App() {
           <div className="activation-dialog-actions"><button className="button secondary" onClick={() => setActivationPreview(null)} disabled={activatingRound}>Cancelar</button><button className="button primary" onClick={() => void confirmRoundActivation(activationPreview.pending.length > 0)} disabled={activatingRound}>{activatingRound ? 'Activando ronda…' : activationPreview.pending.length > 0 ? 'Activar igualmente' : 'Activar ronda'}</button></div>
         </section>
       </div>}
-      {view === 'overview' && <><div className="page-heading"><div><p className="eyebrow">VISTA OPERATIVA</p><h2>Estado del torneo</h2><p className="muted">Seguimiento de debates, asignaciones y cronómetros.</p></div><div className="round-badge"><BookOpen size={17} /><span>Ronda activa: <b>{data.rounds.find((round) => round.active)?.name ?? 'Sin ronda activa'}</b></span></div></div>
-      {incompatibilityIncidents.length > 0 && <section className="panel warning-notice" role="status" aria-live="polite"><div className="panel-title"><div><h3>Incompatibilidades detectadas ({incompatibilityIncidents.length})</h3><p>Estas asignaciones existentes requieren revisión. No se han eliminado automáticamente.</p></div></div><div className="pending-debates-list">{incompatibilityIncidents.map((incident) => <article className="pending-debate-item" key={[incident.type, incident.roomId, ...incident.teamIds, ...incident.judgeIds].join(':')}><div className="pending-debate-heading"><b>{incident.roomName}</b><span className="state-pill issue">{incident.type === 'institution' ? 'Institución' : incident.type === 'team-judge' ? 'Equipo–juez' : 'Juez–juez'}</span></div><p>{incident.message}</p><div className="pending-debate-meta"><span>{incident.teamIds.map((id) => data.teams.find((team) => team.id === id)?.name ?? id).join(' · ') || 'Sin equipo afectado'}</span><span>{incident.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name ?? id).join(' · ')}</span><button className="text-button" onClick={() => { setSelectedRound(data.rooms.find((room) => room.id === incident.roomId)?.roundId ?? activeRound); setView('rooms'); }}>Revisar asignación <ChevronRight size={14} /></button></div></article>)}</div></section>}
-      <div className="stat-grid"><Stat label="Salas de la ronda" value={counts.total} icon={<Monitor />} /><Stat label="En debate" value={counts.running} icon={<Activity />} /><Stat label="Preparadas" value={counts.ready} icon={<Check />} /><Stat label="Pendientes" value={counts.unassigned} icon={<Clock3 />} /></div>
-      {(data.rounds.find((round) => round.id === activeRound)?.scoreType ?? 'qualifying') === 'qualifying' && overviewPendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{overviewPendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
-      <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{rooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{rooms.length === 0 && <Empty text="No hay salas creadas para esta ronda." />}</section></>}
+      {view === 'overview' && <><div className="page-heading"><div><p className="eyebrow">VISTA OPERATIVA</p><h2>Estado del torneo</h2><p className="muted">Seguimiento de debates, asignaciones y cronómetros.</p></div><div className="round-badge"><BookOpen size={17} /><span>Ronda activa: <b>{data.rounds.find((round) => round.id === activeTournamentRoundId)?.name ?? 'Sin ronda activa'}</b></span></div></div>
+      {overviewIncompatibilityIncidents.length > 0 && <section className="panel warning-notice" role="status" aria-live="polite"><div className="panel-title"><div><h3>Incompatibilidades detectadas ({overviewIncompatibilityIncidents.length})</h3><p>Estas asignaciones existentes requieren revisión. No se han eliminado automáticamente.</p></div></div><div className="pending-debates-list">{overviewIncompatibilityIncidents.map((incident) => <article className="pending-debate-item" key={[incident.type, incident.roomId, ...incident.teamIds, ...incident.judgeIds].join(':')}><div className="pending-debate-heading"><b>{incident.roomName}</b><span className="state-pill issue">{incident.type === 'institution' ? 'Institución' : incident.type === 'team-judge' ? 'Equipo–juez' : 'Juez–juez'}</span></div><p>{incident.message}</p><div className="pending-debate-meta"><span>{incident.teamIds.map((id) => data.teams.find((team) => team.id === id)?.name ?? id).join(' · ') || 'Sin equipo afectado'}</span><span>{incident.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name ?? id).join(' · ')}</span><button className="text-button" onClick={() => { setSelectedRound(data.rooms.find((room) => room.id === incident.roomId)?.roundId ?? activeRound); setView('rooms'); }}>Revisar asignación <ChevronRight size={14} /></button></div></article>)}</div></section>}
+      <div className="stat-grid"><Stat label="Salas de la ronda" value={overviewCounts.total} icon={<Monitor />} /><Stat label="En debate" value={overviewCounts.running} icon={<Activity />} /><Stat label="Preparadas" value={overviewCounts.ready} icon={<Check />} /><Stat label="Pendientes" value={overviewCounts.unassigned} icon={<Clock3 />} /></div>
+      {(data.rounds.find((round) => round.id === activeTournamentRoundId)?.scoreType ?? 'qualifying') === 'qualifying' && overviewPendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{overviewPendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
+      <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{overviewRooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{!activeTournamentRoundId ? <Empty text="No hay una ronda activa." /> : overviewRooms.length === 0 && <Empty text="No hay salas creadas para la ronda activa." />}</section></>}
 
       {view === 'tournament' && <TournamentView data={data} />}
 
@@ -1270,8 +1277,9 @@ function RoomRow({ room, data, onOpen, now }: { room: Room; data: Tournament; on
   const favor = data.teams.find((team) => team.id === room.teamFavorId)?.name || 'Equipo pendiente';
   const contra = data.teams.find((team) => team.id === room.teamContraId)?.name || 'Equipo pendiente';
   const judges = room.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name).filter(Boolean);
+  const phaseLabel = currentPhaseLabel(room);
   const title = room.timer.status === 'running' ? 'En curso' : room.timer.status === 'paused' ? 'Pausada' : room.timer.status === 'finished' ? 'Finalizada' : room.status === 'ready' ? 'Preparada' : 'Pendiente';
-  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer, now))}</strong>}<ChevronRight size={17} /></div></button>;
+  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small><small><Clock3 size={13} /> {phaseLabel}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer, now))}</strong>}<ChevronRight size={17} /></div></button>;
 }
 
 function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected, lastSyncedAt }: {
