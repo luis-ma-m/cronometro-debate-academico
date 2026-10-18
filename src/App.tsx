@@ -85,6 +85,10 @@ function SearchableEntityPicker({ label, options, value, onChange, multiple = fa
   </div>;
 }
 
+function IncompatibilityPicker({ label, options, value, onChange }: { label: string; options: { id: string; name: string; active: boolean }[]; value: string[]; onChange: (ids: string[]) => void }) {
+  return <SearchableEntityPicker label={label} options={options} value={value} multiple onChange={(next) => onChange(next as string[])} />;
+}
+
 export default function App() {
   const roomId = window.location.pathname.match(/^\/sala\/([^/]+)/)?.[1] ?? '';
   const [data, setData] = useState<Tournament>(readDemo);
@@ -1398,7 +1402,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
       <section className="phase-list"><div className="panel-title"><div><h3>Orden de intervenciones</h3><p>Secuencia y tiempos configurados para este debate</p></div><span>{room?.phases.length ?? 0} intervenciones</span></div>{room?.phases.map((item, index) => <div key={item.id} className={'phase-row ' + (index === room.timer.phaseIndex ? 'current' : index < room.timer.phaseIndex ? 'passed' : '')}><span>{String(index + 1).padStart(2, '0')}</span><div><b>{item.name}</b><small>{item.speaker} · {item.side === 'favor' ? 'A favor' : 'En contra'}</small></div><strong>{formatTime(item.durationSeconds)}</strong>{index === room.timer.phaseIndex && <span className="current-dot" />}</div>)}</section>
     </>}
     {error && <p className="error timer-error">{error}</p>}
-    <footer className="footer timer-footer"><span>LEDU Control</span><button className="text-button" onClick={onRetry}><RefreshCw size={14} /> Actualizar estado</button></footer>
+    <footer className="footer timer-footer"><span>Debate Control</span><button className="text-button" onClick={onRetry}><RefreshCw size={14} /> Actualizar estado</button></footer>
   </main>;
 }
 let audioContext: AudioContext | null = null;
