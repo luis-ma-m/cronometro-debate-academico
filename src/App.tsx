@@ -1066,7 +1066,7 @@ export default function App() {
             <button type="button" className="team-card-toggle" aria-expanded={expanded} aria-controls={'team-config-' + team.id} onClick={() => setExpandedTeamIds((current) => expanded ? current.filter((id) => id !== team.id) : [...current, team.id])}>
               <span className="team-card-name">{team.name || 'Equipo sin nombre'}</span>
               <span className="team-card-metric"><Users size={14} /> {speakerCount} {speakerCount === 1 ? 'orador' : 'oradores'}</span>
-              <span className="team-card-metric"><ShieldAlert size={14} /> {incompatibilityCount} {incompatibilityCount === 1 ? 'incompatibilidad' : 'incompatibilidades'}</span>
+              <span className="team-card-metric"><ShieldCheck size={14} /> {incompatibilityCount} {incompatibilityCount === 1 ? 'incompatibilidad' : 'incompatibilidades'}</span>
               <ChevronRight size={16} className="room-card-chevron" />
             </button>
             <div className="team-card-actions">
