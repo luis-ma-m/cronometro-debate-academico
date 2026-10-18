@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Room, Tournament } from './domain';
-import { currentPhaseLabel, resolveActiveRoundId } from './overview';
+import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 import { createTimer, LEDU_PHASES } from './timer';
 
 const rounds = [
@@ -41,5 +41,26 @@ describe('currentPhaseLabel', () => {
 
   it('does not present the last phase as active after the debate has finished', () => {
     expect(currentPhaseLabel({ ...room, timer: { ...room.timer, status: 'finished' } })).toBe('Debate finalizado');
+  });
+});
+
+describe('currentPhaseSideLabel', () => {
+  const room = {
+    id: 'room-a', name: 'Sala A', roundId: 'round-a', physicalRoomId: 'physical-a', formatId: 'format',
+    teamFavorId: 'team-a', teamContraId: 'team-b', judgeIds: [], status: 'ready' as const,
+    phases: LEDU_PHASES, timer: createTimer(LEDU_PHASES), notes: '', updatedAt: 1,
+  } satisfies Room;
+
+  it('labels a favor phases without exposing the speaker', () => {
+    expect(currentPhaseSideLabel({ ...room, timer: { ...room.timer, phaseIndex: 0 } })).toBe('A favor');
+  });
+
+  it('labels en contra phases without exposing the speaker', () => {
+    expect(currentPhaseSideLabel({ ...room, timer: { ...room.timer, phaseIndex: 2 } })).toBe('En contra');
+  });
+
+  it('omits the side when the debate is finished or the phase index is invalid', () => {
+    expect(currentPhaseSideLabel({ ...room, timer: { ...room.timer, status: 'finished' } })).toBeNull();
+    expect(currentPhaseSideLabel({ ...room, timer: { ...room.timer, phaseIndex: 999 } })).toBeNull();
   });
 });
