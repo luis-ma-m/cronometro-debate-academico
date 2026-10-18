@@ -1,4 +1,4 @@
-# Definición funcional — LEDU Control
+# Definición funcional — Debate Control
 
 ## Objetivo
 Crear una aplicación web para organizar un torneo académico LEDU. Se compone de gestión privada y cronómetros públicos por sala. Se reescribe el proyecto desde cero; el repositorio previo solo se considera referencia conceptual.
