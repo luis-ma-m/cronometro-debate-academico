@@ -17,3 +17,11 @@ export function currentPhaseLabel(room: Pick<Room, 'phases' | 'timer'>): string 
   const phase = room.phases[room.timer.phaseIndex];
   return phase?.name?.trim() || 'Fase no disponible';
 }
+
+/** Current debate side, omitted when the debate is finished or the phase is invalid. */
+export function currentPhaseSideLabel(room: Pick<Room, 'phases' | 'timer'>): string | null {
+  if (room.timer.status === 'finished') return null;
+  const phase = room.phases[room.timer.phaseIndex];
+  if (!phase) return null;
+  return phase.side === 'favor' ? 'A favor' : 'En contra';
+}
