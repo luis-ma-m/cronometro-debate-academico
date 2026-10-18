@@ -268,8 +268,40 @@
 .tournament-ranking-panel{margin-bottom:20px}.tournament-table-wrap{width:100%;overflow-x:auto}.tournament-table-wrap table{width:100%;border-collapse:collapse;text-align:left}.tournament-table-wrap th{padding:12px 10px;background:var(--surface-subtle,#f8fafc);color:var(--muted,#667085);font-size:10px;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}.tournament-table-wrap td{padding:13px 10px;border-top:1px solid var(--border,#e4e7ec);font-size:12px}.tournament-table-wrap td:first-child{color:var(--muted,#667085);width:52px}.speaker-ranking-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.speaker-ranking-panel{min-width:0}.speaker-ranking-panel .panel-title{min-height:55px}.tournament-empty{font-size:12px;line-height:1.5;padding:8px 0}@media(max-width:1000px){.speaker-ranking-grid{grid-template-columns:1fr}}@media(max-width:760px){.tournament-table-wrap table{min-width:520px}.speaker-ranking-panel .panel-title{min-height:0}}
 
 /* Debate Control UI/UX polish */
-.entity-picker{display:grid;gap:8px;min-width:0;padding:10px 0}.entity-picker-label{font-size:11px;color:#59667b;font-weight:700}.entity-picker>input[type=search]{width:100%;min-width:0;border:1px solid #dce3ec;border-radius:8px;padding:9px 10px;background:#fff;color:#28364b}.entity-picker-options{display:grid;gap:2px;max-height:220px;overflow:auto}.entity-picker-option{display:flex;align-items:flex-start;gap:8px;padding:7px 8px;border-radius:6px;font-size:11px;color:#56647a;cursor:pointer}.entity-picker-option:hover,.entity-picker-option.selected{background:#f0f8f5}.entity-picker-option input{margin-top:2px;accent-color:#177e6b;flex-shrink:0}.entity-picker-option span{min-width:0;overflow-wrap:anywhere}.entity-picker-selected{display:flex;flex-wrap:wrap;gap:5px}.picker-expand{border:0;background:transparent;color:#177e6b;font-size:11px;font-weight:700;padding:5px 0;text-align:left;cursor:pointer}.judges-select .entity-picker{border:1px solid #e7ebf1;border-radius:9px;padding:10px;margin-top:8px}.assign-grid>.entity-picker{padding:0}.speaker-manager{margin-top:12px;padding-top:10px;border-top:1px solid #edf0f4}.speaker-manager summary{cursor:pointer;font-size:11px;color:#177e6b;font-weight:650;padding:5px 0}.speaker-manager-content{display:grid;gap:10px;padding:12px 3px 5px}.speaker-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0}.speaker-add{justify-self:start}.table-panel td{vertical-align:top}.round-transition{animation:round-transition-lifecycle 45s linear both}@keyframes round-transition-lifecycle{0%{opacity:0}4.444%,95.556%{opacity:1}100%{opacity:0}}
+.entity-picker{display:grid;gap:8px;min-width:0;width:100%;max-width:100%;padding:10px 0;box-sizing:border-box}.entity-picker-label{font-size:11px;color:#59667b;font-weight:700}.entity-picker>input[type=search]{display:block;width:100%;max-width:100%;min-width:0;box-sizing:border-box;flex:none;border:1px solid #dce3ec;border-radius:8px;padding:9px 10px;background:#fff;color:#28364b}.entity-picker-options{display:grid;gap:2px;width:100%;min-width:0;max-width:100%;max-height:220px;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;box-sizing:border-box}.entity-picker-option{display:flex;align-items:flex-start;gap:8px;min-width:0;max-width:100%;box-sizing:border-box;padding:7px 8px;border-radius:6px;font-size:11px;color:#56647a;cursor:pointer}.entity-picker-option:hover,.entity-picker-option.selected{background:#f0f8f5}.entity-picker-option input{margin-top:2px;accent-color:#177e6b;flex-shrink:0}.entity-picker-option span{min-width:0;overflow-wrap:anywhere}.entity-picker-selected{display:flex;flex-wrap:wrap;gap:5px}.picker-expand{border:0;background:transparent;color:#177e6b;font-size:11px;font-weight:700;padding:5px 0;text-align:left;cursor:pointer}.judges-select .entity-picker{border:1px solid #e7ebf1;border-radius:9px;padding:10px;margin-top:8px}.assign-grid>.entity-picker{padding:0}.speaker-manager{margin-top:12px;padding-top:10px;border-top:1px solid #edf0f4}.speaker-manager summary{cursor:pointer;font-size:11px;color:#177e6b;font-weight:650;padding:5px 0}.speaker-manager-content{display:grid;gap:10px;padding:12px 3px 5px}.speaker-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0}.speaker-add{justify-self:start}.table-panel td{vertical-align:top}.round-transition{animation:round-transition-lifecycle 45s linear both}@keyframes round-transition-lifecycle{0%{opacity:0}4.444%,95.556%{opacity:1}100%{opacity:0}}
 
 /* Shared expand/collapse motion for native disclosure sections */
 details::details-content{block-size:0;opacity:0;overflow:clip;transition:block-size 240ms ease,opacity 220ms ease,content-visibility 240ms allow-discrete;}
 details[open]::details-content{block-size:auto;opacity:1;}
+
+
+/* Compact room cards: show only the room name and key actions until expanded. */
+.managed-rooms{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));align-items:start;gap:12px}
+.room-card{min-width:0;overflow:hidden;padding:0}
+.room-card-header{display:flex;align-items:center;gap:10px;min-width:0;padding:10px 12px}
+.room-card-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;min-height:38px;padding:4px 0;border:0;background:transparent;text-align:left;cursor:pointer;color:var(--text,#252a34)}
+.room-card-name{min-width:0;overflow-wrap:anywhere;font-size:13px;font-weight:800}
+.room-card-toggle-hint{flex-shrink:0;color:var(--muted,#667085);font-size:10px}
+.room-card-chevron{flex-shrink:0;color:var(--muted,#667085);transition:transform 220ms ease}
+.room-card.expanded .room-card-chevron{transform:rotate(90deg)}
+.room-card .room-open-actions{flex-shrink:0;gap:5px}
+.room-card .room-open-actions .icon-button{width:32px;height:32px;padding:7px}
+.room-card .room-open-actions .text-button{font-size:10px}
+.room-card-disclosure{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows 240ms ease,opacity 220ms ease;border-top:0 solid var(--border,#e4e7ec)}
+.room-card.expanded .room-card-disclosure{grid-template-rows:1fr;opacity:1;border-top-width:1px}
+.room-card-disclosure-inner{min-height:0;overflow:hidden;padding:0 14px}
+.room-card.expanded .room-card-disclosure-inner{padding:12px 14px 14px}
+.room-editor-heading{display:grid;gap:7px;margin-bottom:12px}
+.room-editor-heading label{display:grid;gap:6px;color:var(--muted,#667085);font-size:11px;font-weight:700}
+.room-editor-heading .muted{margin:0;overflow-wrap:anywhere;font-size:10px}
+.room-card .assign-grid{min-width:0}
+.room-card .assign-grid>*{min-width:0}
+.room-card .judges-select{min-width:0}
+.room-card .room-editor-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border,#edf0f4)}
+@media(max-width:620px){
+ .managed-rooms{grid-template-columns:minmax(0,1fr)}
+ .room-card-header{align-items:flex-start;flex-wrap:wrap}
+ .room-card-toggle{flex-basis:100%}
+ .room-card .room-open-actions{width:100%;justify-content:flex-end;align-items:center;flex-direction:row}
+ .room-card .room-open-actions .text-button{margin-right:auto}
+}
