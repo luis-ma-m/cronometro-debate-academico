@@ -1,4 +1,4 @@
-# LEDU Control — organización de torneos de debate
+# Debate Control — organización de torneos de debate
 
 Aplicación web para coordinar un torneo de debate académico LEDU desde un panel privado y abrir un cronómetro por sala. **GitHub versiona el código, Vercel sirve la web y la API, Google Sheets conserva los datos del torneo y Upstash Redis coordina las operaciones concurrentes y las sesiones. No se utiliza Google Apps Script.**
 
