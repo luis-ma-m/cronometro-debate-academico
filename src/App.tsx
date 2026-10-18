@@ -349,7 +349,6 @@ export default function App() {
   // Keep navigation selection separate from the operational round shown in Overview.
   const activeRound = selectedRound || data.rounds[0]?.id || '';
   const rooms = data.rooms.filter((room) => room.roundId === activeRound);
-  const counts = { total: rooms.length, running: rooms.filter((room) => room.timer.status === 'running').length, ready: rooms.filter((room) => room.status === 'ready').length, unassigned: rooms.filter((room) => room.status === 'unassigned').length, finished: rooms.filter((room) => room.timer.status === 'finished').length };
   const activeTournamentRoundId = resolveActiveRoundId(data);
   const overviewRooms = activeTournamentRoundId ? data.rooms.filter((room) => room.roundId === activeTournamentRoundId) : [];
   const overviewCounts = { total: overviewRooms.length, running: overviewRooms.filter((room) => room.timer.status === 'running').length, ready: overviewRooms.filter((room) => room.status === 'ready').length, unassigned: overviewRooms.filter((room) => room.status === 'unassigned').length, finished: overviewRooms.filter((room) => room.timer.status === 'finished').length };
