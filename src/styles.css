@@ -305,3 +305,30 @@ details[open]::details-content{block-size:auto;opacity:1;}
  .room-card .room-open-actions{width:100%;justify-content:flex-end;align-items:center;flex-direction:row}
  .room-card .room-open-actions .text-button{margin-right:auto}
 }
+
+/* Compact, expandable team cards mirror the room-card interaction pattern. */
+.team-card-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+.team-card{min-width:0;overflow:hidden;padding:0;margin:0}
+.team-card-header{display:flex;align-items:center;gap:10px;min-width:0;padding:10px 12px}
+.team-card-toggle{display:flex;align-items:center;gap:12px;flex:1;min-width:0;min-height:38px;padding:4px 0;border:0;background:transparent;text-align:left;color:var(--text,#252a34)}
+.team-card-name{min-width:0;flex:1;overflow-wrap:anywhere;font-size:13px;font-weight:800}
+.team-card-metric{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;color:var(--muted,#667085);font-size:10px;white-space:nowrap}
+.team-card-metric svg{color:#8490a3}
+.team-card-actions{display:flex;align-items:center;gap:7px;flex-shrink:0}
+.team-card-actions .state-pill{border:0;cursor:pointer}
+.team-card-actions .icon-button{width:32px;height:32px;padding:7px}
+.team-card .room-card-chevron{flex-shrink:0;transition:transform 220ms ease}
+.team-card.expanded .room-card-chevron{transform:rotate(90deg)}
+.team-card-disclosure{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows 240ms ease,opacity 220ms ease;border-top:0 solid var(--border,#e4e7ec)}
+.team-card.expanded .team-card-disclosure{grid-template-rows:1fr;opacity:1;border-top-width:1px}
+.team-card-disclosure-inner{min-height:0;overflow:hidden;padding:0 14px}
+.team-card.expanded .team-card-disclosure-inner{padding:13px 14px 15px}
+.team-edit-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.team-edit-grid label{display:grid;gap:5px;font-size:11px;font-weight:650;color:#647188;min-width:0}
+.team-edit-grid .table-input{border:1px solid #dce2eb;background:#fff;min-width:0}
+.team-card-section{display:grid;gap:9px;margin-top:14px;padding-top:12px;border-top:1px solid #edf0f5}
+.team-card-section>b,.team-card-section-heading>b{font-size:11px;color:#59667b}
+.team-card-section-heading{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.team-card-section .entity-picker{min-width:0}
+@media(max-width:1100px){.team-card-list{grid-template-columns:1fr}}
+@media(max-width:760px){.team-card-header{align-items:flex-start;flex-wrap:wrap}.team-card-toggle{flex-basis:100%;flex-wrap:wrap;gap:8px}.team-card-name{flex-basis:100%}.team-card-actions{width:100%;justify-content:flex-end}.team-card-actions .state-pill{margin-right:auto}.team-edit-grid{grid-template-columns:1fr}}
