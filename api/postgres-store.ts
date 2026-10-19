@@ -436,7 +436,7 @@ async function persistEvent(client: PoolClient, event: unknown[]): Promise<void>
      VALUES($1,$2,COALESCE(NULLIF($3,'')::timestamptz,now()),$4,$5,NULLIF($6,'')::integer,$7::jsonb)
      ON CONFLICT(event_key) DO NOTHING`,
     [eventKey, eventType, str(event[1]), assignmentId, roundId, str(event[5]), JSON.stringify(details)],
-
+  );
   const idempotency = details && typeof details === "object" ? details as Record<string, unknown> : {};
   if (typeof idempotency.idempotencyKey === "string" && idempotency.idempotencyResponse !== undefined) {
     await client.query(
