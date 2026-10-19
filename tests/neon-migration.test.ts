@@ -148,4 +148,13 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain("SCORED_ASSIGNMENT_JUDGES_IMMUTABLE");
   });
 
+
+  it("requires exactly two team-score rows matching the scorecard teams", async () => {
+    const sql = await readFile(resolve("db/migrations/0009_scorecard_team_score_consistency.sql"), "utf8");
+    expect(sql).toContain("scorecard_team_score_membership_check");
+    expect(sql).toContain("scorecards_both_team_scores_check");
+    expect(sql).toContain("score_count <> 2");
+    expect(sql).toContain("favor_count <> 1 OR contra_count <> 1");
+  });
+
 });
