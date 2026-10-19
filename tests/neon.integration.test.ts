@@ -68,7 +68,7 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     );
     await expect(client!.query("UPDATE room_assignments SET team_favor_id='t3' WHERE id='a1'"))
       .rejects.toMatchObject({ code: "23514" });
-    await expect(client!.query("UPDATE room_assignments SET physical_room_id='p2' WHERE id='a1'"))
+    await expect(client!.query("UPDATE room_assignments SET physical_room_id='p1' WHERE id='a1'"))
       .rejects.toMatchObject({ code: "23514" });
   });
 
