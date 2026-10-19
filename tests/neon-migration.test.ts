@@ -44,4 +44,27 @@ describe("Neon migration artifacts", () => {
     expect(runner).toContain("pg_advisory_xact_lock");
     expect(runner).toContain('client.query("ROLLBACK")');
   });
+
+  it("routes operational API persistence through PostgreSQL without a Sheets dependency", async () => {
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    expect(api).toContain("loadPostgresSheetData");
+    expect(api).toContain("writePostgresTables");
+    expect(api).not.toMatch(/GOOGLE_SERVICE_ACCOUNT_JSON|sheets\\.googleapis\\.com|googleAccessToken|batchUpdateSpreadsheet/);
+    expect(api).not.toContain("ledu:lock:spreadsheet");
+    expect(store).toContain("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    expect(store).toContain("WHERE id=$8 AND timer_revision=$9");
+  });
+
+  it("persists timer audit and idempotency in the same write transaction", async () => {
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    expect(api).toContain("readIdempotentResponse(idempotencyKey, idempotencyScope)");
+    expect(api).toContain("idempotencyResponse: response");
+    expect(store).toContain("INSERT INTO audit_events");
+    expect(store).toContain("INSERT INTO idempotency_keys");
+    expect(store).toContain('await client.query("COMMIT")');
+    expect(store).toContain('await client.query("ROLLBACK")');
+  });
+
 });
