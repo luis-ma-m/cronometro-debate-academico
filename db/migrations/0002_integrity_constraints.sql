@@ -47,40 +47,50 @@ BEFORE INSERT OR UPDATE OF assignment_id, round_id ON assignment_judges
 FOR EACH ROW EXECUTE FUNCTION sync_assignment_judge_round();
 
 
--- Cross-side team uniqueness is a cross-column invariant and cannot be
--- represented by two independent unique indexes. Serialize assignment edits
--- on the round row so concurrent requests cannot claim the same team.
-CREATE OR REPLACE FUNCTION enforce_team_once_per_round()
-RETURNS trigger LANGUAGE plpgsql AS $
+-- A normalized claim table enforces team uniqueness across both sides,
+-- including concurrent writes. It is the relational equivalent of a unique
+-- (round_id, team_id) constraint regardless of side.
+CREATE TABLE IF NOT EXISTS round_team_claims (
+  round_id text NOT NULL REFERENCES rounds(id) ON DELETE RESTRICT,
+  team_id text NOT NULL REFERENCES teams(id) ON DELETE RESTRICT,
+  assignment_id text NOT NULL REFERENCES room_assignments(id) ON DELETE CASCADE,
+  side text NOT NULL CHECK (side IN ('favor', 'contra')),
+  PRIMARY KEY (round_id, team_id),
+  UNIQUE (assignment_id, side)
+);
+INSERT INTO round_team_claims (round_id, team_id, assignment_id, side)
+SELECT round_id, team_favor_id, id, 'favor'
+FROM room_assignments WHERE team_favor_id IS NOT NULL
+ON CONFLICT DO NOTHING;
+INSERT INTO round_team_claims (round_id, team_id, assignment_id, side)
+SELECT round_id, team_contra_id, id, 'contra'
+FROM room_assignments WHERE team_contra_id IS NOT NULL
+ON CONFLICT DO NOTHING;
+
+CREATE OR REPLACE FUNCTION sync_round_team_claims()
+RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM 1 FROM rounds WHERE id = NEW.round_id FOR UPDATE;
-  IF NEW.team_favor_id IS NOT NULL AND EXISTS (
-    SELECT 1 FROM room_assignments ra
-    WHERE ra.round_id = NEW.round_id AND ra.id <> NEW.id
-      AND NEW.team_favor_id IN (ra.team_favor_id, ra.team_contra_id)
-  ) THEN
-    RAISE EXCEPTION 'team already assigned in this round'
-      USING ERRCODE = '23505';
+  IF TG_OP = 'DELETE' THEN
+    DELETE FROM round_team_claims WHERE assignment_id = OLD.id;
+    RETURN OLD;
   END IF;
-  IF NEW.team_contra_id IS NOT NULL AND EXISTS (
-    SELECT 1 FROM room_assignments ra
-    WHERE ra.round_id = NEW.round_id AND ra.id <> NEW.id
-      AND NEW.team_contra_id IN (ra.team_favor_id, ra.team_contra_id)
-  ) THEN
-    RAISE EXCEPTION 'team already assigned in this round'
-      USING ERRCODE = '23505';
+
+  DELETE FROM round_team_claims WHERE assignment_id = NEW.id;
+  IF NEW.team_favor_id IS NOT NULL THEN
+    INSERT INTO round_team_claims (round_id, team_id, assignment_id, side)
+    VALUES (NEW.round_id, NEW.team_favor_id, NEW.id, 'favor');
   END IF;
-  IF NEW.team_favor_id IS NOT NULL AND NEW.team_favor_id = NEW.team_contra_id THEN
-    RAISE EXCEPTION 'a team cannot debate itself'
-      USING ERRCODE = '23514';
+  IF NEW.team_contra_id IS NOT NULL THEN
+    INSERT INTO round_team_claims (round_id, team_id, assignment_id, side)
+    VALUES (NEW.round_id, NEW.team_contra_id, NEW.id, 'contra');
   END IF;
   RETURN NEW;
 END;
-$;
+$$;
 DROP TRIGGER IF EXISTS room_assignments_team_once_per_round ON room_assignments;
 CREATE TRIGGER room_assignments_team_once_per_round
-BEFORE INSERT OR UPDATE OF round_id, team_favor_id, team_contra_id
-ON room_assignments FOR EACH ROW EXECUTE FUNCTION enforce_team_once_per_round();
+AFTER INSERT OR UPDATE OF round_id, team_favor_id, team_contra_id OR DELETE
+ON room_assignments FOR EACH ROW EXECUTE FUNCTION sync_round_team_claims();
 
 -- Ensure the active-round pointer and the single-active-round marker cannot
 -- silently disagree after a transaction.
