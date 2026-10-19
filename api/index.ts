@@ -1,13 +1,12 @@
-import { createHash, createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured } from "./db.js";
-import { loadPostgresSheetData, writePostgresTables } from "./postgres-store.js";
+import { loadPostgresSheetData, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
 import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
 import {
   ApiError,
-  DEFAULT_SPREADSHEET_ID,
   SESSION_TTL_SECONDS,
   SHEET_HEADERS,
   bool,
@@ -15,7 +14,6 @@ import {
   deriveRoomStatus,
   initialTimer,
   num,
-  objectsFromRows,
   parseJson,
   parseStringArray,
   publicRoomPayload,
@@ -43,25 +41,7 @@ type ResponseLike = {
   end(): void;
 };
 
-type MetadataSheet = { properties: { sheetId: number; title: string; gridProperties?: { rowCount?: number; columnCount?: number } } };
-type SpreadsheetMetadata = { spreadsheetId: string; properties?: { title?: string }; sheets?: MetadataSheet[] };
-type SheetData = {
-  metadata: SpreadsheetMetadata;
-  raw: Record<SheetName, unknown[][]>;
-  rows: Record<SheetName, SheetRow[]>;
-};
-
-const SHEET_NAMES = Object.keys(SHEET_HEADERS) as SheetName[];
-const WRITE_LOCK = "ledu:lock:spreadsheet";
-const LOCK_TTL_MS = 30000;
-const LOCK_WAIT_MS = 6000;
-const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets/";
-const REDIS_RELEASE_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
-
-let cachedGoogleToken: { token: string; expiresAt: number } | null = null;
-let cachedSpreadsheetMetadata: { spreadsheetId: string; metadata: SpreadsheetMetadata; expiresAt: number } | null = null;
-const METADATA_CACHE_MS = 60_000;
+type SheetData = PostgresSheetData;
 
 function env(name: string): string {
   return (process.env[name] || "").trim();
@@ -105,325 +85,6 @@ function safeEquals(left: string, right: string): boolean {
   return timingSafeEqual(leftDigest, rightDigest);
 }
 
-function googleCredentials(): { clientEmail: string; privateKey: string } {
-  const raw = env("GOOGLE_SERVICE_ACCOUNT_JSON");
-  if (!raw) {
-    throw new ApiError("NOT_CONFIGURED", "Falta GOOGLE_SERVICE_ACCOUNT_JSON en Vercel. Pega el JSON completo de la cuenta técnica de Google Sheets.", 503);
-  }
-
-  let credentials: { client_email?: unknown; private_key?: unknown };
-  try {
-    credentials = JSON.parse(raw) as { client_email?: unknown; private_key?: unknown };
-  } catch {
-    throw new ApiError("NOT_CONFIGURED", "GOOGLE_SERVICE_ACCOUNT_JSON no contiene un JSON válido de cuenta de servicio.", 503);
-  }
-
-  const clientEmail = str(credentials.client_email);
-  const privateKey = str(credentials.private_key).replace(/\\n/g, "\n");
-  if (!clientEmail || !privateKey.includes("PRIVATE KEY")) {
-    throw new ApiError("NOT_CONFIGURED", "GOOGLE_SERVICE_ACCOUNT_JSON debe incluir client_email y private_key.", 503);
-  }
-  return { clientEmail, privateKey };
-}
-
-function base64Url(value: string | Buffer): string {
-  return Buffer.from(value).toString("base64url");
-}
-
-async function googleAccessToken(): Promise<string> {
-  if (cachedGoogleToken && cachedGoogleToken.expiresAt > Date.now() + 60000) return cachedGoogleToken.token;
-  const { clientEmail: email, privateKey } = googleCredentials();
-
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const header = base64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const claims = base64Url(JSON.stringify({
-    iss: email,
-    scope: "https://www.googleapis.com/auth/spreadsheets",
-    aud: TOKEN_URL,
-    iat: nowSeconds,
-    exp: nowSeconds + 3600,
-  }));
-  const signingInput = header + "." + claims;
-  const signer = createSign("RSA-SHA256");
-  signer.update(signingInput);
-  signer.end();
-  const assertion = signingInput + "." + signer.sign(privateKey).toString("base64url");
-
-  let response: Response;
-  try {
-    response = await fetch(TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-        assertion,
-      }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(7000),
-    });
-  } catch {
-    throw new ApiError("GOOGLE_AUTH_UNAVAILABLE", "No se ha podido conectar con la autenticación de Google.", 503);
-  }
-  const result = await response.json().catch(() => ({})) as { access_token?: string; expires_in?: number };
-  if (!response.ok || !result.access_token) {
-    throw new ApiError("GOOGLE_AUTH_FAILED", "Google ha rechazado la cuenta de servicio. Comprueba la clave privada y los permisos del proyecto de Google Cloud.", 503);
-  }
-  cachedGoogleToken = {
-    token: result.access_token,
-    expiresAt: Date.now() + Math.max(60, Number(result.expires_in || 3600)) * 1000,
-  };
-  return result.access_token;
-}
-
-function spreadsheetId(): string {
-  return env("GOOGLE_SHEETS_SPREADSHEET_ID") || DEFAULT_SPREADSHEET_ID;
-}
-
-async function sheetsRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = await googleAccessToken();
-  let response: Response;
-  try {
-    response = await fetch(SHEETS_API + encodeURIComponent(spreadsheetId()) + path, {
-      ...init,
-      headers: {
-        Authorization: "Bearer " + token,
-        "Content-Type": "application/json",
-        ...(init.headers || {}),
-      },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000),
-    });
-  } catch {
-    throw new ApiError("SHEETS_UNAVAILABLE", "No se ha podido conectar con Google Sheets. Comprueba el servicio y vuelve a intentarlo.", 503);
-  }
-  const body = await response.json().catch(() => ({})) as { error?: { message?: string }; [key: string]: unknown };
-  if (!response.ok) {
-    const googleMessage = typeof body.error?.message === "string" ? body.error.message : "Google no devolvió detalles.";
-    // Keep the upstream reason in Vercel logs. Without it, all non-403/404
-    // failures collapse into the same message and cannot be diagnosed.
-    console.error("[ledu-api] Google Sheets API request failed", {
-      status: response.status,
-      method: init.method || "GET",
-      path,
-      message: googleMessage,
-    });
-    const status = response.status === 403 || response.status === 404 ? 503 : response.status;
-    const code = response.status === 403
-      ? "SHEETS_PERMISSION_DENIED"
-      : response.status === 404
-        ? "SHEET_NOT_FOUND"
-        : response.status === 429
-          ? "SHEETS_RATE_LIMITED"
-          : "SHEETS_ERROR";
-    const message = response.status === 403
-      ? "La cuenta de servicio no tiene permiso para editar la hoja. Comparte la hoja con su correo y dale permiso de editor."
-      : response.status === 404
-        ? "No se encuentra la hoja configurada. Comprueba GOOGLE_SHEETS_SPREADSHEET_ID."
-        : response.status === 429
-          ? "Google Sheets ha limitado temporalmente las operaciones por cuota. Espera un momento y vuelve a intentarlo."
-          : "Google Sheets ha rechazado la operación. Comprueba la configuración de la hoja.";
-    throw new ApiError(code, message, status);
-  }
-  return body as T;
-}
-
-async function spreadsheetMetadata(forceRefresh = false): Promise<SpreadsheetMetadata> {
-  const id = spreadsheetId();
-  if (!forceRefresh && cachedSpreadsheetMetadata &&
-      cachedSpreadsheetMetadata.spreadsheetId === id &&
-      cachedSpreadsheetMetadata.expiresAt > Date.now()) {
-    return cachedSpreadsheetMetadata.metadata;
-  }
-  const fields = "spreadsheetId,properties(title),sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))";
-  const metadata = await sheetsRequest<SpreadsheetMetadata>("?fields=" + encodeURIComponent(fields));
-  cachedSpreadsheetMetadata = { spreadsheetId: id, metadata, expiresAt: Date.now() + METADATA_CACHE_MS };
-  return metadata;
-}
-
-function cellData(value: unknown): { userEnteredValue?: { stringValue?: string; numberValue?: number; boolValue?: boolean } } {
-  if (value === "" || value === null || value === undefined) return {};
-  if (typeof value === "boolean") return { userEnteredValue: { boolValue: value } };
-  if (typeof value === "number" && Number.isFinite(value)) return { userEnteredValue: { numberValue: value } };
-  return { userEnteredValue: { stringValue: String(value) } };
-}
-
-async function batchUpdateSpreadsheet(requests: unknown[]): Promise<void> {
-  await sheetsRequest(":batchUpdate", {
-    method: "POST",
-    body: JSON.stringify({ requests }),
-  });
-}
-
-async function ensureSchema(): Promise<SpreadsheetMetadata> {
-  let metadata = await spreadsheetMetadata();
-  const initialTitles = new Set((metadata.sheets || []).map((item) => item.properties.title));
-  const missing = SHEET_NAMES.filter((name) => !initialTitles.has(name));
-  // Preview deployments can share the Production spreadsheet credentials.
-  // Never let schema repair create tabs there before the destructive migration guard runs.
-  if (missing.length && env("VERCEL_ENV") !== "production") {
-    throw new ApiError(
-      "SCHEMA_MIGRATION_PRODUCTION_ONLY",
-      "Faltan pestañas del esquema y solo se pueden crear o migrar desde Production. Google Sheets no se ha modificado.",
-      503,
-    );
-  }
-  if (missing.length) {
-    return withLock("ledu:lock:schema", async () => {
-      metadata = await spreadsheetMetadata(true);
-      const existing = new Set((metadata.sheets || []).map((item) => item.properties.title));
-      const missingNow = SHEET_NAMES.filter((name) => !existing.has(name));
-      if (missingNow.length) {
-        let nextSheetId = Math.max(0, ...(metadata.sheets || []).map((item) => Number(item.properties.sheetId) || 0)) + 1;
-        const requests: unknown[] = [];
-        for (const name of missingNow) {
-          const sheetId = nextSheetId++;
-          requests.push({
-            addSheet: {
-              properties: {
-                sheetId,
-                title: name,
-                gridProperties: { rowCount: 1000, columnCount: (SHEET_HEADERS[name] as readonly string[]).length },
-              },
-            },
-          });
-          requests.push({
-            updateCells: {
-              start: { sheetId, rowIndex: 0, columnIndex: 0 },
-              rows: [{ values: (SHEET_HEADERS[name] as readonly string[]).map(cellData) }],
-              fields: "userEnteredValue",
-            },
-          });
-        }
-        await batchUpdateSpreadsheet(requests);
-        metadata = await spreadsheetMetadata(true);
-      }
-      return migrateToPermanentRooms();
-    });
-  }
-  return migrateToPermanentRooms();
-}
-
-async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
-  // Version 3 is intentionally a destructive reset: the product decision allows
-  // the old tournament data to be discarded instead of being ambiguously mapped
-  // onto permanent physical rooms and per-round assignments.
-  return withLock("ledu:lock:schema-migration", async () => {
-    // Re-check schema version only after obtaining the lock. Two first requests
-    // can otherwise both decide to migrate and the second can erase new data.
-    const current = await sheetsRequest<{ values?: unknown[][] }>("/values/Config!A:B?majorDimension=ROWS");
-    const configRows = objectsFromRows(current.values);
-    if (configRows.some((row) => str(row.key) === "schemaVersion" && str(row.value) === "3")) {
-      return spreadsheetMetadata(true);
-    }
-    if (env("VERCEL_ENV") !== "production") {
-      throw new ApiError(
-        "SCHEMA_MIGRATION_PRODUCTION_ONLY",
-        "La migración al esquema de salas permanentes elimina los datos de torneo existentes y solo se ejecuta en Production. Google Sheets no se ha reinicializado.",
-        503,
-      );
-    }
-    let metadata = await spreadsheetMetadata(true);
-
-    // Existing spreadsheets can have manually reduced grid sizes. Ensure every
-    // tab can hold its current schema before issuing clear/write ranges; otherwise
-    // Google rejects the entire migration batch with HTTP 400 and no detail reaches
-    // the UI. Growing a grid is non-destructive, so perform it before the reset.
-    const dimensionRequests: unknown[] = [];
-    for (const name of SHEET_NAMES) {
-      const sheet = (metadata.sheets || []).find((item) => item.properties.title === name);
-      if (!sheet) throw new ApiError("SCHEMA_MISMATCH", "No se ha podido crear la pestaña " + name + ".", 503);
-      const sheetId = sheet.properties.sheetId;
-      const gridRows = Number(sheet.properties.gridProperties?.rowCount || 1000);
-      const gridColumns = Number(sheet.properties.gridProperties?.columnCount || 1);
-      const requiredRows = name === "Config" ? 1 + 10 : 2;
-      const requiredColumns = (SHEET_HEADERS[name] as readonly string[]).length;
-      if (gridRows < requiredRows) {
-        dimensionRequests.push({ appendDimension: { sheetId, dimension: "ROWS", length: requiredRows - gridRows } });
-      }
-      if (gridColumns < requiredColumns) {
-        dimensionRequests.push({ appendDimension: { sheetId, dimension: "COLUMNS", length: requiredColumns - gridColumns } });
-      }
-    }
-    if (dimensionRequests.length) {
-      await batchUpdateSpreadsheet(dimensionRequests);
-      metadata = await spreadsheetMetadata(true);
-    }
-
-    const requests: unknown[] = [];
-    const now = Date.now();
-    const defaultPreset = {
-      id: "format-ledu",
-      name: "LEDU",
-      phases: defaultPhases(),
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const configSeed = [
-      ["tournamentName", "Torneo LEDU"],
-      ["formatPhases", JSON.stringify(defaultPhases())],
-      ["institutions", "[]"],
-      ["minimumJudgesPerRoom", "1"],
-      ["revision", "1"],
-      ["updatedAt", String(now)],
-      ["schemaVersion", "3"],
-      ["activeRoundId", ""],
-      ["activationRevision", "0"],
-      ["activatedAt", "0"],
-      ["roundTypes", JSON.stringify({ "round-1": "qualifying" })],
-      ["scoring", JSON.stringify(emptyScoringConfig())],
-    ];
-    for (const name of SHEET_NAMES) {
-      const sheet = (metadata.sheets || []).find((item) => item.properties.title === name);
-      if (!sheet) throw new ApiError("SCHEMA_MISMATCH", "No se ha podido crear la pestaña " + name + ".", 503);
-      const sheetId = sheet.properties.sheetId;
-      const gridRows = Number(sheet.properties.gridProperties?.rowCount || 1000);
-      const gridColumns = Number(sheet.properties.gridProperties?.columnCount || (SHEET_HEADERS[name] as readonly string[]).length);
-      if (gridRows > 1 && gridColumns > 0) {
-        requests.push({
-          repeatCell: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: gridRows, startColumnIndex: 0, endColumnIndex: gridColumns },
-            cell: { userEnteredValue: { stringValue: "" } },
-            fields: "userEnteredValue",
-          },
-        });
-      }
-      requests.push({
-        updateCells: {
-          start: { sheetId, rowIndex: 0, columnIndex: 0 },
-          rows: [{ values: (SHEET_HEADERS[name] as readonly string[]).map(cellData) }],
-          fields: "userEnteredValue",
-        },
-      });
-    }
-    const configSheetId = sheetIdByName(metadata, "Config");
-    requests.push({
-      updateCells: {
-        start: { sheetId: configSheetId, rowIndex: 1, columnIndex: 0 },
-        rows: configSeed.map((row) => ({ values: row.map(cellData) })),
-        fields: "userEnteredValue",
-      },
-    });
-    const roundsSheetId = sheetIdByName(metadata, "Rondas");
-    requests.push({
-      updateCells: {
-        start: { sheetId: roundsSheetId, rowIndex: 1, columnIndex: 0 },
-        rows: [{ values: ["round-1", 1, "Ronda 1", false, defaultPreset.id].map(cellData) }],
-        fields: "userEnteredValue",
-      },
-    });
-    const formatsSheetId = sheetIdByName(metadata, "Formatos");
-    requests.push({
-      updateCells: {
-        start: { sheetId: formatsSheetId, rowIndex: 1, columnIndex: 0 },
-        rows: [{ values: [defaultPreset.id, defaultPreset.name, JSON.stringify(defaultPreset.phases), defaultPreset.version, defaultPreset.createdAt, defaultPreset.updatedAt].map(cellData) }],
-        fields: "userEnteredValue",
-      },
-    });
-    await batchUpdateSpreadsheet(requests);
-    return spreadsheetMetadata(true);
-  });
-}
 async function loadSheetData(_skipEnsure = false): Promise<SheetData> {
   // Compatibility shape for existing domain rules; all reads now come from normalized PostgreSQL.
   return loadPostgresSheetData();
@@ -566,42 +227,6 @@ function setConfig(rows: SheetRow[], key: string, value: string): void {
   const existing = rows.find((row) => str(row.key) === key);
   if (existing) existing.value = value;
   else rows.push({ key, value });
-}
-
-function sheetIdByName(metadata: SpreadsheetMetadata, name: SheetName): number {
-  const sheet = (metadata.sheets || []).find((item) => item.properties.title === name);
-  if (!sheet) throw new ApiError("SCHEMA_MISMATCH", "Falta la pestaña " + name + ".", 503);
-  return sheet.properties.sheetId;
-}
-
-function updateCellsRequest(
-  sheetId: number,
-  headers: readonly string[],
-  objects: SheetRow[],
-  oldDataRows: number,
-  gridRows: number,
-  gridColumns: number,
-): unknown[] {
-  const rowCount = Math.max(oldDataRows, objects.length);
-  const requests: unknown[] = [];
-  if (rowCount + 1 > gridRows) {
-    requests.push({ appendDimension: { sheetId, dimension: "ROWS", length: rowCount + 1 - gridRows } });
-  }
-  if (headers.length > gridColumns) {
-    requests.push({ appendDimension: { sheetId, dimension: "COLUMNS", length: headers.length - gridColumns } });
-  }
-  if (!rowCount) return requests;
-  const rows = Array.from({ length: rowCount }, (_, index) => ({
-    values: headers.map((header) => cellData(objects[index]?.[header])),
-  }));
-  requests.push({
-    updateCells: {
-      range: { sheetId, startRowIndex: 1, endRowIndex: rowCount + 1, startColumnIndex: 0, endColumnIndex: headers.length },
-      rows,
-      fields: "userEnteredValue",
-    },
-  });
-  return requests;
 }
 
 async function writeTables(data: SheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[]): Promise<void> {
