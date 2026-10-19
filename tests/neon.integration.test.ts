@@ -17,7 +17,7 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await client.connect();
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}"`);
-    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql", "0005_normalize_assignment_claims.sql", "0006_scorecard_judge_consistency.sql", "0007_scope_judge_consistency_checks.sql"]) {
+    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql", "0005_normalize_assignment_claims.sql", "0006_scorecard_judge_consistency.sql", "0007_scope_judge_consistency_checks.sql", "0008_preserve_scored_assignment_snapshots.sql"]) {
       await client.query(await readFile(resolve("db/migrations", file), "utf8"));
     }
     await client.query("INSERT INTO tournament_settings(id) VALUES(1)");
@@ -27,6 +27,7 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await client.query("INSERT INTO rounds(id,number,name) VALUES('r1',1,'Ronda 1')");
     await client.query("INSERT INTO room_assignments(id,round_id,physical_room_id,team_favor_id,team_contra_id) VALUES('a1','r1','p1','t1','t2'),('a2','r1','p2','t3','t4')");
     await client.query("INSERT INTO assignment_judges(assignment_id,judge_id) VALUES('a1','j1'),('a2','j2')");
+    await client.query("INSERT INTO assignment_phases(assignment_id,phase_id,phase_order,name,side,speaker,duration_seconds,phase_type) VALUES('a1','phase-1',0,'Apertura','favor','Interviniente',60,'opening')");
   }, 30_000);
 
   afterAll(async () => {
@@ -104,6 +105,10 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await expect(client!.query("UPDATE room_assignments SET team_favor_id='t3' WHERE id='a1'"))
       .rejects.toMatchObject({ code: "23514" });
     await expect(client!.query("UPDATE room_assignments SET physical_room_id='p1' WHERE id='a1'"))
+      .rejects.toMatchObject({ code: "23514" });
+    await expect(client!.query("DELETE FROM assignment_judges WHERE assignment_id='a1' AND judge_id='j1'"))
+      .rejects.toMatchObject({ code: "23514" });
+    await expect(client!.query("DELETE FROM assignment_phases WHERE assignment_id='a1' AND phase_id='phase-1'"))
       .rejects.toMatchObject({ code: "23514" });
   });
 
