@@ -491,12 +491,13 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     await client.query("BEGIN");
     await client.query("SET CONSTRAINTS ALL DEFERRED");
     if (replacements.Config) await persistConfig(client, data.rows.Config, replacements.Config);
+    // Parent rows must exist before rounds and assignments reference them.
+    if (replacements.Formatos) await persistFormats(client, replacements.Formatos);
     if (replacements.Rondas) await persistRounds(client, replacements.Rondas);
     if (replacements.Equipos) await persistTeams(client, replacements.Equipos, false);
     if (replacements.Jueces) await persistTeams(client, replacements.Jueces, true);
     if (replacements.Equipos && replacements.Jueces) await persistIncompatibilities(client, replacements.Equipos, replacements.Jueces);
     if (replacements.SalasFisicas) await persistPhysicalRooms(client, replacements.SalasFisicas);
-    if (replacements.Formatos) await persistFormats(client, replacements.Formatos);
     if (replacements.Equipos) {
       // Release derived cross-side claims and judge slots before a full roster
       // replacement; the assignment triggers rebuild them transactionally.
