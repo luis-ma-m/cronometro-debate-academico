@@ -486,9 +486,15 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     }
     if (replacements.Config) {
       const config = replacements.Config;
-      await persistInstitutions(client, getConfig(config, "institutions"));
-      await persistSpeakers(client, getConfig(config, "speakers"));
-      await persistScoring(client, getConfig(config, "scoring"));
+      if (!same(parseJson(getConfig(config, "institutions"), []), parseJson(getConfig(data.rows.Config, "institutions"), []))) {
+        await persistInstitutions(client, getConfig(config, "institutions"));
+      }
+      if (!same(parseJson(getConfig(config, "speakers"), []), parseJson(getConfig(data.rows.Config, "speakers"), []))) {
+        await persistSpeakers(client, getConfig(config, "speakers"));
+      }
+      if (!same(parseJson(getConfig(config, "scoring"), emptyScoringConfig()), parseJson(getConfig(data.rows.Config, "scoring"), emptyScoringConfig()))) {
+        await persistScoring(client, getConfig(config, "scoring"));
+      }
     }
     if (replacements.Equipos || replacements.Jueces || replacements.SalasFisicas || replacements.Rondas) {
       // A complete tournament save includes Equipos; only then are omitted assignments treated as removed.
