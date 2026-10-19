@@ -108,4 +108,12 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("CREATE CONSTRAINT TRIGGER scorecards_judges_consistency");
   });
 
+
+  it("limits deferred judge consistency checks to the affected scorecard", async () => {
+    const sql = await readFile(resolve("db/migrations/0007_scope_judge_consistency_checks.sql"), "utf8");
+    expect(sql).toContain("target_scorecard_id");
+    expect(sql).toContain("FROM scorecards WHERE assignment_id = target_assignment_id");
+    expect(sql).toContain("FROM scorecard_judges WHERE scorecard_id = target_scorecard_id");
+  });
+
 });
