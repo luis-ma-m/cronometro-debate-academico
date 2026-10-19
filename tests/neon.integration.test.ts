@@ -17,7 +17,7 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await client.connect();
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}"`);
-    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql"]) {
+    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql", "0005_normalize_assignment_claims.sql"]) {
       await client.query(await readFile(resolve("db/migrations", file), "utf8"));
     }
     await client.query("INSERT INTO tournament_settings(id) VALUES(1)");
@@ -47,6 +47,19 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await expect(client!.query(
       "INSERT INTO scorecards(id,assignment_id,round_id,team_favor_id,team_contra_id) VALUES('sc-bad','a1','r1','t3','t2')",
     )).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("allows an atomic swap of physical rooms in the same round", async () => {
+    await client!.query("BEGIN");
+    await client!.query("DELETE FROM round_room_claims");
+    await client!.query("UPDATE room_assignments SET physical_room_id='p2' WHERE id='a1'");
+    await client!.query("UPDATE room_assignments SET physical_room_id='p1' WHERE id='a2'");
+    await client!.query("COMMIT");
+    const rooms = await client!.query("SELECT id,physical_room_id FROM room_assignments ORDER BY id");
+    expect(rooms.rows).toEqual([
+      { id: "a1", physical_room_id: "p2" },
+      { id: "a2", physical_room_id: "p1" },
+    ]);
   });
 
   it("prevents changing teams or physical room after an act has been recorded", async () => {
