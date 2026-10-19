@@ -1,95 +1,73 @@
 # Despliegue de LEDU Control en Vercel
 
-## Arquitectura vigente
+## Arquitectura operativa
 
-No se utiliza Google Apps Script. El frontend y la API se despliegan desde el mismo repositorio en Vercel. Las funciones de servidor del directorio api/ acceden a Google Sheets API mediante una cuenta de servicio. Google Sheets sigue siendo la fuente de verdad del torneo.
+La API de Vercel usa Neon PostgreSQL como fuente de verdad para el torneo. Google Sheets ya no forma parte de la ruta de lectura/escritura de la API. Las tablas relacionales contienen instituciones, equipos, jueces, oradores, rondas, salas físicas, asignaciones, snapshots de fases, cronómetros, categorías, actas, puntuaciones y auditoría.
 
-Se utiliza Upstash Redis únicamente para elementos operativos que no pueden residir solo en la memoria efímera de una función: sesiones revocables, claves de control por sala y un bloqueo distribuido para serializar escrituras simultáneas. Los datos del torneo continúan en la hoja.
+Upstash Redis se reserva para sesiones revocables, límite de intentos de acceso y claves de control por sala. No se usa un bloqueo global Redis para coordinar las escrituras del torneo. Las escrituras de configuración usan la revisión del torneo; las transiciones del cronómetro comparan la revisión de la asignación dentro de la transacción PostgreSQL.
 
-## 1. Preparar Google Sheets API
+## 1. Variables privadas de Vercel
 
-La hoja del torneo es:
+Configura las variables como Sensitive/Encrypted y solo en entornos que deban acceder al backend:
 
-https://docs.google.com/spreadsheets/d/1YxqCaKESdneb42Oqty2pssnmm_LyiS2hhBs4plcequI/edit
-
-1. En Google Cloud Console, selecciona o crea un proyecto y habilita **Google Sheets API**.
-2. Crea una cuenta de servicio y genera una clave JSON para esa cuenta.
-3. Guarda el JSON descargado completo en una variable privada de Vercel llamada GOOGLE_SERVICE_ACCOUNT_JSON. No hace falta separar el correo y la clave en variables distintas.
-4. Comparte la hoja anterior con el valor client_email que aparece dentro del JSON y dale permiso de editor. La hoja debe seguir siendo privada; no habilites el acceso público.
-5. No subas el JSON a GitHub ni lo compartas por el chat. Solo debe estar guardado como variable privada en Vercel.
-
-El esquema v3 utiliza las pestañas `Config`, `Rondas`, `Equipos`, `Jueces`, `Salas`, `Cronometros`, `Registro`, `SalasFisicas` y `Formatos`. `Equipos` y `Jueces` añaden `incompatibleJudgeIds` serializado como JSON. `SalasFisicas` conserva la identidad y el slug permanente de cada sala; `Salas` registra las asignaciones por ronda; `Formatos` contiene presets versionados.
-
-**Migración destructiva del esquema v3:** en la primera petición al backend en el entorno `Production`, si `Config` no contiene `schemaVersion=3`, la API crea las pestañas que falten, reinicializa el contenido de las pestañas de datos y crea una ronda inicial y el preset LEDU. Se perderán deliberadamente las rondas, equipos, jueces, salas, cronómetros, instituciones e historial anteriores. No conserva ni convierte los datos del esquema previo; esa decisión se tomó para evitar asignaciones ambiguas durante el cambio al modelo de salas permanentes.
-
-La migración solo se ejecuta cuando `VERCEL_ENV=production`. Un despliegue `Preview` contra la misma hoja compartida recibe `SCHEMA_MIGRATION_PRODUCTION_ONLY` y no borra los datos existentes. Después de que Production haya completado la migración, los previews pueden leer el esquema v3. Si se va a reutilizar la hoja para otro torneo, exporta antes cualquier información que quieras conservar.
-
-
-## Incompatibilidades
-
-Las pestañas `Equipos` y `Jueces` almacenan `incompatibleJudgeIds` como JSON. El guardado normaliza las relaciones juez–juez para que sean recíprocas y rechaza IDs inexistentes, duplicados o autorreferencias. Antes de guardar una asignación y justo antes de iniciar un cronómetro se verifican conjuntamente los conflictos por institución, equipo–juez y juez–juez.
-
-**Migración destructiva v3:** si `Config` no contiene `schemaVersion=3`, la primera petición en Production reinicializa las pestañas de datos y crea la ronda inicial y el preset LEDU. El proceso está bloqueado en Preview y protegido con un bloqueo distribuido para evitar que dos solicitudes ejecuten el reset en paralelo. No preserva los equipos, jueces, instituciones, asignaciones, cronómetros ni historial anteriores. Exporta los datos que quieras conservar y confirma la pérdida antes de permitir que Production ejecute esta versión.
-
-
-## 2. Preparar coordinación en Upstash Redis
-
-Las funciones de Vercel son efímeras y pueden ejecutarse en paralelo. Un bloqueo en memoria no sirve para coordinar distintas instancias, por lo que Redis es necesario para mantener las garantías de concurrencia y revocación de sesiones.
-
-1. Crea una base Redis de Upstash desde la integración/Marketplace de Vercel o desde Upstash.
-2. Obtén el REST URL y el REST token de esa base.
-3. Añádelos a Vercel como UPSTASH_REDIS_REST_URL y UPSTASH_REDIS_REST_TOKEN. Solo las funciones del servidor deben poder leerlos.
-
-Redis no reemplaza Google Sheets: el contenido del torneo, las asignaciones, el estado persistente de cada cronómetro y los eventos siguen guardándose en la hoja.
-
-## 3. Variables de entorno de Vercel
-
-En Project Settings → Environment Variables, configura estas variables como **Encrypted** o **Sensitive** cuando la opción esté disponible. Configúralas al menos para Production y Preview; añade Development si vas a probar el backend con despliegue local de Vercel.
-
-| Variable | Valor |
+| Variable | Uso |
 |---|---|
-| GOOGLE_SERVICE_ACCOUNT_JSON | Contenido completo del JSON de la cuenta técnica de Google Sheets. |
-| ADMIN_PASSWORD | La única contraseña privada que se introduce para entrar en el gestor. |
-| UPSTASH_REDIS_REST_URL | REST URL de Redis; coordina las escrituras entre funciones de Vercel. |
-| UPSTASH_REDIS_REST_TOKEN | Token privado de esa base Redis. |
+| `NEON_DATABASE_URL` | Conexión PostgreSQL generada por la integración Neon. Se acepta `DATABASE_URL` como alternativa. |
+| `ADMIN_PASSWORD` | Contraseña privada del gestor. |
+| `UPSTASH_REDIS_REST_URL` | Endpoint REST de Redis. |
+| `UPSTASH_REDIS_REST_TOKEN` | Token privado de Redis. |
 
-Estas son las cuatro variables imprescindibles. El ID de la hoja ya está fijado en el proyecto, y el backend deriva la clave interna de autenticación de ADMIN_PASSWORD: no hace falta una variable SESSION_SECRET adicional.
+No pongas secretos en variables `VITE_*`. Production y Preview deben utilizar bases de datos separadas; no apuntes una Preview a la base de producción para probar cambios de esquema. Tras modificar variables, vuelve a desplegar para que las funciones reciban la configuración.
 
-En Vercel, elimina también VITE_APPS_SCRIPT_URL si sigue presente: pertenece a la versión antigua y ya no se utiliza. No pongas secretos en variables VITE_*, porque se incorporan al JavaScript público.
+La integración Neon conectada se identificó como `gestor-de-debate-neon`; comprueba en el dashboard que el entorno seleccionado corresponde al proyecto y rama de base de datos correctos antes de ejecutar cualquier migración.
 
-Después de guardar las variables, vuelve a desplegar Vercel para asegurarte de que las funciones reciben la nueva configuración.
+## 2. Inicializar la base de datos
 
-## 4. Verificar API y despliegue
+La migración no importa datos de Google Sheets. La base de destino se prepara deliberadamente sin copiar el torneo anterior, conservando las reglas de negocio en el código.
 
-1. Abre https://<tu-despliegue>.vercel.app/api?action=health. La respuesta correcta debe contener ok: true, status: "ok" y los nombres de las pestañas.
-2. Si responde NOT_CONFIGURED, añade las variables privadas que indique el mensaje. Si informa de permisos de hoja, comprueba que compartiste la hoja con el correo de la cuenta de servicio.
-3. Abre /gestion e inicia sesión con ADMIN_PASSWORD.
-4. Crea o edita un equipo y un juez; guarda y confirma que los datos aparecen en Sheets.
-5. Asigna dos equipos y los jueces a una sala; abre el cronómetro desde gestión.
-6. Comprueba que la página pública de sala sin la clave de control solo permite consultar. Prueba iniciar, pausar, reanudar, reiniciar, avanzar, retroceder y finalizar desde un enlace de control.
-7. Regenera el enlace y confirma que el enlace anterior deja de controlar la sala.
-8. Abre dos salas a la vez, haz transiciones próximas en el tiempo y verifica revisiones, historial y que las acciones de una sala no afectan a otra.
-9. Recarga con el reloj en curso, deja que pase de cero y prueba desconectar/reconectar.
-10. Comprueba que Registro recibe una fila por transición relevante y no una fila por segundo.
+Desde un entorno administrativo controlado, con `NEON_DATABASE_URL` apuntando a la base correcta:
+
+```bash
+npm ci
+npm run db:status
+npm run db:migrate
+npm run db:status
+npm run db:seed
+```
+
+El runner aplica los SQL versionados en orden, verifica SHA-256 y registra el historial en `schema_migrations` dentro de una transacción con advisory lock. No edites una migración ya aplicada: añade una nueva versión. El runner bloquea por defecto las migraciones desde el runtime Vercel Production.
+
+El seed es idempotente y crea únicamente los valores predeterminados que falten: configuración del torneo, preset LEDU, sus fases y ronda inicial. No ejecutes los comandos hasta verificar el destino de la conexión. La API responde `DATABASE_NOT_INITIALIZED` si faltan los valores base.
+
+## 3. Redis y seguridad de las salas
+
+Configura `UPSTASH_REDIS_REST_URL` y `UPSTASH_REDIS_REST_TOKEN`. Redis conserva:
+
+- Sesiones del gestor con duración de ocho horas.
+- Contadores de intentos fallidos con ventana de quince minutos.
+- Claves privadas de control por sala física; rotarlas invalida las claves anteriores.
+
+La página pública de una sala permite consultar el estado, pero solo una clave de control vigente puede iniciar, pausar, reanudar, reiniciar, avanzar, retroceder o finalizar el cronómetro. La conexión PostgreSQL nunca se entrega al navegador.
+
+## 4. Comprobaciones tras desplegar
+
+1. Abre `/api?action=health`. La respuesta debe identificar `Neon PostgreSQL` y verificar Redis.
+2. Abre `/gestion`, inicia sesión y confirma que el torneo carga desde la base recién inicializada.
+3. Crea/edita instituciones, equipos, jueces, oradores, formatos y asignaciones. Recarga y confirma que persisten.
+4. Comprueba incompatibilidades de institución, equipo–juez y juez–juez, así como que un equipo o juez no puede asignarse a dos debates de la misma ronda.
+5. Prueba todas las transiciones del cronómetro desde dos clientes. La revisión debe detectar acciones basadas en un estado antiguo; las solicitudes repetidas de la misma transición deben devolver la respuesta ya confirmada.
+6. Activa una ronda con debates pendientes, prueba el rechazo normal y la confirmación explícita de activación forzada. Verifica reinicio de asignaciones entrantes, pausa de las salientes, incremento de `activationRevision` y anuncio de 20 segundos.
+7. Registra actas en una ronda clasificatoria y verifica el rechazo en rondas eliminatorias, debates no finalizados, equipos/jueces incorrectos, categorías históricas y puntuaciones inválidas.
+8. Comprueba los eventos de auditoría y la ausencia de escrituras por segundo.
+9. Ejecuta pruebas de concurrencia con salas distintas y simultáneas; objetivo mínimo: 20 operaciones válidas en 5 segundos sin pérdida ni duplicación.
+10. Confirma CI, typecheck de API, build y una prueba de integración contra una base Neon de test aislada antes de cualquier corte de producción.
 
 ## Contrato de API
 
-Las peticiones de escritura usan POST a /api con JSON de la forma { "action": "nombreAccion", "payload": { ... } }. Se mantiene el contrato que usa el frontend: login, logout, getTournament, getPublicRoom, getRoomControllerToken, saveTournament y updateRoomTimer.
+El frontend conserva las acciones `login`, `logout`, `getTournament`, `getPublicRoom`, `getRoomControllerToken`, `saveTournament`, `saveScoreConfig`, `getRoundActivationPreview`, `activateRound` y `updateRoomTimer`. Las respuestas mantienen el envoltorio `{ ok, data }` o `{ ok: false, error }`.
 
-La API valida la sesión en el servidor, limita intentos fallidos de acceso, excluye notas internas de la respuesta pública, valida las asignaciones por ronda y sus formatos, compara las revisiones y serializa las escrituras mediante bloqueo distribuido. Las acciones de activación de ronda muestran un resumen de los debates pendientes, registran si se fuerza el cambio, reinician los cronómetros de las asignaciones entrantes y anuncian la nueva ronda en las pantallas públicas durante 20 segundos. Las URLs públicas usan el slug estable de la sala física, no el ID de una asignación específica. La escritura de las tablas afectadas y los eventos se agrupan en una petición batchUpdate de Google Sheets.
+Las escrituras de configuración comparan `expectedRevision`; los cronómetros comparan `expectedRevision`, `assignmentId` y `expectedActivationRevision`. Las actualizaciones de cronómetro y su evento de auditoría se confirman en la misma transacción. La clave idempotente de una transición se deriva de la sala, asignación, revisión esperada y acción, de modo que un reintento tras perder la respuesta no aplica una segunda transición.
 
-## Diagnóstico
+## Rollback y límites
 
-- NOT_CONFIGURED: falta alguna de las cuatro variables privadas, o GOOGLE_SERVICE_ACCOUNT_JSON no contiene un JSON válido con client_email y private_key. El mensaje indica la configuración que falta sin mostrar sus valores.
-- GOOGLE_AUTH_FAILED: comprueba que el JSON de cuenta de servicio es válido y que la clave no se ha revocado.
-- SHEETS_PERMISSION_DENIED: comparte el documento con el correo client_email de la cuenta de servicio y dale permiso de editor.
-- SCHEMA_MISMATCH: revisa las pestañas y los encabezados sin reordenarlos manualmente.
-- SCHEMA_MIGRATION_PRODUCTION_ONLY: la hoja aún requiere la migración destructiva al esquema v3 (incluye las columnas JSON de incompatibilidades); Preview no puede ejecutarla. La primera petición en Production la completa una sola vez cuando Config no contiene schemaVersion=3.
-- COORDINATION_UNAVAILABLE: verifica que Redis responde y que el REST URL y token están bien configurados.
-- UNAUTHORIZED: vuelve a iniciar sesión o genera un enlace de control nuevo.
-- REVISION_CONFLICT: actualiza los datos desde el servidor y vuelve a guardar o aplicar la transición.
-- WRITE_BUSY: otra petición está guardando cambios. Espera brevemente y vuelve a intentarlo.
-
-## Puesta en producción
-
-No se considera finalizada la migración hasta que las variables privadas estén configuradas y el endpoint de salud, login, guardado, apertura de sala y transiciones se hayan probado desde un despliegue real. Las pruebas locales y de CI no sustituyen la autorización real de la cuenta de servicio ni la prueba de dos salas simultáneas.
+No se importa ni se borra el contenido de Google Sheets; permanece separado y deja de ser operativo. Para volver atrás no basta con cambiar una variable: el código anterior esperaba Sheets como fuente de verdad y no recibirá las nuevas escrituras. Cualquier rollback de aplicación debe ser deliberado y considerar que la base PostgreSQL ya contiene las operaciones nuevas. No retires la integración o los secretos de Google hasta que la validación funcional y de producción esté completa y se haya acordado explícitamente su retirada.
