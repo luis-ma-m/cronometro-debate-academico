@@ -310,6 +310,9 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
   for (const row of rooms) {
     const id = str(row.id);
     const timer = timerById.get(id) || getRow(oldTimers, id, "roomId");
+    const oldRoom = getRow(oldRooms, id);
+    const staticChanged = !oldRoom || ["roundId","physicalRoomId","formatId","teamFavorId","teamContraId","notes"].some((key) => str(oldRoom[key]) !== str(row[key])) || !same(parseJson(oldRoom.phases, []), parseJson(row.phases, [])) || !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
+    if (!staticChanged) continue;
     const oldTimer = getRow(oldTimers, id, "roomId");
     await client.query(
       `INSERT INTO room_assignments(id,round_id,physical_room_id,format_id,team_favor_id,team_contra_id,notes,timer_status,phase_index,remaining_seconds,started_at,last_resumed_at,timer_revision,timer_updated_at)
@@ -344,8 +347,7 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     const old = getRow(oldTimers, id, "roomId");
     const changed = !old || !same(old, timer);
     if (!changed) continue;
-    const oldRevision = old ? num(old.revision) : -1;
-    const result = await client.query(
+    if (!old) continue; // New assignments already received their initial timer in the INSERT above.\n    const oldRevision = num(old.revision);\n    const result = await client.query(
       `UPDATE room_assignments SET timer_status=$1,phase_index=$2,remaining_seconds=$3,
        started_at=CASE WHEN $4::bigint=0 THEN NULL ELSE to_timestamp($4::double precision/1000) END,
        last_resumed_at=CASE WHEN $5::bigint=0 THEN NULL ELSE to_timestamp($5::double precision/1000) END,
@@ -372,7 +374,7 @@ async function persistSpeakers(client: PoolClient, value: string): Promise<void>
 
 async function persistScoring(client: PoolClient, value: string): Promise<void> {
   const scoring = parseScoringConfig(parseJson(value, emptyScoringConfig()));
-  for (const category of scoring.categories) await client.query(
+  await client.query("UPDATE score_categories SET category_order=category_order+1000");\n  for (const category of scoring.categories) await client.query(
     "INSERT INTO score_categories(id,name,category_order) VALUES($1,$2,$3) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,category_order=EXCLUDED.category_order,updated_at=now()",
     [category.id, category.name, category.order],
   );
@@ -435,8 +437,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     if (replacements.Jueces) await persistTeams(client, replacements.Jueces, true);
     if (replacements.SalasFisicas) await persistPhysicalRooms(client, replacements.SalasFisicas);
     if (replacements.Formatos) await persistFormats(client, replacements.Formatos);
-    if (replacements.Salas || replacements.Cronometros) {
-      await persistAssignments(client, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
+    if (replacements.Equipos) {\n      // Release derived cross-side claims and judge slots before a full roster\n      // replacement; the assignment triggers rebuild them transactionally.\n      await client.query("DELETE FROM round_team_claims");\n      await client.query("DELETE FROM assignment_judges");\n    }\n    if (replacements.Salas || replacements.Cronometros) {\n      await persistAssignments(client, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
         data.rows.Salas, data.rows.Cronometros);
     }
     if (replacements.Config) {
