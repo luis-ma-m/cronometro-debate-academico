@@ -39,9 +39,6 @@ function phasesFromRows(rows: Record<string, unknown>[], formatId: string): Phas
   }));
 }
 
-function rowMap(headers: readonly string[], values: unknown[][]): SheetRow[] {
-  return values.map((valuesRow) => Object.fromEntries(headers.map((header, index) => [header, valuesRow[index] ?? ""])));
-}
 function rawFromRows(rows: SheetRow[], headers: readonly string[]): unknown[][] {
   return [Array.from(headers), ...rows.map((row) => headers.map((header) => row[header] ?? ""))];
 }
@@ -327,7 +324,6 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     const oldRoom = getRow(oldRooms, id);
     const staticChanged = forceRelations || !oldRoom || ["roundId","physicalRoomId","formatId","teamFavorId","teamContraId","notes"].some((key) => str(oldRoom[key]) !== str(row[key])) || !same(parseJson(oldRoom.phases, []), parseJson(row.phases, [])) || !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
     if (!staticChanged) continue;
-    const oldTimer = getRow(oldTimers, id, "roomId");
     await client.query(
       `INSERT INTO room_assignments(id,round_id,physical_room_id,format_id,team_favor_id,team_contra_id,notes,timer_status,phase_index,remaining_seconds,started_at,last_resumed_at,timer_revision,timer_updated_at)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
@@ -440,7 +436,29 @@ async function persistEvent(client: PoolClient, event: unknown[]): Promise<void>
      VALUES($1,$2,COALESCE(NULLIF($3,'')::timestamptz,now()),$4,$5,NULLIF($6,'')::integer,$7::jsonb)
      ON CONFLICT(event_key) DO NOTHING`,
     [eventKey, eventType, str(event[1]), assignmentId, roundId, str(event[5]), JSON.stringify(details)],
-  );
+
+  const idempotency = details && typeof details === "object" ? details as Record<string, unknown> : {};
+  if (typeof idempotency.idempotencyKey === "string" && idempotency.idempotencyResponse !== undefined) {
+    await client.query(
+      "INSERT INTO idempotency_keys(operation_key,scope,response,completed_at) VALUES($1,$2,$3::jsonb,now()) ON CONFLICT(operation_key) DO NOTHING",
+      [str(idempotency.idempotencyKey), str(idempotency.idempotencyScope), JSON.stringify(idempotency.idempotencyResponse)],
+    );
+  }
+}
+
+export async function readIdempotentResponse(operationKey: string, scope: string): Promise<unknown | null> {
+  const client = await getPool().connect();
+  try {
+    const result = await client.query("SELECT scope,response FROM idempotency_keys WHERE operation_key=$1", [operationKey]);
+    if (!result.rows.length) return null;
+    if (str(result.rows[0].scope) !== scope) throw new ApiError("IDEMPOTENCY_KEY_REUSED", "La clave de idempotencia ya se utilizó para otra operación.", 409);
+    return result.rows[0].response ?? null;
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido comprobar la idempotencia de la operación.", 503);
+  } finally {
+    client.release();
+  }
 }
 
 export async function writePostgresTables(data: PostgresSheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[]): Promise<void> {
