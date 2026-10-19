@@ -6,7 +6,7 @@ Esta rama introduce la base de esquema y herramientas de Neon, pero todavía no 
 
 - Neon PostgreSQL será la fuente de verdad futura.
 - La API server-side usa `@neondatabase/serverless`; el navegador nunca recibe credenciales.
-- Añade `DATABASE_URL` como variable privada/encrypted en Vercel.
+- La integración conectada crea `NEON_DATABASE_URL` (además de otras variables `NEON_*`). El cliente y los scripts aceptan `NEON_DATABASE_URL` y `DATABASE_URL`, dando prioridad a la variable generada por Neon.
 - Upstash Redis se mantiene por ahora para sesiones, rate limit y claves de control de salas.
 - No retirar todavía `GOOGLE_SERVICE_ACCOUNT_JSON`: la API actual sigue utilizándolo.
 
@@ -29,7 +29,7 @@ El modelo separa instituciones, equipos, jueces, oradores, salas físicas, ronda
 
 ## Pasos de configuración
 
-La integración Neon existe en la cuenta Vercel, pero el conector disponible no pudo leer la configuración del proyecto por permisos. Verifica en el dashboard que Neon está conectado a `cronometro-debate-academico` y genera/selecciona una conexión pooled para la base prevista. Añade `DATABASE_URL` a Production, Preview y Development; idealmente, Preview debe apuntar a una base separada. Vuelve a desplegar para que Vercel inyecte la variable.
+La integración Neon existe en la cuenta Vercel, pero el conector disponible no pudo leer la configuración del proyecto por permisos. Verifica en el dashboard que Neon está conectado a `cronometro-debate-academico` y genera/selecciona una conexión pooled para la base prevista. Comprueba que `NEON_DATABASE_URL` está disponible en los entornos necesarios (la integración actual lo crea para Production y Preview); idealmente, Preview debe apuntar a una base separada. Vuelve a desplegar para que Vercel inyecte la variable.
 
 No ejecutes el seed de producción hasta que se confirme que la base y proyecto son los correctos. Aunque es idempotente y no borra, crea ronda 1 y preset LEDU cuando faltan.
 
