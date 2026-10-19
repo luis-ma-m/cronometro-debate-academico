@@ -25,6 +25,7 @@ El handler operativo ya no lee `GOOGLE_SERVICE_ACCOUNT_JSON` ni llama a Google S
 - `db/migrations/0005_normalize_assignment_claims.sql`: mueve la unicidad de sala física y equipo a tablas de claims para que una transacción pueda intercambiar asignaciones sin colisiones transitorias.
 - `db/migrations/0006_scorecard_judge_consistency.sql`: valida al final de cada transacción que el acta registre exactamente los jueces de la asignación.
 - `db/migrations/0007_scope_judge_consistency_checks.sql`: limita esa comprobación a la acta afectada para evitar escaneos completos en cada cambio.
+- `db/migrations/0008_preserve_scored_assignment_snapshots.sql`: hace inmutables los jueces y las fases efectivas de una asignación con acta, además de la identidad de ronda/sala/equipos.
 - `scripts/migrate-db.mjs`: descubre migraciones versionadas en orden, comprueba SHA-256, registra versiones y aplica DDL junto al ledger dentro de una transacción protegida por advisory lock. Si una versión aplicada tiene otro checksum, se detiene; cualquier corrección debe ser una nueva migración.
 
 Comandos administrativos:
