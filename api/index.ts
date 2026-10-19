@@ -8,7 +8,6 @@ import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScor
 import {
   ApiError,
   SESSION_TTL_SECONDS,
-  SHEET_HEADERS,
   bool,
   defaultPhases,
   deriveRoomStatus,
