@@ -1,6 +1,6 @@
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { neon, Pool, type NeonQueryFunction } from "@neondatabase/serverless";
 
-let cachedClient: NeonQueryFunction<false, false> | undefined;
+let cachedClient: NeonQueryFunction<false, false> | undefined;\nlet cachedPool: Pool | undefined;
 
 function getConnectionString(): string {
   const value = (process.env.NEON_DATABASE_URL || process.env.DATABASE_URL)?.trim();
@@ -14,7 +14,7 @@ export function getSql(): NeonQueryFunction<false, false> {
   return cachedClient;
 }
 
-export async function checkDatabase(): Promise<{ ok: true; serverTime: string }> {
+export function getPool(): Pool {\n  if (!cachedPool) cachedPool = new Pool({ connectionString: getConnectionString(), max: 5, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 5_000 });\n  return cachedPool;\n}\n\nexport async function checkDatabase(): Promise<{ ok: true; serverTime: string }> {
   const sql = getSql();
   const rows = await sql`SELECT now()::text AS server_time`;
   const first = rows[0] as { server_time: string } | undefined;
