@@ -340,6 +340,8 @@ async function persistPhysicalRooms(client: PoolClient, rows: SheetRow[]): Promi
 
 async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers: SheetRow[], oldRooms: SheetRow[], oldTimers: SheetRow[], forceRelations = false): Promise<void> {
   const timerById = new Map(timers.map((row) => [str(row.roomId), row]));
+  const scoredIdsResult = forceRelations ? await client.query("SELECT assignment_id FROM scorecards") : null;
+  const scoredAssignmentIds = new Set((scoredIdsResult?.rows || []).map((row) => str(row.assignment_id)));
   for (const row of rooms) {
     const id = str(row.id);
     const timer = timerById.get(id) || getRow(oldTimers, id, "roomId");
@@ -369,9 +371,16 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
         [id, phase.id, i, phase.name, phase.side, phase.speaker || "Interviniente no especificado", phase.durationSeconds, phase.type || "opening", phase.warningThresholdsSeconds || [], phase.allowOvertimeDisplay !== false],
       );
     }
-    await client.query("DELETE FROM assignment_judges WHERE assignment_id=$1", [id]);
     const judgeIds = parseStringArray(row.judgeIds);
-    for (const judgeId of judgeIds) await client.query("INSERT INTO assignment_judges(assignment_id,judge_id) VALUES($1,$2)", [id, judgeId]);
+    const oldJudgeIds = parseStringArray(oldRoom?.judgeIds);
+    const judgesChanged = !same(oldJudgeIds, judgeIds);
+    if (scoredAssignmentIds.has(id) && judgesChanged) {
+      throw new ApiError("SCORED_ASSIGNMENT_JUDGES_IMMUTABLE", "No se pueden cambiar los jueces de una asignación que ya tiene un acta.", 409);
+    }
+    if (!scoredAssignmentIds.has(id) && (forceRelations || judgesChanged)) {
+      await client.query("DELETE FROM assignment_judges WHERE assignment_id=$1", [id]);
+      for (const judgeId of judgeIds) await client.query("INSERT INTO assignment_judges(assignment_id,judge_id) VALUES($1,$2)", [id, judgeId]);
+    }
   }
   // Timer updates are optimistic and row-scoped. A stale timer revision cannot overwrite another device.
   for (const timer of timers) {
@@ -503,7 +512,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
       // replacement; the assignment triggers rebuild them transactionally.
       await client.query("DELETE FROM round_team_claims");
       await client.query("DELETE FROM round_room_claims");
-      await client.query("DELETE FROM assignment_judges");
+      await client.query("DELETE FROM assignment_judges WHERE assignment_id NOT IN (SELECT assignment_id FROM scorecards)");
     }
     if (replacements.Salas || replacements.Cronometros) {
       await persistAssignments(client, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
