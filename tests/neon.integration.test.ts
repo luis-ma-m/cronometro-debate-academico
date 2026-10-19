@@ -17,7 +17,7 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await client.connect();
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}"`);
-    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql", "0005_normalize_assignment_claims.sql"]) {
+    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql", "0005_normalize_assignment_claims.sql", "0006_scorecard_judge_consistency.sql"]) {
       await client.query(await readFile(resolve("db/migrations", file), "utf8"));
     }
     await client.query("INSERT INTO tournament_settings(id) VALUES(1)");
@@ -47,6 +47,21 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await expect(client!.query(
       "INSERT INTO scorecards(id,assignment_id,round_id,team_favor_id,team_contra_id) VALUES('sc-bad','a1','r1','t3','t2')",
     )).rejects.toMatchObject({ code: "23514" });
+  });
+
+  it("rejects scorecards that do not record exactly the assigned judges", async () => {
+    await client!.query("BEGIN");
+    await client!.query(
+      "INSERT INTO scorecards(id,assignment_id,round_id,team_favor_id,team_contra_id) VALUES('sc-bad-judges','a1','r1','t1','t2')",
+    );
+    let commitError: unknown;
+    try {
+      await client!.query("COMMIT");
+    } catch (error) {
+      commitError = error;
+      await client!.query("ROLLBACK").catch(() => undefined);
+    }
+    expect(commitError).toMatchObject({ code: "23514" });
   });
 
   it("allows an atomic swap of physical rooms in the same round", async () => {
