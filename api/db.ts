@@ -3,8 +3,8 @@ import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 let cachedClient: NeonQueryFunction<false, false> | undefined;
 
 function getConnectionString(): string {
-  const value = process.env.DATABASE_URL?.trim();
-  if (!value) throw new Error("Falta DATABASE_URL para conectar con Neon PostgreSQL.");
+  const value = (process.env.NEON_DATABASE_URL || process.env.DATABASE_URL)?.trim();
+  if (!value) throw new Error("Falta NEON_DATABASE_URL (o DATABASE_URL) para conectar con Neon PostgreSQL.");
   return value;
 }
 
@@ -23,5 +23,5 @@ export async function checkDatabase(): Promise<{ ok: true; serverTime: string }>
 }
 
 export function databaseConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL?.trim());
+  return Boolean((process.env.NEON_DATABASE_URL || process.env.DATABASE_URL)?.trim());
 }
