@@ -509,11 +509,6 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
       await persistAssignments(client, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
         data.rows.Salas, data.rows.Cronometros, Boolean(replacements.Equipos));
     }
-    if (replacements.Equipos && replacements.Formatos) {
-      const formatIds = replacements.Formatos.map((row) => str(row.id));
-      if (formatIds.length) await client.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [formatIds]);
-      else await client.query("DELETE FROM format_presets");
-    }
     if (replacements.Config) {
       const config = replacements.Config;
       if (!same(parseJson(getConfig(config, "institutions"), []), parseJson(getConfig(data.rows.Config, "institutions"), []))) {
@@ -545,6 +540,11 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
         if (roundIds.length) await client.query("DELETE FROM rounds WHERE NOT (id = ANY($1::text[]))", [roundIds]);
         else await client.query("DELETE FROM rounds");
       }
+    }
+    if (replacements.Equipos && replacements.Formatos) {
+      const formatIds = replacements.Formatos.map((row) => str(row.id));
+      if (formatIds.length) await client.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [formatIds]);
+      else await client.query("DELETE FROM format_presets");
     }
     if (appendEvent) await persistEvent(client, appendEvent);
     await client.query("COMMIT");
