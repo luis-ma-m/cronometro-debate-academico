@@ -374,7 +374,13 @@ async function persistPhysicalRooms(client: PoolClient, rows: SheetRow[]): Promi
 
 async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers: SheetRow[], oldRooms: SheetRow[], oldTimers: SheetRow[], forceRelations = false): Promise<void> {
   const timerById = new Map(timers.map((row) => [str(row.roomId), row]));
-  const scoredIdsResult = forceRelations ? await client.query("SELECT assignment_id FROM scorecards") : null;
+  const needsScoredCheck = forceRelations || rooms.some((row) => {
+    const oldRoom = getRow(oldRooms, str(row.id));
+    return !oldRoom ||
+      !same(parseJson(oldRoom.phases, []), parseJson(row.phases, [])) ||
+      !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
+  });
+  const scoredIdsResult = needsScoredCheck ? await client.query("SELECT assignment_id FROM scorecards") : null;
   const scoredAssignmentIds = new Set((scoredIdsResult?.rows || []).map((row) => str(row.assignment_id)));
   for (const row of rooms) {
     const id = str(row.id);
