@@ -501,6 +501,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
       // Release derived cross-side claims and judge slots before a full roster
       // replacement; the assignment triggers rebuild them transactionally.
       await client.query("DELETE FROM round_team_claims");
+      await client.query("DELETE FROM round_room_claims");
       await client.query("DELETE FROM assignment_judges");
     }
     if (replacements.Salas || replacements.Cronometros) {
