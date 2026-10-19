@@ -497,6 +497,11 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     if (replacements.Equipos && replacements.Jueces) await persistIncompatibilities(client, replacements.Equipos, replacements.Jueces);
     if (replacements.SalasFisicas) await persistPhysicalRooms(client, replacements.SalasFisicas);
     if (replacements.Formatos) await persistFormats(client, replacements.Formatos);
+    if (replacements.Equipos && replacements.Formatos) {
+      const formatIds = replacements.Formatos.map((row) => str(row.id));
+      if (formatIds.length) await client.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [formatIds]);
+      else await client.query("DELETE FROM format_presets");
+    }
     if (replacements.Equipos) {
       // Release derived cross-side claims and judge slots before a full roster
       // replacement; the assignment triggers rebuild them transactionally.
