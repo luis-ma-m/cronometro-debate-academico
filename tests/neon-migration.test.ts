@@ -135,6 +135,7 @@ describe("Neon migration artifacts", () => {
     expect(api).toContain("idempotencyResponse: response");
     expect(clientApi).toContain("expectedActivationRevision?: number");
     expect(app).toContain("effectivePreview.activationRevision");
+    expect(app).toContain("refreshedPreview.activationRevision > preview.activationRevision");
   });
 
 
