@@ -90,8 +90,8 @@ export interface RoundActivationPreview {
 
 export const getRoundActivationPreview = (token: string, roundId: string) =>
   apiCall<RoundActivationPreview>('getRoundActivationPreview', { token, roundId });
-export const activateRound = (token: string, roundId: string, force = false) =>
-  apiCall<Tournament>('activateRound', { token, roundId, force });
+export const activateRound = (token: string, roundId: string, force = false, expectedActivationRevision?: number) =>
+  apiCall<Tournament>('activateRound', { token, roundId, force, expectedActivationRevision });
 export const updateTimer = (
   roomId: string,
   action: TimerAction,
