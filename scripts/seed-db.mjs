@@ -32,8 +32,15 @@ try {
       [phase[0], i, phase[1], phase[2], phase[3], phase[4], phase[5], phase[6]],
     );
   }
-  await client.query("INSERT INTO rounds (id,number,name,is_active,score_type,default_format_id) VALUES ('round-1',1,'Ronda 1',true,'qualifying','format-ledu') ON CONFLICT (id) DO NOTHING");
-  await client.query("UPDATE tournament_settings SET active_round_id=COALESCE(active_round_id,'round-1') WHERE id=1");
+  await client.query("INSERT INTO rounds (id,number,name,is_active,score_type,default_format_id) VALUES ('round-1',1,'Ronda 1',false,'qualifying','format-ledu') ON CONFLICT (id) DO NOTHING");
+  const settings = await client.query("SELECT active_round_id FROM tournament_settings WHERE id=1");
+  if (!settings.rows[0]?.active_round_id) {
+    const activeRound = await client.query("SELECT id FROM rounds WHERE is_active=true LIMIT 1");
+    const activeRoundId = activeRound.rows[0]?.id || "round-1";
+    await client.query("UPDATE rounds SET is_active=false WHERE is_active=true");
+    await client.query("UPDATE rounds SET is_active=true WHERE id=$1", [activeRoundId]);
+    await client.query("UPDATE tournament_settings SET active_round_id=$1 WHERE id=1", [activeRoundId]);
+  }
   await client.query("INSERT INTO score_categories (id,name,category_order) VALUES ('form','Forma',0),('evidence','Evidencias',1),('rebuttal','Refutaciones',2) ON CONFLICT (id) DO NOTHING");
   await client.query("COMMIT");
   console.log("Seed LEDU ejecutado de forma idempotente; no se eliminaron datos.");
