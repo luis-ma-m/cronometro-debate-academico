@@ -1,7 +1,7 @@
 import { Client } from "@neondatabase/serverless";
 
-const connectionString = process.env.DATABASE_URL?.trim();
-if (!connectionString) throw new Error("Falta DATABASE_URL.");
+const connectionString = (process.env.NEON_DATABASE_URL || process.env.DATABASE_URL)?.trim();
+if (!connectionString) throw new Error("Falta NEON_DATABASE_URL (o DATABASE_URL).");
 const phases = [
   ["ledu-01","Exposición inicial","favor","Equipo a favor",240,"opening",[60,30,10]],
   ["ledu-02","Examen cruzado","contra","En contra pregunta a A favor",120,"cross-examination",[30,10]],
