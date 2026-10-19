@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured } from "./db.js";
-import { loadPostgresSheetData, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
+import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
 import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
@@ -302,7 +302,7 @@ async function requireSession(tokenValue: unknown): Promise<void> {
 
 async function roomControllerToken(p: Record<string, unknown>): Promise<{ token: string }> {
   await requireSession(p.token);
-  return withLock(WRITE_LOCK, async () => {
+  return withLock("database-transaction", async () => {
     const tournament = tournamentFromData(await loadSheetData(true));
     const input = str(p.roomId).toLocaleLowerCase("es-ES");
     const physical = tournament.physicalRooms.find((item) =>
@@ -373,7 +373,7 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
 }
 
 async function saveTournament(payload: Record<string, unknown>): Promise<Tournament> {
-  return withLock(WRITE_LOCK, async () => {
+  return withLock("database-transaction", async () => {
     const data = await loadSheetData(true);
     const current = tournamentFromData(data);
     if (num(payload.expectedRevision) !== current.revision) {
@@ -513,7 +513,7 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
   const roundId = str(payload.roundId);
   const force = payload.force === true || String(payload.force).toLowerCase() === "true";
   if (!roundId) throw new ApiError("INVALID_ROUND", "Selecciona una ronda para activar.");
-  return withLock(WRITE_LOCK, async () => {
+  return withLock("database-transaction", async () => {
     const data = await loadSheetData(true);
     const tournament = tournamentFromData(data);
     const targetRound = tournament.rounds.find((item) => item.id === roundId);
@@ -600,7 +600,7 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
 
 
 async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tournament> {
-  return withLock(WRITE_LOCK, async () => {
+  return withLock("database-transaction", async () => {
     const data = await loadSheetData(true);
     const current = tournamentFromData(data);
     if (num(payload.expectedRevision) !== current.revision) {
@@ -709,23 +709,33 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
   if (!roomSlugInput || !["start", "pause", "reset", "next", "previous", "finish"].includes(action)) {
     throw new ApiError("INVALID_ACTION", "La acción de cronómetro o el identificador de sala no son válidos.");
   }
-  return withLock(WRITE_LOCK, async () => {
+  return withLock("room-timer", async () => {
     const data = await loadSheetData(true);
     const tournament = tournamentFromData(data);
     const physical = tournament.physicalRooms.find((item) =>
       item.slug.toLocaleLowerCase("es-ES") === roomSlugInput.toLocaleLowerCase("es-ES") ||
       item.id.toLocaleLowerCase("es-ES") === roomSlugInput.toLocaleLowerCase("es-ES"));
     if (!physical) throw new ApiError("ROOM_NOT_FOUND", "No se encuentra esa sala física.", 404);
-    const activeRoundId = tournament.activeRoundId || tournament.rounds.find((round) => round.active)?.id || "";
-    const room = tournament.rooms.find((item) => item.physicalRoomId === physical.id && item.roundId === activeRoundId);
-    if (!room) throw new ApiError("NO_ASSIGNMENT", "Esta sala no tiene debate asignado en la ronda activa.", 409);
-    if (str(payload.assignmentId) !== room.id || num(payload.expectedActivationRevision) !== tournament.activationRevision) {
-      throw new ApiError("STALE_ASSIGNMENT", "La ronda o asignación ha cambiado. Se han recargado los datos; vuelve a intentarlo.", 409);
-    }
+
     const controlKey = str(payload.controlKey);
     const expectedToken = await redisCommand(["GET", "ledu:room-control:" + sha256(physical.id)]);
     if (!controlKey || typeof expectedToken !== "string" || !safeEquals(controlKey, expectedToken)) {
       throw new ApiError("UNAUTHORIZED", "Abre esta sala desde el panel de organización para controlar el cronómetro.", 401);
+    }
+
+    // A deterministic key makes a retried request return the already committed
+    // response, even if the first HTTP response was lost after COMMIT.
+    const requestedAssignmentId = str(payload.assignmentId);
+    const idempotencyScope = "timer:" + physical.id + ":" + requestedAssignmentId;
+    const idempotencyKey = sha256([idempotencyScope, str(payload.expectedRevision), action].join(":"));
+    const previousResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+    if (previousResponse !== null) return previousResponse;
+
+    const activeRoundId = tournament.activeRoundId || tournament.rounds.find((round) => round.active)?.id || "";
+    const room = tournament.rooms.find((item) => item.physicalRoomId === physical.id && item.roundId === activeRoundId);
+    if (!room) throw new ApiError("NO_ASSIGNMENT", "Esta sala no tiene debate asignado en la ronda activa.", 409);
+    if (requestedAssignmentId !== room.id || num(payload.expectedActivationRevision) !== tournament.activationRevision) {
+      throw new ApiError("STALE_ASSIGNMENT", "La ronda o asignación ha cambiado. Se han recargado los datos; vuelve a intentarlo.", 409);
     }
     if (payload.expectedRevision === undefined || num(payload.expectedRevision) !== room.timer.revision) {
       throw new ApiError("REVISION_CONFLICT", "El cronómetro cambió en otro dispositivo. Actualiza el estado.", 409);
@@ -738,11 +748,7 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
       if (!room.teamFavorId || !room.teamContraId || room.teamFavorId === room.teamContraId || room.judgeIds.length < (tournament.minimumJudgesPerRoom || 1)) {
         throw new ApiError("INVALID_ASSIGNMENT", "Asigna dos equipos distintos y al menos " + (tournament.minimumJudgesPerRoom || 1) + " juez(es) antes de iniciar.");
       }
-      const conflicts = findAssignmentConflicts({
-        teams: tournament.teams,
-        judges: tournament.judges,
-        rooms: [room],
-      });
+      const conflicts = findAssignmentConflicts({ teams: tournament.teams, judges: tournament.judges, rooms: [room] });
       if (conflicts.length) {
         const code = conflicts.some((conflict) => conflict.type === "institution")
           ? "INSTITUTION_CONFLICT"
@@ -777,6 +783,7 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
     if (existingRoomIndex < 0) throw new ApiError("SCHEMA_MISMATCH", "La asignación no tiene una fila persistida.", 503);
     roomRows[existingRoomIndex] = newRoomRow;
 
+    const response = publicRoomPayload({ ...tournament, rooms }, physical.slug);
     const phase = room.phases[previousIndex];
     const eventNames: Record<TimerAction, string> = {
       start: beforeStatus === "paused" ? "resumed" : "started",
@@ -796,10 +803,20 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
       previousIndex,
       eventNames[action],
       Math.round(elapsed),
-      JSON.stringify({ action, fromStatus: beforeStatus, toStatus: nextTimer.status, revision: nextTimer.revision, activationRevision: tournament.activationRevision }),
+      JSON.stringify({
+        action, fromStatus: beforeStatus, toStatus: nextTimer.status,
+        revision: nextTimer.revision, activationRevision: tournament.activationRevision,
+        idempotencyKey, idempotencyScope, idempotencyResponse: response,
+      }),
     ];
-    await writeTables(data, { Salas: roomRows, Cronometros: timers }, event);
-    return publicRoomPayload({ ...tournament, rooms }, physical.slug);
+    try {
+      await writeTables(data, { Salas: roomRows, Cronometros: timers }, event);
+    } catch (error) {
+      const committedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+      if (committedResponse !== null) return committedResponse;
+      throw error;
+    }
+    return response;
   });
 }
 
