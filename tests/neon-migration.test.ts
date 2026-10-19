@@ -67,4 +67,18 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain('await client.query("ROLLBACK")');
   });
 
+
+  it("normalizes incompatibilities into foreign-key-backed relationships", async () => {
+    const sql = await readFile(resolve("db/migrations/0003_normalize_incompatibilities.sql"), "utf8");
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS team_judge_incompatibilities");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS judge_incompatibilities");
+    expect(sql).toContain("ALTER TABLE teams DROP COLUMN incompatible_judge_ids");
+    expect(sql).toContain("ALTER TABLE judges DROP COLUMN incompatible_judge_ids");
+    expect(sql).toContain("judge incompatibilities must be reciprocal");
+    expect(store).toContain("FROM team_judge_incompatibilities");
+    expect(store).toContain("FROM judge_incompatibilities");
+    expect(store).toContain("persistIncompatibilities");
+  });
+
 });
