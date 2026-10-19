@@ -44,7 +44,7 @@ El runner bloquea por defecto las migraciones desde el runtime Vercel Production
 - La configuración usa `tournament_settings.revision` como compare-and-swap.
 - Las transiciones del cronómetro actualizan `room_assignments` con condición sobre `timer_revision`, de modo que dos solicitudes basadas en la misma revisión no pueden sobrescribirse silenciosamente.
 - La transición y su evento de auditoría se guardan en la misma transacción.
-- Una clave determinista basada en sala, asignación, acción y revisión esperada permite devolver la respuesta confirmada si se repite una transición después de perder la respuesta HTTP.
+- Las escrituras de torneo y actas usan claves deterministas basadas en la revisión esperada y el contenido de la petición; la activación usa la revisión de activación, ronda y modo forzado; el cronómetro usa sala, asignación, acción y revisión esperada. Los reintentos devuelven la respuesta confirmada sin repetir efectos.
 - La activación de ronda se guarda en una transacción que contiene la revisión global, la ronda activa, las asignaciones afectadas, los cronómetros y el evento.
 - Se mantiene la validación de dominio del backend para incompatibilidades, jueces mínimos, estado finalizado, rondas clasificatorias y puntuaciones; las restricciones SQL refuerzan las referencias y los invariantes relacionales.
 
