@@ -6,12 +6,18 @@ CREATE OR REPLACE FUNCTION prevent_scored_assignment_judge_changes()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE assignment_key text;
 BEGIN
-  assignment_key := CASE WHEN TG_OP = 'DELETE' THEN OLD.assignment_id ELSE NEW.assignment_id END;
-  IF EXISTS (SELECT 1 FROM scorecards sc WHERE sc.assignment_id = assignment_key) THEN
+  IF TG_OP = 'DELETE' THEN
+    assignment_key := OLD.assignment_id;
+  ELSE
+    assignment_key := NEW.assignment_id;
+  END IF;
+  IF EXISTS (SELECT 1 FROM scorecards sc WHERE sc.assignment_id = assignment_key)
+     OR (TG_OP = 'UPDATE' AND EXISTS (SELECT 1 FROM scorecards sc WHERE sc.assignment_id = OLD.assignment_id)) THEN
     RAISE EXCEPTION 'judges of a scored assignment are immutable until its scorecard is removed'
       USING ERRCODE = '23514';
   END IF;
-  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
 END;
 $$;
 
@@ -24,12 +30,18 @@ CREATE OR REPLACE FUNCTION prevent_scored_assignment_phase_changes()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE assignment_key text;
 BEGIN
-  assignment_key := CASE WHEN TG_OP = 'DELETE' THEN OLD.assignment_id ELSE NEW.assignment_id END;
-  IF EXISTS (SELECT 1 FROM scorecards sc WHERE sc.assignment_id = assignment_key) THEN
+  IF TG_OP = 'DELETE' THEN
+    assignment_key := OLD.assignment_id;
+  ELSE
+    assignment_key := NEW.assignment_id;
+  END IF;
+  IF EXISTS (SELECT 1 FROM scorecards sc WHERE sc.assignment_id = assignment_key)
+     OR (TG_OP = 'UPDATE' AND EXISTS (SELECT 1 FROM scorecards sc WHERE sc.assignment_id = OLD.assignment_id)) THEN
     RAISE EXCEPTION 'phase snapshots of a scored assignment are immutable until its scorecard is removed'
       USING ERRCODE = '23514';
   END IF;
-  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+  RETURN NEW;
 END;
 $$;
 
