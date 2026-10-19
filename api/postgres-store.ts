@@ -287,17 +287,23 @@ async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolea
        active=EXCLUDED.active,updated_at=now()`,
       [str(row.id), str(row.name).trim(), institution, bool(row.active)],
     );
-    const incompatibilities = parseStringArray(row.incompatibleJudgeIds);
-    if (judges) {
-      await client.query("DELETE FROM judge_incompatibilities WHERE judge_id=$1", [str(row.id)]);
-      for (const incompatibleJudgeId of incompatibilities) {
-        await client.query("INSERT INTO judge_incompatibilities(judge_id,incompatible_judge_id) VALUES($1,$2)", [str(row.id), incompatibleJudgeId]);
-      }
-    } else {
-      await client.query("DELETE FROM team_judge_incompatibilities WHERE team_id=$1", [str(row.id)]);
-      for (const judgeId of incompatibilities) {
-        await client.query("INSERT INTO team_judge_incompatibilities(team_id,judge_id) VALUES($1,$2)", [str(row.id), judgeId]);
-      }
+
+  }
+}
+
+async function persistIncompatibilities(client: PoolClient, teams: SheetRow[], judges: SheetRow[]): Promise<void> {
+  // Rebuild both relation sets only after every referenced team and judge exists.
+  // This is one transaction, so no caller can observe an intermediate empty set.
+  await client.query("DELETE FROM team_judge_incompatibilities");
+  await client.query("DELETE FROM judge_incompatibilities");
+  for (const team of teams) {
+    for (const judgeId of parseStringArray(team.incompatibleJudgeIds)) {
+      await client.query("INSERT INTO team_judge_incompatibilities(team_id,judge_id) VALUES($1,$2)", [str(team.id), judgeId]);
+    }
+  }
+  for (const judge of judges) {
+    for (const incompatibleJudgeId of parseStringArray(judge.incompatibleJudgeIds)) {
+      await client.query("INSERT INTO judge_incompatibilities(judge_id,incompatible_judge_id) VALUES($1,$2)", [str(judge.id), incompatibleJudgeId]);
     }
   }
 }
@@ -488,6 +494,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     if (replacements.Rondas) await persistRounds(client, replacements.Rondas);
     if (replacements.Equipos) await persistTeams(client, replacements.Equipos, false);
     if (replacements.Jueces) await persistTeams(client, replacements.Jueces, true);
+    if (replacements.Equipos && replacements.Jueces) await persistIncompatibilities(client, replacements.Equipos, replacements.Jueces);
     if (replacements.SalasFisicas) await persistPhysicalRooms(client, replacements.SalasFisicas);
     if (replacements.Formatos) await persistFormats(client, replacements.Formatos);
     if (replacements.Equipos) {
