@@ -124,4 +124,17 @@ describe("Neon migration artifacts", () => {
     expect(api).not.toContain("previousCard.updatedAt !== card.updatedAt");
   });
 
+
+  it("uses revision-scoped idempotency for configuration, scoring and activation writes", async () => {
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    const clientApi = await readFile(resolve("src/api.ts"), "utf8");
+    const app = await readFile(resolve("src/App.tsx"), "utf8");
+    expect(api).toContain('const idempotencyScope = "saveTournament:" + expectedRevision');
+    expect(api).toContain('const idempotencyScope = "saveScoreConfig:" + expectedRevision');
+    expect(api).toContain('const idempotencyScope = expectedActivationRevision === null ? "" : "activateRound:" + expectedActivationRevision');
+    expect(api).toContain("idempotencyResponse: response");
+    expect(clientApi).toContain("expectedActivationRevision?: number");
+    expect(app).toContain("effectivePreview.activationRevision");
+  });
+
 });
