@@ -608,6 +608,29 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
 
 
 
+function scorecardComparable(card: RoundScorecard): string {
+  return JSON.stringify({
+    id: card.id,
+    roundId: card.roundId,
+    roomId: card.roomId,
+    teamFavorId: card.teamFavorId,
+    teamContraId: card.teamContraId,
+    judges: card.judges.map((judge) => judge.judgeId).sort(),
+    teams: card.teams.map((team) => ({
+      teamId: team.teamId,
+      categoryScores: Object.fromEntries(Object.entries(team.categoryScores || {}).sort(([a], [b]) => a.localeCompare(b))),
+      minorFaults: team.minorFaults,
+      majorFaults: team.majorFaults,
+    })).sort((a, b) => a.teamId.localeCompare(b.teamId)),
+    speakers: card.speakers.map((speaker) => ({
+      speakerId: speaker.speakerId,
+      teamId: speaker.teamId,
+      position: speaker.position,
+      score: speaker.score,
+    })).sort((a, b) => [a.teamId, a.position, a.speakerId].join(":").localeCompare([b.teamId, b.position, b.speakerId].join(":"))),
+  });
+}
+
 async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tournament> {
   return withLock("database-transaction", async () => {
     const data = await loadSheetData(true);
@@ -652,7 +675,7 @@ async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tourna
       savedIds.add(card.id);
       savedRoomIds.add(card.roomId);
       const previousCard = previous.scorecards.find((item) => item.id === card.id);
-      const changed = !previousCard || previousCard.updatedAt !== card.updatedAt;
+      const changed = !previousCard || scorecardComparable(previousCard) !== scorecardComparable(card);
       if (changed) {
         const issues = validateScorecard(card, candidate.categories, {
           rounds: current.rounds,
