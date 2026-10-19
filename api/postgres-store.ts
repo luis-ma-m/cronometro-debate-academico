@@ -47,8 +47,9 @@ function rawFromRows(rows: SheetRow[], headers: readonly string[]): unknown[][] 
 }
 
 async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
-  const [settingsQ, roundsQ, teamsQ, judgesQ, speakersQ, physicalQ, formatsQ, formatPhasesQ, assignmentsQ, assignmentJudgesQ, assignmentPhasesQ, categoriesQ, cardsQ, teamScoresQ, categoryScoresQ, cardJudgesQ, speakerScoresQ, eventsQ] = await Promise.all([
+  const [settingsQ, institutionsQ, roundsQ, teamsQ, judgesQ, speakersQ, physicalQ, formatsQ, formatPhasesQ, assignmentsQ, assignmentJudgesQ, assignmentPhasesQ, categoriesQ, cardsQ, teamScoresQ, categoryScoresQ, cardJudgesQ, speakerScoresQ, eventsQ] = await Promise.all([
     client.query("SELECT * FROM tournament_settings WHERE id=1"),
+    client.query("SELECT * FROM institutions ORDER BY name"),
     client.query("SELECT * FROM rounds ORDER BY number"),
     client.query("SELECT t.*, i.name AS institution FROM teams t LEFT JOIN institutions i ON i.id=t.institution_id ORDER BY t.name"),
     client.query("SELECT j.*, i.name AS institution FROM judges j LEFT JOIN institutions i ON i.id=j.institution_id ORDER BY j.name"),
@@ -70,6 +71,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const settings = settingsQ.rows[0] as Record<string, unknown> | undefined;
   if (!settings) throw new ApiError("DATABASE_NOT_INITIALIZED", "Neon está conectado, pero falta inicializar el esquema y los valores base. Ejecuta db:migrate y db:seed en la base correcta.", 503);
   const settingsJson = settings ? (settings.settings as Record<string, unknown> || {}) : {};
+  const institutions = institutionsQ.rows as Record<string, unknown>[];
   const rounds = roundsQ.rows as Record<string, unknown>[];
   const teams = teamsQ.rows as Record<string, unknown>[];
   const judges = judgesQ.rows as Record<string, unknown>[];
@@ -133,7 +135,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     { key: "revision", value: str(settings?.revision ?? 1) },
     { key: "updatedAt", value: str(millis(settings?.updated_at)) },
     { key: "minimumJudgesPerRoom", value: str(settings?.minimum_judges_per_room ?? 1) },
-    { key: "institutions", value: JSON.stringify([...new Set([...teams, ...judges].map((row) => str(row.institution).trim()).filter(Boolean))].sort()) },
+    { key: "institutions", value: JSON.stringify(institutions.map((row) => str(row.name))) },
     { key: "speakers", value: JSON.stringify(speakers.map((row) => ({ id: str(row.id), teamId: str(row.team_id), name: str(row.name) }))) },
     { key: "formatPhases", value: JSON.stringify(parseJson(settingsJson.formatPhases, defaultPhases())) },
     { key: "scoring", value: JSON.stringify(scoring) },
@@ -236,6 +238,16 @@ async function persistConfig(client: PoolClient, oldRows: SheetRow[], newRows: S
       if (active.rowCount !== 1) throw new ApiError("ROUND_NOT_FOUND", "La ronda activa no existe.", 404);
     }
   }
+}
+
+async function persistInstitutions(client: PoolClient, value: string): Promise<void> {
+  const names = parseJson<unknown>(value, []);
+  if (!Array.isArray(names)) throw new ApiError("INVALID_INSTITUTIONS", "El catálogo de instituciones debe ser una lista.", 400);
+  const normalized = [...new Set(names.filter((name): name is string => typeof name === "string").map((name) => name.trim()).filter(Boolean))];
+  for (const name of normalized) await upsertInstitution(client, name);
+  const ids = normalized.map(institutionId);
+  if (ids.length) await client.query("DELETE FROM institutions WHERE NOT (id = ANY($1::text[]))", [ids]);
+  else await client.query("DELETE FROM institutions");
 }
 
 async function upsertInstitution(client: PoolClient, nameValue: unknown): Promise<string | null> {
@@ -454,6 +466,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     }
     if (replacements.Config) {
       const config = replacements.Config;
+      await persistInstitutions(client, getConfig(config, "institutions"));
       await persistSpeakers(client, getConfig(config, "speakers"));
       await persistScoring(client, getConfig(config, "scoring"));
     }
