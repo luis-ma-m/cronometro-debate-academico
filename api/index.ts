@@ -448,7 +448,17 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
       SalasFisicas: tournament.physicalRooms.map((room) => ({ ...room, updatedAt: now })),
       Formatos: tournament.formats.map((format) => ({ ...format, phases: JSON.stringify(format.phases) })),
     };
-    await writeTables(data, replacements);
+    await writeTables(data, replacements, [
+      randomBytes(16).toString("hex"),
+      new Date(now).toISOString(),
+      "",
+      "",
+      "",
+      "",
+      "tournament_saved",
+      "",
+      JSON.stringify({ revision: nextRevision, teams: tournament.teams.length, judges: tournament.judges.length, rooms: finalRooms.length, rounds: tournament.rounds.length }),
+    ]);
 
     const newPhysicalIds = new Set(tournament.physicalRooms.map((room) => room.id));
     const removedPhysicalIds = data.rows.SalasFisicas.map((row) => str(row.id)).filter((id) => id && !newPhysicalIds.has(id));
