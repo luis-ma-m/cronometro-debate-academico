@@ -89,4 +89,14 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("NEW.physical_room_id IS DISTINCT FROM OLD.physical_room_id");
   });
 
+
+  it("normalizes room claims so full saves can swap physical rooms atomically", async () => {
+    const sql = await readFile(resolve("db/migrations/0005_normalize_assignment_claims.sql"), "utf8");
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS round_room_claims");
+    expect(sql).toContain("DROP CONSTRAINT IF EXISTS room_assignments_round_id_physical_room_id_key");
+    expect(sql).toContain("DROP INDEX IF EXISTS room_assignments_team_favor_round_uq");
+    expect(store).toContain('DELETE FROM round_room_claims');
+  });
+
 });
