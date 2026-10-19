@@ -78,9 +78,12 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
   });
 
   it("prevents changing teams or physical room after an act has been recorded", async () => {
+    await client!.query("BEGIN");
     await client!.query(
       "INSERT INTO scorecards(id,assignment_id,round_id,team_favor_id,team_contra_id) VALUES('sc-good','a1','r1','t1','t2')",
     );
+    await client!.query("INSERT INTO scorecard_judges(scorecard_id,judge_id) VALUES('sc-good','j1')");
+    await client!.query("COMMIT");
     await expect(client!.query("UPDATE room_assignments SET team_favor_id='t3' WHERE id='a1'"))
       .rejects.toMatchObject({ code: "23514" });
     await expect(client!.query("UPDATE room_assignments SET physical_room_id='p1' WHERE id='a1'"))
