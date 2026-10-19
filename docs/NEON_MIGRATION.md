@@ -62,6 +62,12 @@ La base refuerza la asignación única por sala/ronda, un equipo por ronda indep
 
 La activación conserva el rechazo de debates pendientes salvo confirmación explícita, la pausa de cronómetros salientes, el reinicio de asignaciones entrantes, el incremento de `activationRevision` y el anuncio de veinte segundos.
 
+## Pruebas de integración Neon
+
+`tests/neon.integration.test.ts` ejecuta las migraciones completas y verifica restricciones reales de PostgreSQL, swaps de salas, asignación de jueces, consistencia de actas, revisiones de cronómetro y rollback atómico. Por seguridad, queda omitido en CI normal y solo se activa si se configuran ambas variables `NEON_TEST_DATABASE_URL` y `NEON_TEST_DATABASE_ISOLATED=1`.
+
+Ejecuta `npm test` únicamente con una base de test desechable y aislada. La suite crea y elimina un esquema temporal aleatorio; no habilites el flag para Production ni para una base con datos que quieras conservar. La integración real aún debe ejecutarse explícitamente antes del corte.
+
 ## Criterios pendientes antes del corte
 
 1. Aplicar migraciones y seed en una base Neon de test aislada y ejecutar pruebas funcionales reales de ida y vuelta para todas las entidades.
