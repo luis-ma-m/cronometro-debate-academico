@@ -3,14 +3,14 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { Client } from "@neondatabase/serverless";
 
-const connectionString = process.env.DATABASE_URL?.trim();
+const connectionString = (process.env.NEON_DATABASE_URL || process.env.DATABASE_URL)?.trim();
 if (!connectionString) {
-  console.error("Falta DATABASE_URL. Configura una conexión PostgreSQL privada antes de migrar.");
+  console.error("Falta NEON_DATABASE_URL (o DATABASE_URL). Configura una conexión PostgreSQL privada antes de migrar.");
   process.exit(1);
 }
 const url = new URL(connectionString);
 if (!["postgres:", "postgresql:"].includes(url.protocol)) {
-  console.error("DATABASE_URL debe ser una URL PostgreSQL válida.");
+  console.error("NEON_DATABASE_URL/DATABASE_URL debe ser una URL PostgreSQL válida.");
   process.exit(1);
 }
 if (process.env.VERCEL_ENV === "production" && process.env.ALLOW_PRODUCTION_DB_MIGRATIONS !== "1") {
