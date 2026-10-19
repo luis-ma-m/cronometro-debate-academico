@@ -373,9 +373,14 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
 
 async function saveTournament(payload: Record<string, unknown>): Promise<Tournament> {
   return withLock("database-transaction", async () => {
+    const expectedRevision = num(payload.expectedRevision);
+    const idempotencyScope = "saveTournament:" + expectedRevision;
+    const idempotencyKey = sha256("saveTournament:" + expectedRevision + ":" + sha256(JSON.stringify(payload.tournament)));
+    const cachedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+    if (cachedResponse !== null) return cachedResponse as Tournament;
     const data = await loadSheetData(true);
     const current = tournamentFromData(data);
-    if (num(payload.expectedRevision) !== current.revision) {
+    if (expectedRevision !== current.revision) {
       throw new ApiError("REVISION_CONFLICT", "El torneo cambió en otro dispositivo. Actualiza los datos antes de guardar.", 409);
     }
     validateTournamentInput(payload.tournament);
@@ -448,17 +453,33 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
       SalasFisicas: tournament.physicalRooms.map((room) => ({ ...room, updatedAt: now })),
       Formatos: tournament.formats.map((format) => ({ ...format, phases: JSON.stringify(format.phases) })),
     };
-    await writeTables(data, replacements, [
-      randomBytes(16).toString("hex"),
-      new Date(now).toISOString(),
-      "",
-      "",
-      "",
-      "",
-      "tournament_saved",
-      "",
-      JSON.stringify({ revision: nextRevision, teams: tournament.teams.length, judges: tournament.judges.length, rooms: finalRooms.length, rounds: tournament.rounds.length }),
-    ]);
+    const response = tournamentFromData({ ...data, rows: { ...data.rows, ...replacements } });
+    try {
+      await writeTables(data, replacements, [
+        randomBytes(16).toString("hex"),
+        new Date(now).toISOString(),
+        "",
+        "",
+        "",
+        "",
+        "tournament_saved",
+        "",
+        JSON.stringify({
+          revision: nextRevision,
+          teams: tournament.teams.length,
+          judges: tournament.judges.length,
+          rooms: finalRooms.length,
+          rounds: tournament.rounds.length,
+          idempotencyKey,
+          idempotencyScope,
+          idempotencyResponse: response,
+        }),
+      ]);
+    } catch (error) {
+      const committedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+      if (committedResponse !== null) return committedResponse as Tournament;
+      throw error;
+    }
 
     const newPhysicalIds = new Set(tournament.physicalRooms.map((room) => room.id));
     const removedPhysicalIds = data.rows.SalasFisicas.map((row) => str(row.id)).filter((id) => id && !newPhysicalIds.has(id));
@@ -466,7 +487,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
       redisCommand(["DEL", "ledu:room-control:" + sha256(id)]).catch(() => undefined)
     ));
 
-    return tournamentFromData(await loadSheetData(true));
+    return response;
   });
 }
 
