@@ -74,8 +74,8 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const rounds = roundsQ.rows as Record<string, unknown>[];
   const teamIncompatibilities = teamIncompatQ.rows as Record<string, unknown>[];
   const judgeIncompatibilities = judgeIncompatQ.rows as Record<string, unknown>[];
-  const teams = (teamsQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: teamIncompatibilities.filter((item) => str(item.team_id) === str(row.id)).map((item) => str(item.judge_id)) }));
-  const judges = (judgesQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: judgeIncompatibilities.filter((item) => str(item.judge_id) === str(row.id)).map((item) => str(item.incompatible_judge_id)) }));
+  const teams: Record<string, unknown>[] = (teamsQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: teamIncompatibilities.filter((item) => str(item.team_id) === str(row.id)).map((item) => str(item.judge_id)) }));
+  const judges: Record<string, unknown>[] = (judgesQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: judgeIncompatibilities.filter((item) => str(item.judge_id) === str(row.id)).map((item) => str(item.incompatible_judge_id)) }));
   const speakers = speakersQ.rows as Record<string, unknown>[];
   const physicalRooms = physicalQ.rows as Record<string, unknown>[];
   const formatRows = formatsQ.rows as Record<string, unknown>[];
