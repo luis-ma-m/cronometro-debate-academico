@@ -897,6 +897,22 @@ export default function App() {
         const previewChanged = signature(refreshedPreview) !== signature(preview);
         setActivationPreview(refreshedPreview);
         if (refreshedPreview.alreadyActive) {
+          // If the activation revision advanced since this dialog was opened,
+          // a previous request may have committed while its HTTP response was
+          // lost. Refresh the committed tournament instead of asking the user
+          // to repeat an already-completed irreversible operation.
+          if (refreshedPreview.activationRevision > preview.activationRevision) {
+            const latest = await getTournament(session.token);
+            setData(latest);
+            hasUnsavedRef.current = false;
+            setHasUnsavedChanges(false);
+            setFormatDirty(false);
+            setSelectedRound(refreshedPreview.targetRoundId);
+            setActivationPreview(null);
+            setLastSyncedAt(Date.now());
+            setConnected(true);
+            return;
+          }
           setActivationPreview(null);
           setServerError('Esa ronda ya está activa.');
           return;
