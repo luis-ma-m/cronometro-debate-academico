@@ -116,4 +116,12 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("FROM scorecard_judges WHERE scorecard_id = target_scorecard_id");
   });
 
+
+  it("does not trust client timestamps to decide whether scorecards need validation", async () => {
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    expect(api).toContain("function scorecardComparable(card: RoundScorecard)");
+    expect(api).toContain("scorecardComparable(previousCard) !== scorecardComparable(card)");
+    expect(api).not.toContain("previousCard.updatedAt !== card.updatedAt");
+  });
+
 });
