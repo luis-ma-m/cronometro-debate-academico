@@ -43,6 +43,17 @@ function rawFromRows(rows: SheetRow[], headers: readonly string[]): unknown[][] 
   return [Array.from(headers), ...rows.map((row) => headers.map((header) => row[header] ?? ""))];
 }
 
+function groupByString<T extends Record<string, unknown>>(rows: T[], key: string): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) {
+    const value = str(row[key]);
+    const group = groups.get(value);
+    if (group) group.push(row);
+    else groups.set(value, [row]);
+  }
+  return groups;
+}
+
 async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const [settingsQ, institutionsQ, roundsQ, teamsQ, teamIncompatQ, judgesQ, judgeIncompatQ, speakersQ, physicalQ, formatsQ, formatPhasesQ, assignmentsQ, assignmentJudgesQ, assignmentPhasesQ, categoriesQ, cardsQ, teamScoresQ, categoryScoresQ, cardJudgesQ, speakerScoresQ, eventsQ] = await Promise.all([
     client.query("SELECT * FROM tournament_settings WHERE id=1"),
@@ -74,8 +85,10 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const rounds = roundsQ.rows as Record<string, unknown>[];
   const teamIncompatibilities = teamIncompatQ.rows as Record<string, unknown>[];
   const judgeIncompatibilities = judgeIncompatQ.rows as Record<string, unknown>[];
-  const teams: Record<string, unknown>[] = (teamsQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: teamIncompatibilities.filter((item) => str(item.team_id) === str(row.id)).map((item) => str(item.judge_id)) }));
-  const judges: Record<string, unknown>[] = (judgesQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: judgeIncompatibilities.filter((item) => str(item.judge_id) === str(row.id)).map((item) => str(item.incompatible_judge_id)) }));
+  const teamIncompatibilitiesByTeam = groupByString(teamIncompatibilities, "team_id");
+  const judgeIncompatibilitiesByJudge = groupByString(judgeIncompatibilities, "judge_id");
+  const teams: Record<string, unknown>[] = (teamsQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: (teamIncompatibilitiesByTeam.get(str(row.id)) || []).map((item) => str(item.judge_id)) }));
+  const judges: Record<string, unknown>[] = (judgesQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: (judgeIncompatibilitiesByJudge.get(str(row.id)) || []).map((item) => str(item.incompatible_judge_id)) }));
   const speakers = speakersQ.rows as Record<string, unknown>[];
   const physicalRooms = physicalQ.rows as Record<string, unknown>[];
   const formatRows = formatsQ.rows as Record<string, unknown>[];
@@ -90,34 +103,57 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const cardJudges = cardJudgesQ.rows as Record<string, unknown>[];
   const speakerScores = speakerScoresQ.rows as Record<string, unknown>[];
 
+  const teamsById = new Map(teams.map((row) => [str(row.id), row]));
+  const judgesById = new Map(judges.map((row) => [str(row.id), row]));
+  const speakersById = new Map(speakers.map((row) => [str(row.id), row]));
+  const roundsById = new Map(rounds.map((row) => [str(row.id), row]));
+  const physicalRoomsById = new Map(physicalRooms.map((row) => [str(row.id), row]));
+  const assignmentsById = new Map(assignments.map((row) => [str(row.id), row]));
+  const teamIncompatibilitiesByTeam = groupByString(teamIncompatibilities, "team_id");
+  const judgeIncompatibilitiesByJudge = groupByString(judgeIncompatibilities, "judge_id");
+  const formatPhasesByFormat = groupByString(formatPhases, "format_id");
+  const assignmentJudgesByAssignment = groupByString(assignmentJudges, "assignment_id");
+  const assignmentPhasesByAssignment = groupByString(assignmentPhases, "assignment_id");
+  const teamScoresByCard = groupByString(teamScores, "scorecard_id");
+  const categoryScoresByCardTeam = new Map<string, Record<string, unknown>[]>();
+  for (const score of categoryScores) {
+    const key = str(score.scorecard_id) + "::" + str(score.team_id);
+    const values = categoryScoresByCardTeam.get(key);
+    if (values) values.push(score);
+    else categoryScoresByCardTeam.set(key, [score]);
+  }
+  const cardJudgesByCard = groupByString(cardJudges, "scorecard_id");
+  const speakerScoresByCard = groupByString(speakerScores, "scorecard_id");
+
   const scorecards: RoundScorecard[] = cards.map((card) => {
-    const teamRows = teamScores.filter((score) => str(score.scorecard_id) === str(card.id));
+    const cardId = str(card.id);
+    const teamRows = teamScoresByCard.get(cardId) || [];
     const teamsScored = teamRows.map((score) => {
-      const categoryValues = categoryScores.filter((value) => str(value.scorecard_id) === str(card.id) && str(value.team_id) === str(score.team_id));
-      const team = teams.find((item) => str(item.id) === str(score.team_id));
+      const categoryValues = categoryScoresByCardTeam.get(cardId + "::" + str(score.team_id)) || [];
+      const team = teamsById.get(str(score.team_id));
       return {
         teamId: str(score.team_id), teamName: str(team?.name), total: num(score.total),
         minorFaults: num(score.minor_faults), majorFaults: num(score.major_faults),
         categoryScores: Object.fromEntries(categoryValues.map((value) => [str(value.category_id), num(value.score)])),
       };
     });
-    const assignment = assignments.find((item) => str(item.id) === str(card.assignment_id));
-    const round = rounds.find((item) => str(item.id) === str(card.round_id));
-    const physical = physicalRooms.find((item) => str(item.id) === str(assignment?.physical_room_id));
-    const judgesForCard = cardJudges.filter((item) => str(item.scorecard_id) === str(card.id)).map((item) => {
-      const judge = judges.find((candidate) => str(candidate.id) === str(item.judge_id));
+    const assignment = assignmentsById.get(str(card.assignment_id));
+    const round = roundsById.get(str(card.round_id));
+    const physical = physicalRoomsById.get(str(assignment?.physical_room_id));
+    const judgesForCard = (cardJudgesByCard.get(cardId) || []).map((item) => {
+      const judge = judgesById.get(str(item.judge_id));
       return { judgeId: str(item.judge_id), judgeName: str(judge?.name) };
     });
-    const speakersForCard = speakerScores.filter((item) => str(item.scorecard_id) === str(card.id)).map((item) => {
-      const speaker = speakers.find((candidate) => str(candidate.id) === str(item.speaker_id));
+    const speakersForCard = (speakerScoresByCard.get(cardId) || []).map((item) => {
+      const speaker = speakersById.get(str(item.speaker_id));
       return { speakerId: str(item.speaker_id), speakerName: str(speaker?.name), teamId: str(item.team_id), position: str(item.position) as RoundScorecard["speakers"][number]["position"], score: num(item.score) };
     });
     const favorId = str(card.team_favor_id);
     const contraId = str(card.team_contra_id);
-    const fallback = (teamId: string) => ({ teamId, teamName: str(teams.find((item) => str(item.id) === teamId)?.name), categoryScores: {}, total: 0, minorFaults: 0, majorFaults: 0 });
+    const fallback = (teamId: string) => ({ teamId, teamName: str(teamsById.get(teamId)?.name), categoryScores: {}, total: 0, minorFaults: 0, majorFaults: 0 });
     const byId = new Map(teamsScored.map((item) => [item.teamId, item]));
     return {
-      id: str(card.id), roundId: str(card.round_id), roundName: str(round?.name),
+      id: cardId, roundId: str(card.round_id), roundName: str(round?.name),
       roomId: str(card.assignment_id), roomName: str(physical?.name),
       teamFavorId: favorId, teamContraId: contraId, judges: judgesForCard,
       teams: [byId.get(favorId) || fallback(favorId), byId.get(contraId) || fallback(contraId)],
@@ -147,9 +183,9 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const teamRows = teams.map((row) => ({ id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active), incompatibleJudgeIds: JSON.stringify(parseStringArray(row.incompatible_judge_ids)) }));
   const judgeRows = judges.map((row) => ({ id: str(row.id), name: str(row.name), institution: str(row.institution), active: bool(row.active), incompatibleJudgeIds: JSON.stringify(parseStringArray(row.incompatible_judge_ids)) }));
   const physicalRows = physicalRooms.map((row) => ({ id: str(row.id), slug: str(row.slug), name: str(row.name), active: bool(row.active), createdAt: millis(row.created_at), updatedAt: millis(row.updated_at) }));
-  const formatObjects = formatRows.map((row) => ({ id: str(row.id), name: str(row.name), phases: JSON.stringify(phasesFromRows(formatPhases, str(row.id))), version: num(row.version), createdAt: millis(row.created_at), updatedAt: millis(row.updated_at) }));
+  const formatObjects = formatRows.map((row) => ({ id: str(row.id), name: str(row.name), phases: JSON.stringify(phasesFromRows(formatPhasesByFormat.get(str(row.id)) || [], str(row.id))), version: num(row.version), createdAt: millis(row.created_at), updatedAt: millis(row.updated_at) }));
   const roomRows = assignments.map((row) => {
-    const phaseRows = assignmentPhases.filter((phase) => str(phase.assignment_id) === str(row.id)).map((phase) => ({
+    const phaseRows = assignmentPhasesByAssignment.get(str(row.id)) || [].map((phase) => ({
       id: str(phase.phase_id), name: str(phase.name), side: str(phase.side), speaker: str(phase.speaker),
       durationSeconds: num(phase.duration_seconds), type: str(phase.phase_type),
       warningThresholdsSeconds: Array.isArray(phase.warning_thresholds_seconds) ? phase.warning_thresholds_seconds.map(Number) : [],
@@ -158,7 +194,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     return {
       id: str(row.id), name: str(physicalRooms.find((physical) => str(physical.id) === str(row.physical_room_id))?.name),
       roundId: str(row.round_id), teamFavorId: str(row.team_favor_id), teamContraId: str(row.team_contra_id),
-      judgeIds: JSON.stringify(assignmentJudges.filter((item) => str(item.assignment_id) === str(row.id)).map((item) => str(item.judge_id))),
+      judgeIds: JSON.stringify((assignmentJudgesByAssignment.get(str(row.id)) || []).map((item) => str(item.judge_id))),
       status: str(row.timer_status), phases: JSON.stringify(phaseRows), notes: str(row.notes),
       updatedAt: millis(row.updated_at), physicalRoomId: str(row.physical_room_id), formatId: str(row.format_id),
     };
