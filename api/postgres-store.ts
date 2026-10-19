@@ -44,12 +44,14 @@ function rawFromRows(rows: SheetRow[], headers: readonly string[]): unknown[][] 
 }
 
 async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
-  const [settingsQ, institutionsQ, roundsQ, teamsQ, judgesQ, speakersQ, physicalQ, formatsQ, formatPhasesQ, assignmentsQ, assignmentJudgesQ, assignmentPhasesQ, categoriesQ, cardsQ, teamScoresQ, categoryScoresQ, cardJudgesQ, speakerScoresQ, eventsQ] = await Promise.all([
+  const [settingsQ, institutionsQ, roundsQ, teamsQ, teamIncompatQ, judgesQ, judgeIncompatQ, speakersQ, physicalQ, formatsQ, formatPhasesQ, assignmentsQ, assignmentJudgesQ, assignmentPhasesQ, categoriesQ, cardsQ, teamScoresQ, categoryScoresQ, cardJudgesQ, speakerScoresQ, eventsQ] = await Promise.all([
     client.query("SELECT * FROM tournament_settings WHERE id=1"),
     client.query("SELECT * FROM institutions ORDER BY name"),
     client.query("SELECT * FROM rounds ORDER BY number"),
     client.query("SELECT t.*, i.name AS institution FROM teams t LEFT JOIN institutions i ON i.id=t.institution_id ORDER BY t.name"),
+    client.query("SELECT team_id,judge_id FROM team_judge_incompatibilities ORDER BY team_id,judge_id"),
     client.query("SELECT j.*, i.name AS institution FROM judges j LEFT JOIN institutions i ON i.id=j.institution_id ORDER BY j.name"),
+    client.query("SELECT judge_id,incompatible_judge_id FROM judge_incompatibilities ORDER BY judge_id,incompatible_judge_id"),
     client.query("SELECT * FROM speakers ORDER BY team_id, name"),
     client.query("SELECT * FROM physical_rooms ORDER BY name"),
     client.query("SELECT * FROM format_presets ORDER BY name"),
@@ -70,8 +72,10 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const settingsJson = settings ? (settings.settings as Record<string, unknown> || {}) : {};
   const institutions = institutionsQ.rows as Record<string, unknown>[];
   const rounds = roundsQ.rows as Record<string, unknown>[];
-  const teams = teamsQ.rows as Record<string, unknown>[];
-  const judges = judgesQ.rows as Record<string, unknown>[];
+  const teamIncompatibilities = teamIncompatQ.rows as Record<string, unknown>[];
+  const judgeIncompatibilities = judgeIncompatQ.rows as Record<string, unknown>[];
+  const teams = (teamsQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: teamIncompatibilities.filter((item) => str(item.team_id) === str(row.id)).map((item) => str(item.judge_id)) }));
+  const judges = (judgesQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: judgeIncompatibilities.filter((item) => str(item.judge_id) === str(row.id)).map((item) => str(item.incompatible_judge_id)) }));
   const speakers = speakersQ.rows as Record<string, unknown>[];
   const physicalRooms = physicalQ.rows as Record<string, unknown>[];
   const formatRows = formatsQ.rows as Record<string, unknown>[];
@@ -277,12 +281,24 @@ async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolea
     const institution = await upsertInstitution(client, row.institution);
     const table = judges ? "judges" : "teams";
     await client.query(
-      `INSERT INTO ${table}(id,name,institution_id,active,incompatible_judge_ids)
-       VALUES($1,$2,$3,$4,$5::text[])
+      `INSERT INTO ${table}(id,name,institution_id,active)
+       VALUES($1,$2,$3,$4)
        ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,institution_id=EXCLUDED.institution_id,
-       active=EXCLUDED.active,incompatible_judge_ids=EXCLUDED.incompatible_judge_ids,updated_at=now()`,
-      [str(row.id), str(row.name).trim(), institution, bool(row.active), parseStringArray(row.incompatibleJudgeIds)],
+       active=EXCLUDED.active,updated_at=now()`,
+      [str(row.id), str(row.name).trim(), institution, bool(row.active)],
     );
+    const incompatibilities = parseStringArray(row.incompatibleJudgeIds);
+    if (judges) {
+      await client.query("DELETE FROM judge_incompatibilities WHERE judge_id=$1", [str(row.id)]);
+      for (const incompatibleJudgeId of incompatibilities) {
+        await client.query("INSERT INTO judge_incompatibilities(judge_id,incompatible_judge_id) VALUES($1,$2)", [str(row.id), incompatibleJudgeId]);
+      }
+    } else {
+      await client.query("DELETE FROM team_judge_incompatibilities WHERE team_id=$1", [str(row.id)]);
+      for (const judgeId of incompatibilities) {
+        await client.query("INSERT INTO team_judge_incompatibilities(team_id,judge_id) VALUES($1,$2)", [str(row.id), judgeId]);
+      }
+    }
   }
 }
 
