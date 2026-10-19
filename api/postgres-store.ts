@@ -392,10 +392,12 @@ async function persistScoring(client: PoolClient, value: string): Promise<void> 
     [category.id, category.name, category.order],
   );
   const categoryIds = scoring.categories.map((category) => category.id);
-  if (categoryIds.length) await client.query("DELETE FROM score_categories WHERE NOT (id = ANY($1::text[]))", [categoryIds]);
   const cardIds = scoring.scorecards.map((card) => card.id);
+  // Remove obsolete scorecards first so their dependent category rows do not
+  // block deletion of a category that is no longer referenced by retained acts.
   if (cardIds.length) await client.query("DELETE FROM scorecards WHERE NOT (id = ANY($1::text[]))", [cardIds]);
   else await client.query("DELETE FROM scorecards");
+  if (categoryIds.length) await client.query("DELETE FROM score_categories WHERE NOT (id = ANY($1::text[]))", [categoryIds]);
   for (const card of scoring.scorecards) {
     await client.query(
       `INSERT INTO scorecards(id,assignment_id,round_id,team_favor_id,team_contra_id,status,created_at,updated_at)
