@@ -17,10 +17,31 @@ describe("Neon migration artifacts", () => {
     ]) expect(sql).toContain(token);
   });
 
-  it("does not destroy or import current spreadsheet data", async () => {
+  it("does not include destructive data operations in the initial schema", async () => {
     const sql = await readFile(resolve("db/migrations/0001_initial_schema.sql"), "utf8");
-    expect(sql).not.toMatch(/\\bDROP\\s+TABLE\\b/i);
-    expect(sql).not.toMatch(/\\bTRUNCATE\\b/i);
-    expect(sql).not.toMatch(/\\bDELETE\\s+FROM\\b/i);
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(sql).not.toMatch(/\bINSERT\s+INTO\s+.*SELECT\b/i);
+  });
+
+  it("adds database-enforced cross-row integrity constraints", async () => {
+    const sql = await readFile(resolve("db/migrations/0002_integrity_constraints.sql"), "utf8");
+    expect(sql).toContain("CREATE TRIGGER room_assignments_team_once_per_round");
+    expect(sql).toContain("CREATE UNIQUE INDEX IF NOT EXISTS assignment_judges_one_room_per_round_uq");
+    expect(sql).toContain("CREATE TRIGGER scorecards_assignment_consistency");
+    expect(sql).toContain("CREATE TRIGGER scorecard_judges_assignment_check");
+    expect(sql).toContain("CREATE TRIGGER scorecard_speaker_team_check");
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
+  it("migration runner discovers ordered, versioned SQL migrations and verifies checksums", async () => {
+    const runner = await readFile(resolve("scripts/migrate-db.mjs"), "utf8");
+    expect(runner).toContain('readdir(directory)');
+    expect(runner).toContain('file.slice(0, 4)');
+    expect(runner).toContain('previous.checksum !== migration.checksum');
+    expect(runner).toContain("pg_advisory_xact_lock");
+    expect(runner).toContain('client.query("ROLLBACK")');
   });
 });
