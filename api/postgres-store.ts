@@ -346,8 +346,13 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     const id = str(row.id);
     const timer = timerById.get(id) || getRow(oldTimers, id, "roomId");
     const oldRoom = getRow(oldRooms, id);
-    const staticChanged = forceRelations || !oldRoom || ["roundId","physicalRoomId","formatId","teamFavorId","teamContraId","notes"].some((key) => str(oldRoom[key]) !== str(row[key])) || !same(parseJson(oldRoom.phases, []), parseJson(row.phases, [])) || !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
+    const phases = parseJson<Phase[]>(row.phases, []);
+    const phasesChanged = !oldRoom || !same(parseJson(oldRoom.phases, []), phases);
+    const staticChanged = forceRelations || !oldRoom || ["roundId","physicalRoomId","formatId","teamFavorId","teamContraId","notes"].some((key) => str(oldRoom[key]) !== str(row[key])) || phasesChanged || !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
     if (!staticChanged) continue;
+    if (scoredAssignmentIds.has(id) && phasesChanged) {
+      throw new ApiError("SCORED_ASSIGNMENT_PHASES_IMMUTABLE", "No se pueden modificar las fases históricas de una asignación que ya tiene un acta.", 409);
+    }
     await client.query(
       `INSERT INTO room_assignments(id,round_id,physical_room_id,format_id,team_favor_id,team_contra_id,notes,timer_status,phase_index,remaining_seconds,started_at,last_resumed_at,timer_revision,timer_updated_at)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
@@ -361,15 +366,16 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
        str(row.notes), str(timer?.status || "idle"), num(timer?.phaseIndex), num(timer?.remainingSeconds), num(timer?.startedAt), num(timer?.lastResumedAt),
        num(timer?.revision), num(timer?.updatedAt)],
     );
-    const phases = parseJson<Phase[]>(row.phases, []);
-    await client.query("DELETE FROM assignment_phases WHERE assignment_id=$1", [id]);
-    for (let i = 0; i < phases.length; i += 1) {
-      const phase = phases[i];
-      await client.query(
-        `INSERT INTO assignment_phases(assignment_id,phase_id,phase_order,name,side,speaker,duration_seconds,phase_type,warning_thresholds_seconds,allow_overtime_display)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::int[],$10)`,
-        [id, phase.id, i, phase.name, phase.side, phase.speaker || "Interviniente no especificado", phase.durationSeconds, phase.type || "opening", phase.warningThresholdsSeconds || [], phase.allowOvertimeDisplay !== false],
-      );
+    if (!scoredAssignmentIds.has(id)) {
+      await client.query("DELETE FROM assignment_phases WHERE assignment_id=$1", [id]);
+      for (let i = 0; i < phases.length; i += 1) {
+        const phase = phases[i];
+        await client.query(
+          `INSERT INTO assignment_phases(assignment_id,phase_id,phase_order,name,side,speaker,duration_seconds,phase_type,warning_thresholds_seconds,allow_overtime_display)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::int[],$10)`,
+          [id, phase.id, i, phase.name, phase.side, phase.speaker || "Interviniente no especificado", phase.durationSeconds, phase.type || "opening", phase.warningThresholdsSeconds || [], phase.allowOvertimeDisplay !== false],
+        );
+      }
     }
     const judgeIds = parseStringArray(row.judgeIds);
     const oldJudgeIds = parseStringArray(oldRoom?.judgeIds);
