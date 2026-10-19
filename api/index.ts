@@ -375,7 +375,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
   return withLock("database-transaction", async () => {
     const expectedRevision = num(payload.expectedRevision);
     const idempotencyScope = "saveTournament:" + expectedRevision;
-    const idempotencyKey = sha256("saveTournament:" + expectedRevision + ":" + sha256(JSON.stringify(payload.tournament)));
+    const idempotencyKey = sha256("saveTournament:" + expectedRevision + ":" + sha256(JSON.stringify(payload.tournament) || ""));
     const cachedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
     if (cachedResponse !== null) return cachedResponse as Tournament;
     const data = await loadSheetData(true);
