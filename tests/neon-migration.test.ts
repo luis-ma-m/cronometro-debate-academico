@@ -81,4 +81,12 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain("persistIncompatibilities");
   });
 
+
+  it("preserves the identity of assignments that already have scorecards", async () => {
+    const sql = await readFile(resolve("db/migrations/0004_preserve_scored_assignment_identity.sql"), "utf8");
+    expect(sql).toContain("prevent_scored_assignment_reassignment");
+    expect(sql).toContain("NEW.team_favor_id IS DISTINCT FROM OLD.team_favor_id");
+    expect(sql).toContain("NEW.physical_room_id IS DISTINCT FROM OLD.physical_room_id");
+  });
+
 });
