@@ -109,8 +109,6 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const roundsById = new Map(rounds.map((row) => [str(row.id), row]));
   const physicalRoomsById = new Map(physicalRooms.map((row) => [str(row.id), row]));
   const assignmentsById = new Map(assignments.map((row) => [str(row.id), row]));
-  const teamIncompatibilitiesByTeam = groupByString(teamIncompatibilities, "team_id");
-  const judgeIncompatibilitiesByJudge = groupByString(judgeIncompatibilities, "judge_id");
   const formatPhasesByFormat = groupByString(formatPhases, "format_id");
   const assignmentJudgesByAssignment = groupByString(assignmentJudges, "assignment_id");
   const assignmentPhasesByAssignment = groupByString(assignmentPhases, "assignment_id");
@@ -185,14 +183,14 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const physicalRows = physicalRooms.map((row) => ({ id: str(row.id), slug: str(row.slug), name: str(row.name), active: bool(row.active), createdAt: millis(row.created_at), updatedAt: millis(row.updated_at) }));
   const formatObjects = formatRows.map((row) => ({ id: str(row.id), name: str(row.name), phases: JSON.stringify(phasesFromRows(formatPhasesByFormat.get(str(row.id)) || [], str(row.id))), version: num(row.version), createdAt: millis(row.created_at), updatedAt: millis(row.updated_at) }));
   const roomRows = assignments.map((row) => {
-    const phaseRows = assignmentPhasesByAssignment.get(str(row.id)) || [].map((phase) => ({
+    const phaseRows = (assignmentPhasesByAssignment.get(str(row.id)) || []).map((phase) => ({
       id: str(phase.phase_id), name: str(phase.name), side: str(phase.side), speaker: str(phase.speaker),
       durationSeconds: num(phase.duration_seconds), type: str(phase.phase_type),
       warningThresholdsSeconds: Array.isArray(phase.warning_thresholds_seconds) ? phase.warning_thresholds_seconds.map(Number) : [],
       allowOvertimeDisplay: bool(phase.allow_overtime_display),
     }));
     return {
-      id: str(row.id), name: str(physicalRooms.find((physical) => str(physical.id) === str(row.physical_room_id))?.name),
+      id: str(row.id), name: str(physicalRoomsById.get(str(row.physical_room_id))?.name),
       roundId: str(row.round_id), teamFavorId: str(row.team_favor_id), teamContraId: str(row.team_contra_id),
       judgeIds: JSON.stringify((assignmentJudgesByAssignment.get(str(row.id)) || []).map((item) => str(item.judge_id))),
       status: str(row.timer_status), phases: JSON.stringify(phaseRows), notes: str(row.notes),
