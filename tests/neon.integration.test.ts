@@ -17,7 +17,7 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await client.connect();
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}"`);
-    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql"]) {
+    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql"]) {
       await client.query(await readFile(resolve("db/migrations", file), "utf8"));
     }
     await client.query("INSERT INTO tournament_settings(id) VALUES(1)");
