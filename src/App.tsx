@@ -912,7 +912,7 @@ export default function App() {
       let saved: Tournament;
       if (apiConfigured) {
         if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
-        saved = await apiActivateRound(session.token, effectivePreview.targetRoundId, effectiveForce);
+        saved = await apiActivateRound(session.token, effectivePreview.targetRoundId, effectiveForce, effectivePreview.activationRevision);
       } else {
         const target = data.rounds.find((round) => round.id === effectivePreview.targetRoundId);
         if (!target) throw new Error('No se encuentra la ronda seleccionada.');
