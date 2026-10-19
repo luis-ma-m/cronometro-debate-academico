@@ -99,4 +99,13 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain('DELETE FROM round_room_claims');
   });
 
+
+  it("enforces exact judge consistency between assignment and scorecard", async () => {
+    const sql = await readFile(resolve("db/migrations/0006_scorecard_judge_consistency.sql"), "utf8");
+    expect(sql).toContain("scorecard judges must exactly match assignment judges");
+    expect(sql).toContain("CREATE CONSTRAINT TRIGGER assignment_judges_scorecard_consistency");
+    expect(sql).toContain("CREATE CONSTRAINT TRIGGER scorecard_judges_assignment_consistency");
+    expect(sql).toContain("CREATE CONSTRAINT TRIGGER scorecards_judges_consistency");
+  });
+
 });
