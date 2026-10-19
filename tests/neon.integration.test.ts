@@ -43,6 +43,23 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
       .rejects.toMatchObject({ code: "23505" });
   });
 
+  it("requires judge incompatibilities to be reciprocal", async () => {
+    await client!.query("BEGIN");
+    await client!.query("INSERT INTO judge_incompatibilities(judge_id,incompatible_judge_id) VALUES('j1','j2'),('j2','j1')");
+    await client!.query("COMMIT");
+
+    await client!.query("BEGIN");
+    await client!.query("DELETE FROM judge_incompatibilities WHERE judge_id='j2' AND incompatible_judge_id='j1'");
+    let commitError: unknown;
+    try {
+      await client!.query("COMMIT");
+    } catch (error) {
+      commitError = error;
+      await client!.query("ROLLBACK").catch(() => undefined);
+    }
+    expect(commitError).toMatchObject({ code: "23514" });
+  });
+
   it("rejects a scorecard whose teams do not match the assignment", async () => {
     await expect(client!.query(
       "INSERT INTO scorecards(id,assignment_id,round_id,team_favor_id,team_contra_id) VALUES('sc-bad','a1','r1','t3','t2')",
