@@ -20,6 +20,7 @@ El handler operativo ya no lee `GOOGLE_SERVICE_ACCOUNT_JSON` ni llama a Google S
 
 - `db/migrations/0001_initial_schema.sql`: esquema relacional base.
 - `db/migrations/0002_integrity_constraints.sql`: claims normalizados para evitar que un equipo aparezca en dos debates de una ronda; unicidad de juez por ronda; coherencia del puntero de ronda activa; integridad de actas frente a asignación, jueces y oradores.
+- `db/migrations/0003_normalize_incompatibilities.sql`: migra las listas heredadas a tablas con claves foráneas para incompatibilidades equipo–juez y juez–juez; comprueba reciprocidad antes de retirar las columnas de arrays.
 - `scripts/migrate-db.mjs`: descubre migraciones versionadas en orden, comprueba SHA-256, registra versiones y aplica DDL junto al ledger dentro de una transacción protegida por advisory lock. Si una versión aplicada tiene otro checksum, se detiene; cualquier corrección debe ser una nueva migración.
 
 Comandos administrativos:
@@ -47,7 +48,7 @@ La capa conserva los nombres de las funciones internas heredadas para reducir el
 
 ## Reglas de datos
 
-Las tablas separan configuración, instituciones, equipos, jueces, oradores, salas físicas, rondas, presets/fases, asignaciones, snapshots de fases, jueces asignados, categorías, actas, puntuaciones, auditoría e idempotencia.
+Las tablas separan configuración, instituciones, equipos, jueces, oradores, incompatibilidades, salas físicas, rondas, presets/fases, asignaciones, snapshots de fases, jueces asignados, categorías, actas, puntuaciones, auditoría e idempotencia.
 
 La base refuerza la asignación única por sala/ronda, un equipo por ronda independientemente de la postura, un juez por ronda y la coherencia de actas con ronda, equipos, jueces y oradores. Las reglas cruzadas de institución e incompatibilidades se comprueban en el servicio de dominio antes de iniciar o guardar. Las categorías históricas referenciadas no se pueden eliminar por las claves foráneas.
 
