@@ -460,6 +460,13 @@ async function persistScoring(client: PoolClient, value: string): Promise<void> 
 
 async function persistEvent(client: PoolClient, event: unknown[]): Promise<void> {
   const details = json(event[8], {});
+  const detailRecord = details && typeof details === "object" ? { ...(details as Record<string, unknown>) } : {};
+  const idempotencyKey = str(detailRecord.idempotencyKey);
+  const idempotencyScope = str(detailRecord.idempotencyScope);
+  const idempotencyResponse = detailRecord.idempotencyResponse;
+  delete detailRecord.idempotencyKey;
+  delete detailRecord.idempotencyScope;
+  delete detailRecord.idempotencyResponse;
   const eventKey = str(event[0]) || randomBytes(16).toString("hex");
   const assignmentId = str(event[2]).startsWith("round:") || str(event[2]) === "scoring" ? null : str(event[2]) || null;
   const roundId = str(event[3]) || null;
@@ -468,13 +475,12 @@ async function persistEvent(client: PoolClient, event: unknown[]): Promise<void>
     `INSERT INTO audit_events(event_key,event_type,occurred_at,assignment_id,round_id,phase_index,details)
      VALUES($1,$2,COALESCE(NULLIF($3,'')::timestamptz,now()),$4,$5,NULLIF($6,'')::integer,$7::jsonb)
      ON CONFLICT(event_key) DO NOTHING`,
-    [eventKey, eventType, str(event[1]), assignmentId, roundId, str(event[5]), JSON.stringify(details)],
+    [eventKey, eventType, str(event[1]), assignmentId, roundId, str(event[5]), JSON.stringify(detailRecord)],
   );
-  const idempotency = details && typeof details === "object" ? details as Record<string, unknown> : {};
-  if (typeof idempotency.idempotencyKey === "string" && idempotency.idempotencyResponse !== undefined) {
+  if (idempotencyKey && idempotencyResponse !== undefined) {
     await client.query(
       "INSERT INTO idempotency_keys(operation_key,scope,response,completed_at) VALUES($1,$2,$3::jsonb,now()) ON CONFLICT(operation_key) DO NOTHING",
-      [str(idempotency.idempotencyKey), str(idempotency.idempotencyScope), JSON.stringify(idempotency.idempotencyResponse)],
+      [idempotencyKey, idempotencyScope, JSON.stringify(idempotencyResponse)],
     );
   }
 }
