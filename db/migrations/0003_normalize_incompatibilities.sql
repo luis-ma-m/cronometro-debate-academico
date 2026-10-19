@@ -20,13 +20,27 @@ CREATE TABLE IF NOT EXISTS judge_incompatibilities (
 
 INSERT INTO team_judge_incompatibilities(team_id, judge_id)
 SELECT t.id, unnest(t.incompatible_judge_ids)
-FROM teams t
-ON CONFLICT DO NOTHING;
+FROM teams t;
 
 INSERT INTO judge_incompatibilities(judge_id, incompatible_judge_id)
 SELECT j.id, unnest(j.incompatible_judge_ids)
-FROM judges j
-ON CONFLICT DO NOTHING;
+FROM judges j;
+
+DO $
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM judge_incompatibilities a
+    WHERE NOT EXISTS (
+      SELECT 1 FROM judge_incompatibilities b
+      WHERE b.judge_id = a.incompatible_judge_id
+        AND b.incompatible_judge_id = a.judge_id
+    )
+  ) THEN
+    RAISE EXCEPTION 'existing judge incompatibilities are not reciprocal; migration stopped without dropping legacy columns'
+      USING ERRCODE = '23514';
+  END IF;
+END;
+$;
 
 ALTER TABLE teams DROP COLUMN incompatible_judge_ids;
 ALTER TABLE judges DROP COLUMN incompatible_judge_ids;
