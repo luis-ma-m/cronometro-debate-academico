@@ -137,4 +137,14 @@ describe("Neon migration artifacts", () => {
     expect(app).toContain("effectivePreview.activationRevision");
   });
 
+
+  it("protects scored assignment judges and phase snapshots from mutation", async () => {
+    const sql = await readFile(resolve("db/migrations/0008_preserve_scored_assignment_snapshots.sql"), "utf8");
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    expect(sql).toContain("scored_assignment_judges_immutable");
+    expect(sql).toContain("scored_assignment_phases_immutable");
+    expect(store).toContain("SCORED_ASSIGNMENT_PHASES_IMMUTABLE");
+    expect(store).toContain("SCORED_ASSIGNMENT_JUDGES_IMMUTABLE");
+  });
+
 });
