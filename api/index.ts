@@ -654,9 +654,14 @@ function scorecardComparable(card: RoundScorecard): string {
 
 async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tournament> {
   return withLock("database-transaction", async () => {
+    const expectedRevision = num(payload.expectedRevision);
+    const idempotencyScope = "saveScoreConfig:" + expectedRevision;
+    const idempotencyKey = sha256("saveScoreConfig:" + expectedRevision + ":" + sha256(JSON.stringify({ categories: payload.categories, scorecards: payload.scorecards })));
+    const cachedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+    if (cachedResponse !== null) return cachedResponse as Tournament;
     const data = await loadSheetData(true);
     const current = tournamentFromData(data);
-    if (num(payload.expectedRevision) !== current.revision) {
+    if (expectedRevision !== current.revision) {
       throw new ApiError("REVISION_CONFLICT", "El torneo cambió en otro dispositivo. Actualiza antes de registrar puntuaciones.", 409);
     }
 
@@ -748,11 +753,24 @@ async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tourna
     const nextRevision = current.revision + 1;
     setConfig(configRows, "revision", String(nextRevision));
     setConfig(configRows, "updatedAt", String(now));
-    await writeTables(data, { Config: configRows }, [
-      randomBytes(16).toString("hex"), new Date(now).toISOString(), "scoring", "",
-      "", "", "scorecard_saved", "", JSON.stringify({ scorecards: savedScorecards.length, categories: candidate.categories.length }),
-    ]);
-    return tournamentFromData(await loadSheetData(true));
+    const response: Tournament = { ...current, scoring, revision: nextRevision, updatedAt: now, serverTime: now };
+    try {
+      await writeTables(data, { Config: configRows }, [
+        randomBytes(16).toString("hex"), new Date(now).toISOString(), "scoring", "",
+        "", "", "scorecard_saved", "", JSON.stringify({
+          scorecards: savedScorecards.length,
+          categories: candidate.categories.length,
+          idempotencyKey,
+          idempotencyScope,
+          idempotencyResponse: response,
+        }),
+      ]);
+    } catch (error) {
+      const committedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+      if (committedResponse !== null) return committedResponse as Tournament;
+      throw error;
+    }
+    return response;
   });
 }
 
