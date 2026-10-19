@@ -542,10 +542,25 @@ async function getRoundActivationPreview(roundId: string) {
 async function activateRound(payload: Record<string, unknown>): Promise<Tournament> {
   const roundId = str(payload.roundId);
   const force = payload.force === true || String(payload.force).toLowerCase() === "true";
+  const expectedActivationRevision = payload.expectedActivationRevision === undefined
+    ? null
+    : num(payload.expectedActivationRevision);
   if (!roundId) throw new ApiError("INVALID_ROUND", "Selecciona una ronda para activar.");
+  const idempotencyScope = expectedActivationRevision === null ? "" : "activateRound:" + expectedActivationRevision;
+  const idempotencyKey = expectedActivationRevision === null
+    ? ""
+    : sha256("activateRound:" + expectedActivationRevision + ":" + roundId + ":" + force);
+
   return withLock("database-transaction", async () => {
+    if (idempotencyKey) {
+      const cachedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+      if (cachedResponse !== null) return cachedResponse as Tournament;
+    }
     const data = await loadSheetData(true);
     const tournament = tournamentFromData(data);
+    if (expectedActivationRevision !== null && expectedActivationRevision !== tournament.activationRevision) {
+      throw new ApiError("REVISION_CONFLICT", "La ronda activa ha cambiado desde que se preparó la activación. Actualiza la vista y vuelve a confirmar.", 409);
+    }
     const targetRound = tournament.rounds.find((item) => item.id === roundId);
     if (!targetRound) throw new ApiError("ROUND_NOT_FOUND", "No se encuentra la ronda seleccionada.", 404);
     if (roundId === tournament.activeRoundId) throw new ApiError("ROUND_ALREADY_ACTIVE", "Esa ronda ya está activa.", 409);
@@ -567,6 +582,7 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
 
     const now = Date.now();
     const formatsById = new Map(tournament.formats.map((format) => [format.id, format] as const));
+    const persistedTimers = timerRowMap(data.rows.Cronometros);
     const rounds = tournament.rounds.map((round) => ({ ...round, active: round.id === roundId }));
     const nextRooms: Room[] = tournament.rooms.map((room) => {
       if (room.roundId === roundId) {
@@ -574,7 +590,7 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
         const format = formatsById.get(selectedFormatId);
         const phases = (format?.phases || room.phases || tournament.formatPhases || defaultPhases()).map((phase) => ({ ...phase }));
         validatePhases(phases);
-        const previousRevision = timerRowMap(data.rows.Cronometros).get(room.id)?.revision ?? room.timer.revision;
+        const previousRevision = persistedTimers.get(room.id)?.revision ?? room.timer.revision;
         const timer = { ...initialTimer(phases), revision: previousRevision + 1, updatedAt: now };
         const next = { ...room, formatId: room.formatId || "", phases, timer, updatedAt: now };
         next.status = deriveRoomStatus(next, minimumJudges);
@@ -605,6 +621,24 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
     setConfig(configRows, "activatedAt", String(now));
     setConfig(configRows, "revision", String(tournament.revision + 1));
     setConfig(configRows, "updatedAt", String(now));
+    const replacements: Partial<Record<SheetName, SheetRow[]>> = {
+      Config: configRows,
+      Rondas: rounds.map((round) => ({ id: round.id, number: round.number, name: round.name, active: round.id === roundId, defaultFormatId: round.defaultFormatId, scoreType: round.scoreType ?? "qualifying" })),
+      Salas: nextRooms.map((room) => rowObjectForRoom(room, minimumJudges, now)),
+      Cronometros: nextRooms.map((room) => rowObjectForTimer(room.id, room.timer)),
+    };
+    const response = tournamentFromData({ ...data, rows: { ...data.rows, ...replacements } });
+    const eventDetails: Record<string, unknown> = {
+      targetRoundName: targetRound.name,
+      forced: pending.length > 0,
+      pending: pendingDetails,
+      activationRevision: (tournament.activationRevision || 0) + 1,
+    };
+    if (idempotencyKey) {
+      eventDetails.idempotencyKey = idempotencyKey;
+      eventDetails.idempotencyScope = idempotencyScope;
+      eventDetails.idempotencyResponse = response;
+    }
     const event = [
       randomBytes(16).toString("hex"),
       new Date(now).toISOString(),
@@ -614,19 +648,20 @@ async function activateRound(payload: Record<string, unknown>): Promise<Tourname
       "",
       pending.length ? "round_activated_forced" : "round_activated",
       "",
-      JSON.stringify({ targetRoundName: targetRound.name, forced: pending.length > 0, pending: pendingDetails, activationRevision: (tournament.activationRevision || 0) + 1 }),
+      JSON.stringify(eventDetails),
     ];
-    const replacements: Partial<Record<SheetName, SheetRow[]>> = {
-      Config: configRows,
-      Rondas: rounds.map((round) => ({ id: round.id, number: round.number, name: round.name, active: round.id === roundId, defaultFormatId: round.defaultFormatId, scoreType: round.scoreType ?? "qualifying" })),
-      Salas: nextRooms.map((room) => rowObjectForRoom(room, minimumJudges, now)),
-      Cronometros: nextRooms.map((room) => rowObjectForTimer(room.id, room.timer)),
-    };
-    await writeTables(data, replacements, event);
-    return tournamentFromData(await loadSheetData(true));
+    try {
+      await writeTables(data, replacements, event);
+    } catch (error) {
+      if (idempotencyKey) {
+        const committedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+        if (committedResponse !== null) return committedResponse as Tournament;
+      }
+      throw error;
+    }
+    return response;
   });
 }
-
 
 
 function scorecardComparable(card: RoundScorecard): string {
