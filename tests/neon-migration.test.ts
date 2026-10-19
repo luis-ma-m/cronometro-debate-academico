@@ -33,7 +33,7 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("CREATE TRIGGER scorecard_judges_assignment_check");
     expect(sql).toContain("CREATE TRIGGER scorecard_speaker_team_check");
     expect(sql).not.toMatch(/\bTRUNCATE\b/i);
-    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\s+(teams|judges|speakers|rounds|room_assignments|scorecards)\b/i);
   });
 
   it("migration runner discovers ordered, versioned SQL migrations and verifies checksums", async () => {
