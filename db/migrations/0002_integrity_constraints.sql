@@ -46,6 +46,42 @@ CREATE TRIGGER assignment_judges_sync_round
 BEFORE INSERT OR UPDATE OF assignment_id, round_id ON assignment_judges
 FOR EACH ROW EXECUTE FUNCTION sync_assignment_judge_round();
 
+
+-- Cross-side team uniqueness is a cross-column invariant and cannot be
+-- represented by two independent unique indexes. Serialize assignment edits
+-- on the round row so concurrent requests cannot claim the same team.
+CREATE OR REPLACE FUNCTION enforce_team_once_per_round()
+RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+  PERFORM 1 FROM rounds WHERE id = NEW.round_id FOR UPDATE;
+  IF NEW.team_favor_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM room_assignments ra
+    WHERE ra.round_id = NEW.round_id AND ra.id <> NEW.id
+      AND NEW.team_favor_id IN (ra.team_favor_id, ra.team_contra_id)
+  ) THEN
+    RAISE EXCEPTION 'team already assigned in this round'
+      USING ERRCODE = '23505';
+  END IF;
+  IF NEW.team_contra_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM room_assignments ra
+    WHERE ra.round_id = NEW.round_id AND ra.id <> NEW.id
+      AND NEW.team_contra_id IN (ra.team_favor_id, ra.team_contra_id)
+  ) THEN
+    RAISE EXCEPTION 'team already assigned in this round'
+      USING ERRCODE = '23505';
+  END IF;
+  IF NEW.team_favor_id IS NOT NULL AND NEW.team_favor_id = NEW.team_contra_id THEN
+    RAISE EXCEPTION 'a team cannot debate itself'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$;
+DROP TRIGGER IF EXISTS room_assignments_team_once_per_round ON room_assignments;
+CREATE TRIGGER room_assignments_team_once_per_round
+BEFORE INSERT OR UPDATE OF round_id, team_favor_id, team_contra_id
+ON room_assignments FOR EACH ROW EXECUTE FUNCTION enforce_team_once_per_round();
+
 -- Ensure the active-round pointer and the single-active-round marker cannot
 -- silently disagree after a transaction.
 CREATE OR REPLACE FUNCTION enforce_active_round_pointer()
