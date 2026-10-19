@@ -60,12 +60,10 @@ CREATE TABLE IF NOT EXISTS round_team_claims (
 );
 INSERT INTO round_team_claims (round_id, team_id, assignment_id, side)
 SELECT round_id, team_favor_id, id, 'favor'
-FROM room_assignments WHERE team_favor_id IS NOT NULL
-ON CONFLICT DO NOTHING;
+FROM room_assignments WHERE team_favor_id IS NOT NULL;
 INSERT INTO round_team_claims (round_id, team_id, assignment_id, side)
 SELECT round_id, team_contra_id, id, 'contra'
-FROM room_assignments WHERE team_contra_id IS NOT NULL
-ON CONFLICT DO NOTHING;
+FROM room_assignments WHERE team_contra_id IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION sync_round_team_claims()
 RETURNS trigger LANGUAGE plpgsql AS $$
