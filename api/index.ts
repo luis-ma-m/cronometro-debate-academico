@@ -1,5 +1,7 @@
 import { createHash, createHmac, createSign, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
+import { checkDatabase, databaseConfigured } from "./db.js";
+import { loadPostgresSheetData, writePostgresTables } from "./postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
 import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
@@ -67,12 +69,13 @@ function env(name: string): string {
 
 function requiredEnvironment(): string[] {
   const names = [
-    "GOOGLE_SERVICE_ACCOUNT_JSON",
     "ADMIN_PASSWORD",
     "UPSTASH_REDIS_REST_URL",
     "UPSTASH_REDIS_REST_TOKEN",
   ];
-  return names.filter((name) => !env(name));
+  const missing = names.filter((name) => !env(name));
+  if (!databaseConfigured()) missing.push("NEON_DATABASE_URL (o DATABASE_URL)");
+  return missing;
 }
 
 function ensureConfigured(): void {
@@ -80,11 +83,10 @@ function ensureConfigured(): void {
   if (missing.length) {
     throw new ApiError(
       "NOT_CONFIGURED",
-      "La API de Vercel aún no está configurada. Faltan variables privadas: " + missing.join(", ") + ". Consulta docs/DEPLOYMENT.md.",
+      "La API de Vercel aún no está configurada. Faltan variables privadas: " + missing.join(", ") + ". Consulta docs/NEON_MIGRATION.md.",
       503,
     );
   }
-  googleCredentials();
   if (env("ADMIN_PASSWORD").length > 1024) {
     throw new ApiError("NOT_CONFIGURED", "ADMIN_PASSWORD no puede superar 1024 caracteres.", 503);
   }
@@ -422,42 +424,9 @@ async function migrateToPermanentRooms(): Promise<SpreadsheetMetadata> {
     return spreadsheetMetadata(true);
   });
 }
-async function loadSheetData(skipEnsure = false): Promise<SheetData> {
-  const metadata = skipEnsure ? await spreadsheetMetadata() : await ensureSchema();
-  const url = new URL(SHEETS_API + encodeURIComponent(spreadsheetId()) + "/values:batchGet");
-  url.searchParams.set("majorDimension", "ROWS");
-  url.searchParams.set("valueRenderOption", "UNFORMATTED_VALUE");
-  for (const name of SHEET_NAMES) url.searchParams.append("ranges", name + "!A:Z");
-
-  const token = await googleAccessToken();
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: { Authorization: "Bearer " + token },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000),
-    });
-  } catch {
-    throw new ApiError("SHEETS_UNAVAILABLE", "No se ha podido leer Google Sheets. Comprueba la conexión e inténtalo de nuevo.", 503);
-  }
-  if (!response.ok) {
-    if (response.status === 403) throw new ApiError("SHEETS_PERMISSION_DENIED", "La cuenta de servicio no tiene permiso para leer la hoja. Comparte la hoja con su correo y dale permiso de editor.", 503);
-    throw new ApiError("SHEETS_ERROR", "No se han podido leer las pestañas del torneo.", 503);
-  }
-  const payload = await response.json() as { valueRanges?: { values?: unknown[][] }[] };
-  const raw = {} as Record<SheetName, unknown[][]>;
-  const rows = {} as Record<SheetName, SheetRow[]>;
-  SHEET_NAMES.forEach((name, index) => {
-    raw[name] = payload.valueRanges?.[index]?.values ?? [];
-    rows[name] = objectsFromRows(raw[name]);
-    const headers = (raw[name][0] || []).map((value) => String(value ?? ""));
-    const expected = SHEET_HEADERS[name] as readonly string[];
-    if (headers.length && expected.some((header, position) => headers[position] !== header)) {
-      throw new ApiError("SCHEMA_MISMATCH", "Los encabezados de la pestaña " + name + " no coinciden con el esquema esperado. No se ha escrito ningún dato.", 503);
-    }
-    if (!headers.length) throw new ApiError("SCHEMA_MISMATCH", "La pestaña " + name + " no tiene encabezados. Revisa docs/DEPLOYMENT.md.", 503);
-  });
-  return { metadata, raw, rows };
+async function loadSheetData(_skipEnsure = false): Promise<SheetData> {
+  // Compatibility shape for existing domain rules; all reads now come from normalized PostgreSQL.
+  return loadPostgresSheetData();
 }
 
 function configValue(configRows: SheetRow[], key: string): string {
@@ -636,31 +605,7 @@ function updateCellsRequest(
 }
 
 async function writeTables(data: SheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[]): Promise<void> {
-  const requests: unknown[] = [];
-  for (const name of SHEET_NAMES) {
-    const objects = replacements[name];
-    if (!objects) continue;
-    const grid = (data.metadata.sheets || []).find((item) => item.properties.title === name)?.properties.gridProperties;
-    const existingDataRows = Math.max(0, (data.raw[name]?.length || 1) - 1);
-    requests.push(...updateCellsRequest(
-      sheetIdByName(data.metadata, name),
-      SHEET_HEADERS[name],
-      objects,
-      existingDataRows,
-      Number(grid?.rowCount || 1000),
-      Number(grid?.columnCount || SHEET_HEADERS[name].length),
-    ));
-  }
-  if (appendEvent) {
-    requests.push({
-      appendCells: {
-        sheetId: sheetIdByName(data.metadata, "Registro"),
-        rows: [{ values: appendEvent.map(cellData) }],
-        fields: "userEnteredValue",
-      },
-    });
-  }
-  if (requests.length) await batchUpdateSpreadsheet(requests);
+  await writePostgresTables(data, replacements, appendEvent);
 }
 
 async function redisCommand(command: Array<string | number>): Promise<unknown> {
@@ -686,21 +631,10 @@ async function redisCommand(command: Array<string | number>): Promise<unknown> {
   return payload.result;
 }
 
-async function withLock<T>(name: string, operation: () => Promise<T>): Promise<T> {
-  const lockToken = randomBytes(24).toString("hex");
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  while (Date.now() < deadline) {
-    const acquired = await redisCommand(["SET", name, lockToken, "NX", "PX", LOCK_TTL_MS]);
-    if (acquired === "OK") {
-      try {
-        return await operation();
-      } finally {
-        await redisCommand(["EVAL", REDIS_RELEASE_SCRIPT, 1, name, lockToken]).catch(() => undefined);
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, 150 + Math.floor(Math.random() * 100)));
-  }
-  throw new ApiError("WRITE_BUSY", "El torneo está recibiendo otra operación. Espera un instante y vuelve a intentarlo.", 409);
+async function withLock<T>(_name: string, operation: () => Promise<T>): Promise<T> {
+  // PostgreSQL row locks, revision checks and transactions replace the former
+  // global Redis write lock. Redis is reserved for auth and room-control keys.
+  return operation();
 }
 
 async function createSession(password: string, ip: string): Promise<{ token: string; expiresAt: number }> {
@@ -1247,14 +1181,14 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
 
 async function health(): Promise<unknown> {
   ensureConfigured();
-  const data = await loadSheetData();
+  const database = await checkDatabase();
   const ping = await redisCommand(["PING"]);
   if (ping !== "PONG") throw new ApiError("COORDINATION_UNAVAILABLE", "No se ha podido verificar el servicio de coordinación.", 503);
   return {
     status: "ok",
     service: "LEDU Tournament Desk API",
-    spreadsheet: data.metadata.properties?.title || "Google Sheets",
-    sheets: (data.metadata.sheets || []).map((sheet) => sheet.properties.title),
+    database: "Neon PostgreSQL",
+    serverTime: database.serverTime,
     now: Date.now(),
   };
 }
@@ -1306,12 +1240,6 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     const payload = body.payload && typeof body.payload === "object" && !Array.isArray(body.payload)
       ? body.payload
       : {};
-    if (["saveTournament", "updateRoomTimer", "getRoomControllerToken"].includes(action)) {
-      // These handlers call loadSheetData(true) while they hold any write lock,
-      // so prepare/validate the schema before entering them.
-      await ensureSchema();
-    }
-    // Read endpoints validate the schema in loadSheetData() itself.
     const result = await dispatch(action, payload, req);
     res.status(200).json({ ok: true, data: result });
   } catch (error) {
