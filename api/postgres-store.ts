@@ -68,6 +68,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     client.query("SELECT * FROM audit_events ORDER BY occurred_at"),
   ]);
   const settings = settingsQ.rows[0] as Record<string, unknown> | undefined;
+  if (!settings) throw new ApiError("DATABASE_NOT_INITIALIZED", "Neon está conectado, pero falta inicializar el esquema y los valores base. Ejecuta db:migrate y db:seed en la base correcta.", 503);
   const settingsJson = settings ? (settings.settings as Record<string, unknown> || {}) : {};
   const rounds = roundsQ.rows as Record<string, unknown>[];
   const teams = teamsQ.rows as Record<string, unknown>[];
@@ -250,6 +251,7 @@ async function upsertInstitution(client: PoolClient, nameValue: unknown): Promis
 
 async function persistRounds(client: PoolClient, rows: SheetRow[]): Promise<void> {
   await client.query("UPDATE rounds SET is_active=false WHERE is_active=true");
+  await client.query("UPDATE rounds SET number=number+100000");
   for (const row of rows) {
     await client.query(
       `INSERT INTO rounds(id,number,name,is_active,score_type,default_format_id)
@@ -305,13 +307,13 @@ async function persistPhysicalRooms(client: PoolClient, rows: SheetRow[]): Promi
   );
 }
 
-async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers: SheetRow[], oldRooms: SheetRow[], oldTimers: SheetRow[]): Promise<void> {
+async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers: SheetRow[], oldRooms: SheetRow[], oldTimers: SheetRow[], forceRelations = false): Promise<void> {
   const timerById = new Map(timers.map((row) => [str(row.roomId), row]));
   for (const row of rooms) {
     const id = str(row.id);
     const timer = timerById.get(id) || getRow(oldTimers, id, "roomId");
     const oldRoom = getRow(oldRooms, id);
-    const staticChanged = !oldRoom || ["roundId","physicalRoomId","formatId","teamFavorId","teamContraId","notes"].some((key) => str(oldRoom[key]) !== str(row[key])) || !same(parseJson(oldRoom.phases, []), parseJson(row.phases, [])) || !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
+    const staticChanged = forceRelations || !oldRoom || ["roundId","physicalRoomId","formatId","teamFavorId","teamContraId","notes"].some((key) => str(oldRoom[key]) !== str(row[key])) || !same(parseJson(oldRoom.phases, []), parseJson(row.phases, [])) || !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
     if (!staticChanged) continue;
     const oldTimer = getRow(oldTimers, id, "roomId");
     await client.query(
@@ -448,7 +450,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     }
     if (replacements.Salas || replacements.Cronometros) {
       await persistAssignments(client, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
-        data.rows.Salas, data.rows.Cronometros);
+        data.rows.Salas, data.rows.Cronometros, Boolean(replacements.Equipos));
     }
     if (replacements.Config) {
       const config = replacements.Config;
