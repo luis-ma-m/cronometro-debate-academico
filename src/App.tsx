@@ -384,7 +384,7 @@ export default function App() {
     }
   };
 
-  if (roomId) return <RoomScreen snapshot={snapshot} now={now} serverOffsetMs={serverOffsetMs} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('debate-control-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} lastSyncedAt={lastSyncedAt} />;
+  if (roomId) return <RoomScreen snapshot={snapshot} now={now} serverOffsetMs={serverOffsetMs} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('debate-control-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} />;
 
   if (!session) {
     return <div className="login-shell">
