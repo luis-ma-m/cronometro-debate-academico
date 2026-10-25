@@ -78,10 +78,10 @@ describe('Room readiness', () => {
 
 describe('LEDU timer state machine', () => {
   it('formats regular and overtime values', () => {
-    expect(formatTime(0)).toBe('00:00');
-    expect(formatTime(61)).toBe('01:01');
-    expect(formatTime(-4)).toBe('+00:04');
-    expect(formatTime(-61)).toBe('+01:01');
+    expect(formatTime(0)).toBe('0:00');
+    expect(formatTime(61)).toBe('1:01');
+    expect(formatTime(-4)).toBe('+0:04');
+    expect(formatTime(-61)).toBe('+1:01');
   });
 
   it('derives remaining time from timestamps rather than interval ticks, including overtime', () => {
