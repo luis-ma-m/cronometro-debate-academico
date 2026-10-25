@@ -236,7 +236,7 @@ export default function App() {
         } catch (error) {
           const message = error instanceof Error ? error.message : 'No se ha podido sincronizar el cronómetro.';
           setServerError(message);
-          const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : '';
+          const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code ?? '' : '';
           if (['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
             // The server is reachable but has rejected this operation. Preserve
             // the local timer and queue rather than silently replacing it.
