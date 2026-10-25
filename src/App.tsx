@@ -1516,12 +1516,6 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
     : <>
       <section className="timer-card timer-primary-card">
         <div className="timer-status"><span className={'state-pill ' + (timedOut ? 'paused' : room?.timer.status || '')}>{ended ? 'Debate finalizado' : timedOut ? 'Tiempo agotado · exceso de tiempo' : room?.timer.status === 'running' ? 'Intervención en curso' : room?.timer.status === 'paused' ? 'Cronómetro pausado' : 'Preparado para comenzar'}</span><span>{snapshot.physicalRoomName} · {snapshot.roundName}</span></div>
-        <div className="timer-heading">
-          <p>{snapshot.tournamentName}</p>
-          <h1>{snapshot.physicalRoomName}</h1>
-          <div className="team-versus"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
-          <div className="judge-line"><Gavel size={16} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
-        </div>
         <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''} · {phase?.side === 'favor' ? 'A favor' : phase?.side === 'contra' ? 'En contra' : ''}</b></div>
         <div className={'timer-digits ' + (timedOut ? 'overtime' : (room?.timer.status === 'running' && hasReachedWarning(phase, left) ? 'warning' : '')) + (room?.timer.status === 'running' && reachedWarningCount(phase, left) >= 2 ? ' blink' : '')}>{formatTime(phase?.allowOvertimeDisplay === false && left < 0 ? 0 : left)}</div>
         <div className="timer-track"><div style={{ width: pct + '%' }} /></div>
@@ -1534,6 +1528,14 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
           <button className="button secondary big" onClick={() => runAction('next')} disabled={!controllerEnabled || ended}><ArrowRight size={18} /> Siguiente</button>
           <button className="button ghost big" onClick={() => runAction('reset', '¿Reiniciar únicamente esta intervención?')} disabled={!controllerEnabled || !phase}><RotateCcw size={17} /> Reiniciar turno</button>
           <button className="button ghost big" onClick={() => runAction('finish', '¿Dar por finalizado el debate?')} disabled={!controllerEnabled || ended}><Check size={17} /> Finalizar</button>
+        </div>
+      </section>
+      <section className="timer-room-metadata" aria-label="Información de la sala">
+        <div className="timer-heading">
+          <p>{snapshot.tournamentName}</p>
+          <h1>{snapshot.physicalRoomName}</h1>
+          <div className="team-versus"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
+          <div className="judge-line"><Gavel size={16} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
         </div>
       </section>
     </>}
