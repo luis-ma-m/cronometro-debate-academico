@@ -32,6 +32,25 @@ function getSession(): { token: string; expiresAt: number } | null {
 
 function makeId(prefix: string): string { return prefix + Math.random().toString(36).slice(2, 9); }
 
+type PendingTimerSync = {
+  roomSlug: string;
+  assignmentId: string;
+  activationRevision: number;
+  baseRevision: number;
+  actions: TimerAction[];
+  snapshot: PublicRoom;
+};
+const pendingTimerKey = (roomSlug: string) => 'debate-control-pending-timer:' + roomSlug;
+function readPendingTimer(roomSlug: string): PendingTimerSync | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(pendingTimerKey(roomSlug)) || 'null') as PendingTimerSync | null;
+    return value && value.roomSlug === roomSlug && Array.isArray(value.actions) ? value : null;
+  } catch { return null; }
+}
+function writePendingTimer(queue: PendingTimerSync): void {
+  localStorage.setItem(pendingTimerKey(queue.roomSlug), JSON.stringify(queue));
+}
+
 function getInstitutionCatalog(tournament: Pick<Tournament, 'institutions' | 'teams' | 'judges'>): string[] {
   const known = new Map<string, string>();
   for (const rawName of [
@@ -356,31 +375,95 @@ export default function App() {
     if (apiConfigured && token) void apiLogout(token).catch(() => undefined);
   };
 
+  const pendingSyncRef = useRef(false);
+  const syncPendingRoomActions = useCallback(async () => {
+    if (!roomId || !apiConfigured || !controllerToken || pendingSyncRef.current) return;
+    pendingSyncRef.current = true;
+    try {
+      while (true) {
+        const queue = readPendingTimer(roomId);
+        if (!queue || queue.actions.length === 0) {
+          if (queue) localStorage.removeItem(pendingTimerKey(roomId));
+          return;
+        }
+        try {
+          const requestStartedAt = Date.now();
+          const updated = await updateTimer(queue.roomSlug, queue.actions[0], queue.baseRevision, controllerToken, queue.assignmentId, queue.activationRevision);
+          const responseReceivedAt = Date.now();
+          queue.actions.shift();
+          queue.baseRevision = updated.room.timer.revision;
+          if (queue.actions.length) {
+            writePendingTimer(queue);
+          } else {
+            localStorage.removeItem(pendingTimerKey(roomId));
+            setSnapshot(updated);
+          }
+          setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
+          setConnected(true);
+          setLastSyncedAt(responseReceivedAt);
+          setServerError('');
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'No se ha podido sincronizar el cronómetro.';
+          setServerError(message);
+          const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : '';
+          if (['NETWORK_ERROR', 'VERCEL_RUNTIME_ERROR', 'COORDINATION_UNAVAILABLE', 'NOT_CONFIGURED'].includes(errorCode)) {
+            setConnected(false);
+          } else {
+            // Preserve local control and the queue. A semantic conflict needs
+            // an explicit resolution; never silently overwrite the room state.
+            setConnected(true);
+          }
+          return;
+        }
+      }
+    } finally {
+      pendingSyncRef.current = false;
+    }
+  }, [roomId, controllerToken]);
+
   const timerAction = async (action: TimerAction) => {
     if (!snapshot) return;
-    try {
-      if (apiConfigured) {
-        const requestStartedAt = Date.now();
-        const updated = await updateTimer(snapshot.roomSlug, action, snapshot.room.timer.revision, controllerToken, snapshot.room.id, snapshot.activationRevision);
-        const responseReceivedAt = Date.now();
-        setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
-        setSnapshot(updated);
-      } else {
-        const current = readDemo();
-        const room = current.rooms.find((item) => item.id === snapshot.room.id);
-        if (!room) return;
-        const changed = withRoomStatus({ ...room, timer: transitionTimer(room.timer, room.phases, action) }, current.minimumJudgesPerRoom ?? 1);
-        const next = { ...current, rooms: current.rooms.map((item) => item.id === room.id ? changed : item), revision: current.revision + 1, updatedAt: Date.now() };
-        writeDemo(next);
-        setData(next);
-        await reloadRoom();
+    if (apiConfigured) {
+      const currentSnapshot = snapshot;
+      const actionAt = Date.now() + serverOffsetMs;
+      const nextTimer = transitionTimer(currentSnapshot.room.timer, currentSnapshot.room.phases, action, actionAt);
+      if (nextTimer.revision === currentSnapshot.room.timer.revision) return;
+      const optimisticRoom = withRoomStatus(
+        { ...currentSnapshot.room, timer: nextTimer, updatedAt: actionAt },
+        currentSnapshot.minimumJudgesPerRoom ?? 1,
+      );
+      const optimisticSnapshot = { ...currentSnapshot, room: optimisticRoom, serverTime: actionAt };
+      const existingQueue = readPendingTimer(currentSnapshot.roomSlug);
+      const queue: PendingTimerSync = existingQueue ?? {
+        roomSlug: currentSnapshot.roomSlug,
+        assignmentId: currentSnapshot.room.id,
+        activationRevision: currentSnapshot.activationRevision,
+        baseRevision: currentSnapshot.room.timer.revision,
+        actions: [],
+        snapshot: optimisticSnapshot,
+      };
+      queue.actions.push(action);
+      queue.snapshot = optimisticSnapshot;
+      try {
+        writePendingTimer(queue);
+      } catch {
+        // The live in-memory timer still works if browser storage is unavailable.
       }
-      setConnected(true);
-      setServerError('');
+      setSnapshot(optimisticSnapshot);
+      void syncPendingRoomActions();
+      return;
+    }
+    try {
+      const current = readDemo();
+      const room = current.rooms.find((item) => item.id === snapshot.room.id);
+      if (!room) return;
+      const changed = withRoomStatus({ ...room, timer: transitionTimer(room.timer, room.phases, action) }, current.minimumJudgesPerRoom ?? 1);
+      const next = { ...current, rooms: current.rooms.map((item) => item.id === room.id ? changed : item), revision: current.revision + 1, updatedAt: Date.now() };
+      writeDemo(next);
+      setData(next);
+      await reloadRoom();
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se ha podido controlar el cronómetro.');
-      const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : undefined;
-      if (errorCode && ['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION'].includes(errorCode)) await reloadRoom();
     }
   };
 
