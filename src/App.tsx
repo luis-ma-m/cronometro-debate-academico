@@ -176,10 +176,20 @@ export default function App() {
         void getRoomConnectionStatuses(session.token).then((statuses) => {
           setRoomConnectionStatuses(Object.fromEntries(statuses.map((status) => [status.physicalRoomId, status])));
         }).catch(() => {
-          // A monitoring read must not break the tournament manager's main data refresh.
+          // If health cannot be checked, do not leave stale "connected" badges on screen.
+          setRoomConnectionStatuses((current) => Object.fromEntries(Object.entries(current).map(([id, status]) => [id, {
+            ...status,
+            connected: false,
+            disconnectedAt: status.lastSeenAt === null ? null : status.disconnectedAt ?? status.lastSeenAt + 18_000,
+          }])));
         });
       } catch (error) {
         setConnected(false);
+        setRoomConnectionStatuses((current) => Object.fromEntries(Object.entries(current).map(([id, status]) => [id, {
+          ...status,
+          connected: false,
+          disconnectedAt: status.lastSeenAt === null ? null : status.disconnectedAt ?? status.lastSeenAt + 18_000,
+        }])));
         if (error instanceof Error && 'code' in error && (error as Error & { code?: string }).code === 'UNAUTHORIZED') { localStorage.removeItem(SESSION_KEY); setSession(null); }
         setServerError(error instanceof Error ? error.message : 'No se ha podido cargar el torneo.');
       } finally {
