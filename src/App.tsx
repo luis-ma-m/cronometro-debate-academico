@@ -221,12 +221,19 @@ export default function App() {
           const requestStartedAt = Date.now();
           const updated = await updateTimer(queue.roomSlug, action, queue.baseRevision, controllerToken, queue.assignmentId, queue.activationRevision);
           const responseReceivedAt = Date.now();
-          queue.actions.shift();
-          queue.baseRevision = updated.room.timer.revision;
-          if (queue.actions.length) {
-            writePendingTimer(queue);
+          // Re-read the durable queue after the await: the operator may have
+          // pressed another control while this request was in flight.
+          const latestQueue = readPendingTimer(roomId);
+          if (latestQueue) {
+            if (latestQueue.actions[0] === action) latestQueue.actions.shift();
+            latestQueue.baseRevision = updated.room.timer.revision;
+            if (latestQueue.actions.length) {
+              writePendingTimer(latestQueue);
+            } else {
+              localStorage.removeItem(pendingTimerKey(roomId));
+              setSnapshot(updated);
+            }
           } else {
-            localStorage.removeItem(pendingTimerKey(roomId));
             setSnapshot(updated);
           }
           setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
