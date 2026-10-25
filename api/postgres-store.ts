@@ -244,6 +244,52 @@ function getRow(rows: SheetRow[], id: string, key = "id"): SheetRow | undefined 
 }
 function same(a: unknown, b: unknown): boolean { return JSON.stringify(a) === JSON.stringify(b); }
 
+async function insertMany(
+  client: PoolClient,
+  table: string,
+  columns: string[],
+  rows: unknown[][],
+  suffix = "",
+): Promise<void> {
+  const batchSize = 100;
+  for (let offset = 0; offset < rows.length; offset += batchSize) {
+    const batch = rows.slice(offset, offset + batchSize);
+    const values: string[] = [];
+    const parameters: unknown[] = [];
+    for (const row of batch) {
+      const placeholders = row.map((value) => {
+        parameters.push(value);
+        return "$" + parameters.length;
+      });
+      values.push("(" + placeholders.join(",") + ")");
+    }
+    await client.query(
+      "INSERT INTO " + table + "(" + columns.join(",") + ") VALUES " + values.join(",") + (suffix ? " " + suffix : ""),
+      parameters,
+    );
+  }
+}
+
+function assignmentRelationSignature(row: SheetRow): unknown[] {
+  return [
+    str(row.id), str(row.roundId), str(row.physicalRoomId),
+    str(row.teamFavorId), str(row.teamContraId),
+    parseStringArray(row.judgeIds).sort(),
+  ];
+}
+
+function assignmentRelationsChanged(
+  data: PostgresSheetData,
+  replacements: Partial<Record<SheetName, SheetRow[]>>,
+): boolean {
+  const nextRooms = replacements.Salas ?? data.rows.Salas;
+  const sortById = (rows: SheetRow[]) => [...rows].sort((a, b) => str(a.id).localeCompare(str(b.id)));
+  return !same(
+    sortById(data.rows.Salas).map(assignmentRelationSignature),
+    sortById(nextRooms).map(assignmentRelationSignature),
+  );
+}
+
 async function persistConfig(client: PoolClient, oldRows: SheetRow[], newRows: SheetRow[]): Promise<void> {
   const oldRevision = num(getConfig(oldRows, "revision")) || 1;
   const nextRevision = num(getConfig(newRows, "revision")) || oldRevision;
@@ -327,19 +373,20 @@ async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolea
 
 async function persistIncompatibilities(client: PoolClient, teams: SheetRow[], judges: SheetRow[]): Promise<void> {
   // Rebuild both relation sets only after every referenced team and judge exists.
-  // This is one transaction, so no caller can observe an intermediate empty set.
+  // Batch inserts reduce network round-trips while the transaction keeps the
+  // replacement atomic to readers.
   await client.query("DELETE FROM team_judge_incompatibilities");
   await client.query("DELETE FROM judge_incompatibilities");
+  const teamRelations: unknown[][] = [];
+  const judgeRelations: unknown[][] = [];
   for (const team of teams) {
-    for (const judgeId of parseStringArray(team.incompatibleJudgeIds)) {
-      await client.query("INSERT INTO team_judge_incompatibilities(team_id,judge_id) VALUES($1,$2)", [str(team.id), judgeId]);
-    }
+    for (const judgeId of parseStringArray(team.incompatibleJudgeIds)) teamRelations.push([str(team.id), judgeId]);
   }
   for (const judge of judges) {
-    for (const incompatibleJudgeId of parseStringArray(judge.incompatibleJudgeIds)) {
-      await client.query("INSERT INTO judge_incompatibilities(judge_id,incompatible_judge_id) VALUES($1,$2)", [str(judge.id), incompatibleJudgeId]);
-    }
+    for (const incompatibleJudgeId of parseStringArray(judge.incompatibleJudgeIds)) judgeRelations.push([str(judge.id), incompatibleJudgeId]);
   }
+  await insertMany(client, "team_judge_incompatibilities", ["team_id", "judge_id"], teamRelations);
+  await insertMany(client, "judge_incompatibilities", ["judge_id", "incompatible_judge_id"], judgeRelations);
 }
 
 async function persistFormats(client: PoolClient, rows: SheetRow[]): Promise<void> {
@@ -351,14 +398,15 @@ async function persistFormats(client: PoolClient, rows: SheetRow[]): Promise<voi
     );
     await client.query("DELETE FROM format_phases WHERE format_id=$1", [id]);
     const phases = parseJson<Phase[]>(row.phases, []);
-    for (let i = 0; i < phases.length; i += 1) {
-      const phase = phases[i];
-      await client.query(
-        `INSERT INTO format_phases(format_id,id,phase_order,name,side,speaker,duration_seconds,phase_type,warning_thresholds_seconds,allow_overtime_display)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::int[],$10)`,
-        [id, phase.id, i, phase.name, phase.side, phase.speaker || "Interviniente no especificado", phase.durationSeconds, phase.type || "opening", phase.warningThresholdsSeconds || [], phase.allowOvertimeDisplay !== false],
-      );
-    }
+    const phaseRows: unknown[][] = phases.map((phase, i) => [
+      id, phase.id, i, phase.name, phase.side, phase.speaker || "Interviniente no especificado",
+      phase.durationSeconds, phase.type || "opening", phase.warningThresholdsSeconds || [],
+      phase.allowOvertimeDisplay !== false,
+    ]);
+    await insertMany(client, "format_phases", [
+      "format_id", "id", "phase_order", "name", "side", "speaker", "duration_seconds",
+      "phase_type", "warning_thresholds_seconds", "allow_overtime_display",
+    ], phaseRows);
   }
 }
 
@@ -408,14 +456,15 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     );
     if (!scoredAssignmentIds.has(id)) {
       await client.query("DELETE FROM assignment_phases WHERE assignment_id=$1", [id]);
-      for (let i = 0; i < phases.length; i += 1) {
-        const phase = phases[i];
-        await client.query(
-          `INSERT INTO assignment_phases(assignment_id,phase_id,phase_order,name,side,speaker,duration_seconds,phase_type,warning_thresholds_seconds,allow_overtime_display)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::int[],$10)`,
-          [id, phase.id, i, phase.name, phase.side, phase.speaker || "Interviniente no especificado", phase.durationSeconds, phase.type || "opening", phase.warningThresholdsSeconds || [], phase.allowOvertimeDisplay !== false],
-        );
-      }
+      const phaseRows: unknown[][] = phases.map((phase, i) => [
+        id, phase.id, i, phase.name, phase.side, phase.speaker || "Interviniente no especificado",
+        phase.durationSeconds, phase.type || "opening", phase.warningThresholdsSeconds || [],
+        phase.allowOvertimeDisplay !== false,
+      ]);
+      await insertMany(client, "assignment_phases", [
+        "assignment_id", "phase_id", "phase_order", "name", "side", "speaker", "duration_seconds",
+        "phase_type", "warning_thresholds_seconds", "allow_overtime_display",
+      ], phaseRows);
     }
     const judgeIds = parseStringArray(row.judgeIds);
     const oldJudgeIds = parseStringArray(oldRoom?.judgeIds);
@@ -425,7 +474,8 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     }
     if (!scoredAssignmentIds.has(id) && (forceRelations || judgesChanged)) {
       await client.query("DELETE FROM assignment_judges WHERE assignment_id=$1", [id]);
-      for (const judgeId of judgeIds) await client.query("INSERT INTO assignment_judges(assignment_id,judge_id) VALUES($1,$2)", [id, judgeId]);
+      const judgeRows: unknown[][] = judgeIds.map((judgeId) => [id, judgeId]);
+      await insertMany(client, "assignment_judges", ["assignment_id", "judge_id"], judgeRows);
     }
   }
   // Timer updates are optimistic and row-scoped. A stale timer revision cannot overwrite another device.
@@ -559,16 +609,18 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     if (replacements.Jueces) await persistTeams(client, replacements.Jueces, true);
     if (replacements.Equipos && replacements.Jueces) await persistIncompatibilities(client, replacements.Equipos, replacements.Jueces);
     if (replacements.SalasFisicas) await persistPhysicalRooms(client, replacements.SalasFisicas);
-    if (replacements.Equipos) {
-      // Release derived cross-side claims and judge slots before a full roster
-      // replacement; the assignment triggers rebuild them transactionally.
+    const rebuildAssignmentRelations = assignmentRelationsChanged(data, replacements);
+    if (rebuildAssignmentRelations) {
+      // Room/team/judge claims are unique across a round. Release them only
+      // when assignment identities actually change (including swaps), then
+      // rebuild the complete relation set atomically.
       await client.query("DELETE FROM round_team_claims");
       await client.query("DELETE FROM round_room_claims");
       await client.query("DELETE FROM assignment_judges WHERE assignment_id NOT IN (SELECT assignment_id FROM scorecards)");
     }
-    if (replacements.Salas || replacements.Cronometros) {
+    if (replacements.Salas || replacements.Cronometros || rebuildAssignmentRelations) {
       await persistAssignments(client, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
-        data.rows.Salas, data.rows.Cronometros, Boolean(replacements.Equipos));
+        data.rows.Salas, data.rows.Cronometros, rebuildAssignmentRelations);
     }
     if (replacements.Config) {
       const config = replacements.Config;
@@ -582,29 +634,37 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
         await persistScoring(client, getConfig(config, "scoring"));
       }
     }
-    if (replacements.Equipos || replacements.Jueces || replacements.SalasFisicas || replacements.Rondas) {
-      // A complete tournament save includes Equipos; only then are omitted assignments treated as removed.
-      if (replacements.Equipos) {
-        const ids = (replacements.Salas || []).map((row) => str(row.id));
-        if (ids.length) await client.query("DELETE FROM room_assignments WHERE NOT (id = ANY($1::text[]))", [ids]);
-        else await client.query("DELETE FROM room_assignments");
-        const teamIds = replacements.Equipos.map((row) => str(row.id));
-        if (teamIds.length) await client.query("DELETE FROM teams WHERE NOT (id = ANY($1::text[]))", [teamIds]);
-        else await client.query("DELETE FROM teams");
-        const judgeIds = (replacements.Jueces || []).map((row) => str(row.id));
-        if (judgeIds.length) await client.query("DELETE FROM judges WHERE NOT (id = ANY($1::text[]))", [judgeIds]);
-        else await client.query("DELETE FROM judges");
-        const roomIds = (replacements.SalasFisicas || []).map((row) => str(row.id));
-        if (roomIds.length) await client.query("DELETE FROM physical_rooms WHERE NOT (id = ANY($1::text[]))", [roomIds]);
-        else await client.query("DELETE FROM physical_rooms");
-        const roundIds = (replacements.Rondas || []).map((row) => str(row.id));
-        if (roundIds.length) await client.query("DELETE FROM rounds WHERE NOT (id = ANY($1::text[]))", [roundIds]);
-        else await client.query("DELETE FROM rounds");
-      }
+    // Each collection is a complete replacement only when its semantic
+    // contents changed. Delete obsolete rows for that collection independently;
+    // room deletions must not depend on an unrelated team edit.
+    if (replacements.Salas) {
+      const ids = replacements.Salas.map((row) => str(row.id));
+      if (ids.length) await client.query("DELETE FROM room_assignments WHERE NOT (id = ANY($1::text[]))", [ids]);
+      else await client.query("DELETE FROM room_assignments");
     }
-    if (replacements.Equipos && replacements.Formatos) {
-      const formatIds = replacements.Formatos.map((row) => str(row.id));
-      if (formatIds.length) await client.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [formatIds]);
+    if (replacements.Equipos) {
+      const ids = replacements.Equipos.map((row) => str(row.id));
+      if (ids.length) await client.query("DELETE FROM teams WHERE NOT (id = ANY($1::text[]))", [ids]);
+      else await client.query("DELETE FROM teams");
+    }
+    if (replacements.Jueces) {
+      const ids = replacements.Jueces.map((row) => str(row.id));
+      if (ids.length) await client.query("DELETE FROM judges WHERE NOT (id = ANY($1::text[]))", [ids]);
+      else await client.query("DELETE FROM judges");
+    }
+    if (replacements.SalasFisicas) {
+      const ids = replacements.SalasFisicas.map((row) => str(row.id));
+      if (ids.length) await client.query("DELETE FROM physical_rooms WHERE NOT (id = ANY($1::text[]))", [ids]);
+      else await client.query("DELETE FROM physical_rooms");
+    }
+    if (replacements.Rondas) {
+      const ids = replacements.Rondas.map((row) => str(row.id));
+      if (ids.length) await client.query("DELETE FROM rounds WHERE NOT (id = ANY($1::text[]))", [ids]);
+      else await client.query("DELETE FROM rounds");
+    }
+    if (replacements.Formatos) {
+      const ids = replacements.Formatos.map((row) => str(row.id));
+      if (ids.length) await client.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [ids]);
       else await client.query("DELETE FROM format_presets");
     }
     if (appendEvent) await persistEvent(client, appendEvent);
