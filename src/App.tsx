@@ -201,6 +201,57 @@ export default function App() {
     }
   }, [session, demoMode]);
 
+  const pendingSyncRef = useRef(false);
+  const syncPendingRoomActions = useCallback(async () => {
+    if (!roomId || !apiConfigured || !controllerToken || pendingSyncRef.current) return;
+    pendingSyncRef.current = true;
+    try {
+      while (true) {
+        const queue = readPendingTimer(roomId);
+        if (!queue || queue.actions.length === 0) {
+          if (queue) localStorage.removeItem(pendingTimerKey(roomId));
+          return;
+        }
+        try {
+          const action = queue.actions[0];
+          if (!action) {
+            localStorage.removeItem(pendingTimerKey(roomId));
+            return;
+          }
+          const requestStartedAt = Date.now();
+          const updated = await updateTimer(queue.roomSlug, action, queue.baseRevision, controllerToken, queue.assignmentId, queue.activationRevision);
+          const responseReceivedAt = Date.now();
+          queue.actions.shift();
+          queue.baseRevision = updated.room.timer.revision;
+          if (queue.actions.length) {
+            writePendingTimer(queue);
+          } else {
+            localStorage.removeItem(pendingTimerKey(roomId));
+            setSnapshot(updated);
+          }
+          setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
+          setConnected(true);
+          setLastSyncedAt(responseReceivedAt);
+          setServerError('');
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'No se ha podido sincronizar el cronómetro.';
+          setServerError(message);
+          const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : '';
+          if (['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
+            // The server is reachable but has rejected this operation. Preserve
+            // the local timer and queue rather than silently replacing it.
+            setConnected(true);
+          } else {
+            setConnected(false);
+          }
+          return;
+        }
+      }
+    } finally {
+      pendingSyncRef.current = false;
+    }
+  }, [roomId, controllerToken]);
+
   const reloadRoom = useCallback(async () => {
     if (!roomId) return;
     const pendingBeforeFetch = apiConfigured ? readPendingTimer(roomId) : null;
@@ -397,52 +448,6 @@ export default function App() {
     setView('overview');
     if (apiConfigured && token) void apiLogout(token).catch(() => undefined);
   };
-
-  const pendingSyncRef = useRef(false);
-  const syncPendingRoomActions = useCallback(async () => {
-    if (!roomId || !apiConfigured || !controllerToken || pendingSyncRef.current) return;
-    pendingSyncRef.current = true;
-    try {
-      while (true) {
-        const queue = readPendingTimer(roomId);
-        if (!queue || queue.actions.length === 0) {
-          if (queue) localStorage.removeItem(pendingTimerKey(roomId));
-          return;
-        }
-        try {
-          const requestStartedAt = Date.now();
-          const updated = await updateTimer(queue.roomSlug, queue.actions[0], queue.baseRevision, controllerToken, queue.assignmentId, queue.activationRevision);
-          const responseReceivedAt = Date.now();
-          queue.actions.shift();
-          queue.baseRevision = updated.room.timer.revision;
-          if (queue.actions.length) {
-            writePendingTimer(queue);
-          } else {
-            localStorage.removeItem(pendingTimerKey(roomId));
-            setSnapshot(updated);
-          }
-          setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
-          setConnected(true);
-          setLastSyncedAt(responseReceivedAt);
-          setServerError('');
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'No se ha podido sincronizar el cronómetro.';
-          setServerError(message);
-          const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : '';
-          if (['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
-            // The server is reachable but has rejected this operation. Preserve
-            // the local timer and queue rather than silently replacing it.
-            setConnected(true);
-          } else {
-            setConnected(false);
-          }
-          return;
-        }
-      }
-    } finally {
-      pendingSyncRef.current = false;
-    }
-  }, [roomId, controllerToken]);
 
   const timerAction = async (action: TimerAction) => {
     if (!snapshot) return;
