@@ -901,7 +901,7 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
       throw new ApiError("REVISION_CONFLICT", "El cronómetro cambió en otro dispositivo. Actualiza el estado.", 409);
     }
     const now = Date.now();
-    if (tournament.activatedAt > 0 && now < tournament.activatedAt + 20_000) {
+    if (tournament.activatedAt > 0 && now < tournament.activatedAt + 45_000) {
       throw new ApiError("ROUND_TRANSITION", "La nueva ronda se está anunciando en las pantallas. Los controles del cronómetro estarán disponibles al terminar la transición de 20 segundos.", 409);
     }
     if (action === "start") {
