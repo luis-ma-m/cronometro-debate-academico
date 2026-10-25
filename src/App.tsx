@@ -1447,15 +1447,10 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
   const pct = phase ? Math.max(0, Math.min(100, left / phase.durationSeconds * 100)) : 0;
   const ended = room?.timer.status === 'finished';
   const timedOut = room?.timer.status === 'running' && left < 0;
-  const hasReachedWarning = (currentPhase: Phase | undefined, seconds: number) => {
-    const thresholds = (currentPhase?.warningThresholdsSeconds ?? []).filter(Number.isFinite);
-    const preOvertime = thresholds.filter((threshold) => threshold >= 0);
-    return preOvertime.length > 0 && seconds <= Math.max(...preOvertime);
-  };
-  const countCrossedThresholds = (currentPhase: Phase | undefined, seconds: number, previous: number | null) => {
-    if (previous === null || previous <= seconds) return 0;
-    return (currentPhase?.warningThresholdsSeconds ?? []).filter((threshold) => previous > threshold && seconds <= threshold).length;
-  };
+  const reachedWarningCount = (currentPhase: Phase | undefined, seconds: number) =>
+    (currentPhase?.warningThresholdsSeconds ?? []).filter((threshold) => Number.isFinite(threshold) && seconds <= threshold).length;
+  const hasReachedWarning = (currentPhase: Phase | undefined, seconds: number) =>
+    reachedWarningCount(currentPhase, seconds) > 0;
   const fullyAssigned = Boolean(snapshot?.hasAssignment && snapshot.teamFavor && snapshot.teamContra &&
     snapshot.judges.length >= (snapshot.minimumJudgesPerRoom ?? 1) && room?.phases.length);
   const [transitionUntil, setTransitionUntil] = useState(0);
@@ -1529,7 +1524,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
           <div className="judge-line"><Gavel size={16} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
         </div>
         <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''} · {phase?.side === 'favor' ? 'A favor' : phase?.side === 'contra' ? 'En contra' : ''}</b></div>
-        <div className={'timer-digits ' + (timedOut ? 'overtime' : (room?.timer.status === 'running' && hasReachedWarning(phase, left) ? 'warning' : '')) + (room?.timer.status === 'running' && countCrossedThresholds(phase, left, lastLeft.current) >= 2 ? ' blink' : '')}>{formatTime(phase?.allowOvertimeDisplay === false && left < 0 ? 0 : left)}</div>
+        <div className={'timer-digits ' + (timedOut ? 'overtime' : (room?.timer.status === 'running' && hasReachedWarning(phase, left) ? 'warning' : '')) + (room?.timer.status === 'running' && reachedWarningCount(phase, left) >= 2 ? ' blink' : '')}>{formatTime(phase?.allowOvertimeDisplay === false && left < 0 ? 0 : left)}</div>
         <div className="timer-track"><div style={{ width: pct + '%' }} /></div>
         {!fullyAssigned && <div className="notice warning-notice timer-assignment-warning"><CircleHelp size={16} /><span>Para iniciar el debate, asigna los dos equipos, al menos {snapshot.minimumJudgesPerRoom ?? 1} juez(es) y un formato válido desde el panel.</span></div>}
         <div className="timer-controls">
