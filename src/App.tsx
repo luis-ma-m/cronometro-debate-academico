@@ -540,7 +540,8 @@ export default function App() {
     }
   };
 
-  if (roomId) return <RoomScreen snapshot={snapshot} now={now} serverOffsetMs={serverOffsetMs} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('debate-control-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} />;
+  const pendingTimerSync = Boolean(roomId && readPendingTimer(roomId)?.actions.length);
+  if (roomId) return <RoomScreen snapshot={snapshot} now={now} serverOffsetMs={serverOffsetMs} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('debate-control-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} syncPending={pendingTimerSync} />
 
   if (!session) {
     return <div className="login-shell">
@@ -1586,7 +1587,7 @@ function RoomRow({ room, data, onOpen, now, connectionStatus }: { room: Room; da
   return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small><small><Clock3 size={13} /> {phaseLabel}{phaseSideLabel ? ' · ' + phaseSideLabel : ''}</small><small className={connectionStatus?.connected ? 'room-connection connected' : 'room-connection disconnected'}><i className={connectionStatus?.connected ? '' : 'disconnected'} />{connectionLabel}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer, now))}</strong>}<ChevronRight size={17} /></div></button>;
 }
 
-function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected }: {
+function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected, syncPending }: {
   snapshot: PublicRoom | null;
   now: number;
   serverOffsetMs: number;
@@ -1597,6 +1598,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
   soundEnabled: boolean;
   onToggleSound: () => void;
   connected: boolean;
+  syncPending: boolean;
 }) {
   const room = snapshot?.room;
   const phase = room?.phases[room.timer.phaseIndex];
@@ -1652,7 +1654,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
     <header className="timer-top">
       <a href="/gestion" className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></a>
       <div className="timer-top-actions">
-        <span className="public-pill"><i className={connected ? '' : 'disconnected'} />{connected ? 'SINCRONIZADO' : 'SIN CONEXIÓN'}</span>
+        <span className="public-pill"><i className={connected ? '' : 'disconnected'} />{!connected ? 'SIN CONEXIÓN' : syncPending ? 'PENDIENTE DE SINCRONIZAR' : 'SINCRONIZADO'}</span>
         <button className="button secondary sound-toggle" onClick={onToggleSound} aria-pressed={soundEnabled}><>{soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}{soundEnabled ? 'Avisos sonoros activados' : 'Activar sonido'}</></button>
       </div>
     </header>
