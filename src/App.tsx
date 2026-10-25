@@ -193,16 +193,29 @@ export default function App() {
 
   const reloadRoom = useCallback(async () => {
     if (!roomId) return;
+    const pendingBeforeFetch = apiConfigured ? readPendingTimer(roomId) : null;
+    if (pendingBeforeFetch?.actions.length) setSnapshot(pendingBeforeFetch.snapshot);
     if (apiConfigured) {
       try {
         const requestStartedAt = Date.now();
         const fresh = await getPublicRoom(roomId);
         const responseReceivedAt = Date.now();
-        setSnapshot(fresh);
         setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
         setConnected(true); setLastSyncedAt(responseReceivedAt); setServerError('');
+        const pending = readPendingTimer(roomId);
+        if (pending?.actions.length) {
+          setSnapshot(pending.snapshot);
+          void syncPendingRoomActions();
+          return;
+        }
+        setSnapshot(fresh);
       }
-      catch (error) { setConnected(false); setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.'); }
+      catch (error) {
+        const pending = readPendingTimer(roomId);
+        if (pending?.actions.length) setSnapshot(pending.snapshot);
+        setConnected(false);
+        setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.');
+      }
     } else {
       const fresh = readDemo();
       setData(fresh);
@@ -230,7 +243,7 @@ export default function App() {
       setLastSyncedAt(Date.now());
       setServerError('');
     }
-  }, [roomId]);
+  }, [roomId, syncPendingRoomActions]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 200);
