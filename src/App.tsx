@@ -419,12 +419,12 @@ export default function App() {
           const message = error instanceof Error ? error.message : 'No se ha podido sincronizar el cronómetro.';
           setServerError(message);
           const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : '';
-          if (['NETWORK_ERROR', 'VERCEL_RUNTIME_ERROR', 'COORDINATION_UNAVAILABLE', 'NOT_CONFIGURED'].includes(errorCode)) {
-            setConnected(false);
-          } else {
-            // Preserve local control and the queue. A semantic conflict needs
-            // an explicit resolution; never silently overwrite the room state.
+          if (['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
+            // The server is reachable but has rejected this operation. Preserve
+            // the local timer and queue rather than silently replacing it.
             setConnected(true);
+          } else {
+            setConnected(false);
           }
           return;
         }
@@ -457,13 +457,23 @@ export default function App() {
       };
       queue.actions.push(action);
       queue.snapshot = optimisticSnapshot;
+      let persisted = false;
       try {
         writePendingTimer(queue);
+        persisted = true;
       } catch {
         // The live in-memory timer still works if browser storage is unavailable.
       }
       setSnapshot(optimisticSnapshot);
-      void syncPendingRoomActions();
+      if (persisted) {
+        void syncPendingRoomActions();
+      } else {
+        // Degraded fallback for browsers that block localStorage: attempt one
+        // direct request while keeping the optimistic local timer usable.
+        void updateTimer(currentSnapshot.roomSlug, action, currentSnapshot.room.timer.revision, controllerToken, currentSnapshot.room.id, currentSnapshot.activationRevision)
+          .then((updated) => { setSnapshot(updated); setConnected(true); setServerError(''); })
+          .catch((error) => { setConnected(false); setServerError(error instanceof Error ? error.message : 'Cronómetro local; sincronización pendiente.'); });
+      }
       return;
     }
     try {
