@@ -50,7 +50,7 @@ export function secondsLeft(timer: TimerState, now = Date.now()): number {
 
 export function formatTime(seconds: number): string {
   const safe = Math.floor(Math.abs(seconds));
-  const time = String(Math.floor(safe / 60)).padStart(2, '0') + ':' + String(safe % 60).padStart(2, '0');
+  const time = String(Math.floor(safe / 60)) + ':' + String(safe % 60).padStart(2, '0');
   return seconds < 0 ? '+' + time : time;
 }
 
