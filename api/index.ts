@@ -350,6 +350,11 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       return tournamentFromData(await loadSheetData());
     case "getPublicRoom":
       return publicRoomPayload(tournamentFromData(await loadSheetData()), str(payload.roomId));
+    case "roomHeartbeat":
+      return roomHeartbeat(payload);
+    case "getRoomConnectionStatuses":
+      await requireSession(payload.token);
+      return getRoomConnectionStatuses();
     case "getRoomControllerToken":
       return roomControllerToken(payload);
     case "saveTournament":
@@ -861,6 +866,53 @@ async function saveScoreConfig(payload: Record<string, unknown>): Promise<Tourna
     }
     return response;
   });
+}
+
+const ROOM_HEARTBEAT_TTL_SECONDS = 18;
+const ROOM_HEARTBEAT_HISTORY_TTL_SECONDS = 604800;
+
+async function roomHeartbeat(payload: Record<string, unknown>): Promise<{ serverTime: number }> {
+  const roomSlugInput = str(payload.roomId);
+  if (!roomSlugInput) throw new ApiError("INVALID_ACTION", "Falta el identificador de sala.");
+  const tournament = tournamentFromData(await loadSheetData());
+  const physical = tournament.physicalRooms.find((item) =>
+    item.slug.toLocaleLowerCase("es-ES") === roomSlugInput.toLocaleLowerCase("es-ES") ||
+    item.id.toLocaleLowerCase("es-ES") === roomSlugInput.toLocaleLowerCase("es-ES"));
+  if (!physical) throw new ApiError("ROOM_NOT_FOUND", "No se encuentra esa sala física.", 404);
+  const controlKey = str(payload.controlKey);
+  const expectedToken = await redisCommand(["GET", "ledu:room-control:" + sha256(physical.id)]);
+  if (!controlKey || typeof expectedToken !== "string" || !safeEquals(controlKey, expectedToken)) {
+    throw new ApiError("UNAUTHORIZED", "El enlace de control de esta sala no es válido.", 401);
+  }
+  const key = "ledu:room-heartbeat:" + sha256(physical.id);
+  const now = Date.now();
+  await redisCommand(["SET", key + ":last", now, "EX", ROOM_HEARTBEAT_HISTORY_TTL_SECONDS]);
+  await redisCommand(["SET", key + ":online", "1", "EX", ROOM_HEARTBEAT_TTL_SECONDS]);
+  return { serverTime: now };
+}
+
+async function getRoomConnectionStatuses(): Promise<Array<{
+  physicalRoomId: string; roomName: string; connected: boolean; lastSeenAt: number | null; disconnectedAt: number | null;
+}>> {
+  const tournament = tournamentFromData(await loadSheetData());
+  return Promise.all(tournament.physicalRooms.map(async (physical) => {
+    const key = "ledu:room-heartbeat:" + sha256(physical.id);
+    const [online, lastSeenValue] = await Promise.all([
+      redisCommand(["GET", key + ":online"]),
+      redisCommand(["GET", key + ":last"]),
+    ]);
+    const parsedLastSeen = lastSeenValue === null || lastSeenValue === undefined || lastSeenValue === ""
+      ? null : Number(lastSeenValue);
+    const lastSeenAt = parsedLastSeen !== null && Number.isFinite(parsedLastSeen) ? parsedLastSeen : null;
+    const connected = online === "1" && lastSeenAt !== null && Date.now() - lastSeenAt <= ROOM_HEARTBEAT_TTL_SECONDS * 1000;
+    return {
+      physicalRoomId: physical.id,
+      roomName: physical.name,
+      connected,
+      lastSeenAt,
+      disconnectedAt: connected || lastSeenAt === null ? null : lastSeenAt + ROOM_HEARTBEAT_TTL_SECONDS * 1000,
+    };
+  }));
 }
 
 async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknown> {
