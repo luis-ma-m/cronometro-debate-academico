@@ -26,7 +26,7 @@ INSERT INTO judge_incompatibilities(judge_id, incompatible_judge_id)
 SELECT j.id, unnest(j.incompatible_judge_ids)
 FROM judges j;
 
-DO $
+DO $$
 BEGIN
   IF EXISTS (
     SELECT 1 FROM judge_incompatibilities a
@@ -40,7 +40,7 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 END;
-$;
+$$;
 
 ALTER TABLE teams DROP COLUMN incompatible_judge_ids;
 ALTER TABLE judges DROP COLUMN incompatible_judge_ids;
