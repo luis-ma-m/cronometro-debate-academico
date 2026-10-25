@@ -63,6 +63,17 @@ export const saveTournament = (token: string, expectedRevision: number, tourname
 export const saveScoreConfig = (token: string, expectedRevision: number, categories: ScoreCategory[], scorecards: RoundScorecard[]) =>
   apiCall<Tournament>('saveScoreConfig', { token, expectedRevision, categories, scorecards });
 export const getPublicRoom = (roomId: string) => apiCall<PublicRoom>('getPublicRoom', { roomId });
+export interface RoomConnectionStatus {
+  physicalRoomId: string;
+  roomName: string;
+  connected: boolean;
+  lastSeenAt: number | null;
+  disconnectedAt: number | null;
+}
+export const sendRoomHeartbeat = (roomId: string, controlKey: string) =>
+  apiCall<{ serverTime: number }>('roomHeartbeat', { roomId, controlKey });
+export const getRoomConnectionStatuses = (token: string) =>
+  apiCall<RoomConnectionStatus[]>('getRoomConnectionStatuses', { token });
 export const getRoomControllerToken = (token: string, roomId: string, rotate = false) =>
   apiCall<{ token: string }>('getRoomControllerToken', { token, roomId, rotate });
 export interface PendingDebate {
