@@ -391,3 +391,26 @@ details[open]::details-content{block-size:auto;opacity:1;}
 @media(prefers-reduced-motion:reduce) {
   .timer-digits.warning.blink, .timer-digits.overtime.blink { animation: none; }
 }
+
+
+/* Keep secondary room metadata below the first-viewport timer surface. */
+.timer-room-metadata {
+  flex: 0 0 auto;
+  margin: 18px 0 8px;
+  padding: clamp(18px, 3vw, 30px);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 16px;
+  background: var(--surface, #fff);
+}
+.timer-room-metadata .timer-heading {
+  padding: 0;
+}
+.timer-room-metadata .timer-heading h1 {
+  margin-top: 6px;
+}
+.timer-room-metadata .team-versus {
+  margin: 18px auto 12px;
+}
+@media(max-width:760px) {
+  .timer-room-metadata { margin-top: 12px; padding: 16px 12px; }
+}
