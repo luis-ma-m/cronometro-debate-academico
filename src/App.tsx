@@ -3,8 +3,8 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer } from './api';
-import type { RoundActivationPreview } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
+import type { RoundActivationPreview, RoomConnectionStatus } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibilities';
@@ -31,6 +31,25 @@ function getSession(): { token: string; expiresAt: number } | null {
 }
 
 function makeId(prefix: string): string { return prefix + Math.random().toString(36).slice(2, 9); }
+
+type PendingTimerSync = {
+  roomSlug: string;
+  assignmentId: string;
+  activationRevision: number;
+  baseRevision: number;
+  actions: TimerAction[];
+  snapshot: PublicRoom;
+};
+const pendingTimerKey = (roomSlug: string) => 'debate-control-pending-timer:' + roomSlug;
+function readPendingTimer(roomSlug: string): PendingTimerSync | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(pendingTimerKey(roomSlug)) || 'null') as PendingTimerSync | null;
+    return value && value.roomSlug === roomSlug && Array.isArray(value.actions) ? value : null;
+  } catch { return null; }
+}
+function writePendingTimer(queue: PendingTimerSync): void {
+  localStorage.setItem(pendingTimerKey(queue.roomSlug), JSON.stringify(queue));
+}
 
 function getInstitutionCatalog(tournament: Pick<Tournament, 'institutions' | 'teams' | 'judges'>): string[] {
   const known = new Map<string, string>();
@@ -113,6 +132,7 @@ export default function App() {
   const [adminLoading, setAdminLoading] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [roomConnectionStatuses, setRoomConnectionStatuses] = useState<Record<string, RoomConnectionStatus>>({});
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [formatDirty, setFormatDirty] = useState(false);
   const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
@@ -153,8 +173,23 @@ export default function App() {
         setConnected(true);
         setLastSyncedAt(Date.now());
         setServerError('');
+        void getRoomConnectionStatuses(session.token).then((statuses) => {
+          setRoomConnectionStatuses(Object.fromEntries(statuses.map((status) => [status.physicalRoomId, status])));
+        }).catch(() => {
+          // If health cannot be checked, do not leave stale "connected" badges on screen.
+          setRoomConnectionStatuses((current) => Object.fromEntries(Object.entries(current).map(([id, status]) => [id, {
+            ...status,
+            connected: false,
+            disconnectedAt: status.lastSeenAt === null ? null : status.disconnectedAt ?? status.lastSeenAt + 18_000,
+          }])));
+        });
       } catch (error) {
         setConnected(false);
+        setRoomConnectionStatuses((current) => Object.fromEntries(Object.entries(current).map(([id, status]) => [id, {
+          ...status,
+          connected: false,
+          disconnectedAt: status.lastSeenAt === null ? null : status.disconnectedAt ?? status.lastSeenAt + 18_000,
+        }])));
         if (error instanceof Error && 'code' in error && (error as Error & { code?: string }).code === 'UNAUTHORIZED') { localStorage.removeItem(SESSION_KEY); setSession(null); }
         setServerError(error instanceof Error ? error.message : 'No se ha podido cargar el torneo.');
       } finally {
@@ -166,18 +201,90 @@ export default function App() {
     }
   }, [session, demoMode]);
 
+  const pendingSyncRef = useRef(false);
+  const syncPendingRoomActions = useCallback(async () => {
+    if (!roomId || !apiConfigured || !controllerToken || pendingSyncRef.current) return;
+    pendingSyncRef.current = true;
+    try {
+      while (true) {
+        const queue = readPendingTimer(roomId);
+        if (!queue || queue.actions.length === 0) {
+          if (queue) localStorage.removeItem(pendingTimerKey(roomId));
+          return;
+        }
+        try {
+          const action = queue.actions[0];
+          if (!action) {
+            localStorage.removeItem(pendingTimerKey(roomId));
+            return;
+          }
+          const requestStartedAt = Date.now();
+          const updated = await updateTimer(queue.roomSlug, action, queue.baseRevision, controllerToken, queue.assignmentId, queue.activationRevision);
+          const responseReceivedAt = Date.now();
+          // Re-read the durable queue after the await: the operator may have
+          // pressed another control while this request was in flight.
+          const latestQueue = readPendingTimer(roomId);
+          if (latestQueue) {
+            if (latestQueue.actions[0] === action) latestQueue.actions.shift();
+            latestQueue.baseRevision = updated.room.timer.revision;
+            if (latestQueue.actions.length) {
+              writePendingTimer(latestQueue);
+            } else {
+              localStorage.removeItem(pendingTimerKey(roomId));
+              setSnapshot(updated);
+            }
+          } else {
+            setSnapshot(updated);
+          }
+          setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
+          setConnected(true);
+          setLastSyncedAt(responseReceivedAt);
+          setServerError('');
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'No se ha podido sincronizar el cronómetro.';
+          setServerError(message);
+          const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code ?? '' : '';
+          if (['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
+            // The server is reachable but has rejected this operation. Preserve
+            // the local timer and queue rather than silently replacing it.
+            setConnected(true);
+          } else {
+            setConnected(false);
+          }
+          return;
+        }
+      }
+    } finally {
+      pendingSyncRef.current = false;
+    }
+  }, [roomId, controllerToken]);
+
   const reloadRoom = useCallback(async () => {
     if (!roomId) return;
+    const pendingBeforeFetch = apiConfigured ? readPendingTimer(roomId) : null;
+    if (pendingBeforeFetch?.actions.length) setSnapshot(pendingBeforeFetch.snapshot);
     if (apiConfigured) {
       try {
         const requestStartedAt = Date.now();
         const fresh = await getPublicRoom(roomId);
         const responseReceivedAt = Date.now();
-        setSnapshot(fresh);
         setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
-        setConnected(true); setLastSyncedAt(responseReceivedAt); setServerError('');
+        setConnected(true); setLastSyncedAt(responseReceivedAt);
+        const pending = readPendingTimer(roomId);
+        if (!pending?.actions.length) setServerError('');
+        if (pending?.actions.length) {
+          setSnapshot(pending.snapshot);
+          void syncPendingRoomActions();
+          return;
+        }
+        setSnapshot(fresh);
       }
-      catch (error) { setConnected(false); setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.'); }
+      catch (error) {
+        const pending = readPendingTimer(roomId);
+        if (pending?.actions.length) setSnapshot(pending.snapshot);
+        setConnected(false);
+        setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.');
+      }
     } else {
       const fresh = readDemo();
       setData(fresh);
@@ -205,12 +312,41 @@ export default function App() {
       setLastSyncedAt(Date.now());
       setServerError('');
     }
-  }, [roomId]);
+  }, [roomId, syncPendingRoomActions]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 200);
     return () => window.clearInterval(id);
   }, []);
+
+  useEffect(() => {
+    if (!roomId || !controllerToken || !apiConfigured) return;
+    let stopped = false;
+    const heartbeat = async () => {
+      try {
+        await sendRoomHeartbeat(roomId, controllerToken);
+        if (!stopped) {
+          setConnected(true);
+          setLastSyncedAt(Date.now());
+          if (!readPendingTimer(roomId)?.actions.length) setServerError('');
+        }
+      } catch (error) {
+        if (!stopped) {
+          setConnected(false);
+          setServerError(error instanceof Error ? error.message : 'Se ha perdido la conexión de esta sala.');
+        }
+      }
+    };
+    void heartbeat();
+    const id = window.setInterval(() => void heartbeat(), 5000);
+    const onOnline = () => void heartbeat();
+    window.addEventListener('online', onOnline);
+    return () => {
+      stopped = true;
+      window.clearInterval(id);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [roomId, controllerToken]);
 
   useEffect(() => {
     if (roomId) {
@@ -323,29 +459,57 @@ export default function App() {
 
   const timerAction = async (action: TimerAction) => {
     if (!snapshot) return;
-    try {
-      if (apiConfigured) {
-        const requestStartedAt = Date.now();
-        const updated = await updateTimer(snapshot.roomSlug, action, snapshot.room.timer.revision, controllerToken, snapshot.room.id, snapshot.activationRevision);
-        const responseReceivedAt = Date.now();
-        setServerOffsetMs(updated.serverTime - (requestStartedAt + responseReceivedAt) / 2);
-        setSnapshot(updated);
-      } else {
-        const current = readDemo();
-        const room = current.rooms.find((item) => item.id === snapshot.room.id);
-        if (!room) return;
-        const changed = withRoomStatus({ ...room, timer: transitionTimer(room.timer, room.phases, action) }, current.minimumJudgesPerRoom ?? 1);
-        const next = { ...current, rooms: current.rooms.map((item) => item.id === room.id ? changed : item), revision: current.revision + 1, updatedAt: Date.now() };
-        writeDemo(next);
-        setData(next);
-        await reloadRoom();
+    if (apiConfigured) {
+      const currentSnapshot = snapshot;
+      const actionAt = Date.now() + serverOffsetMs;
+      const nextTimer = transitionTimer(currentSnapshot.room.timer, currentSnapshot.room.phases, action, actionAt);
+      if (nextTimer.revision === currentSnapshot.room.timer.revision) return;
+      const optimisticRoom = withRoomStatus(
+        { ...currentSnapshot.room, timer: nextTimer, updatedAt: actionAt },
+        currentSnapshot.minimumJudgesPerRoom ?? 1,
+      );
+      const optimisticSnapshot = { ...currentSnapshot, room: optimisticRoom, serverTime: actionAt };
+      const existingQueue = readPendingTimer(currentSnapshot.roomSlug);
+      const queue: PendingTimerSync = existingQueue ?? {
+        roomSlug: currentSnapshot.roomSlug,
+        assignmentId: currentSnapshot.room.id,
+        activationRevision: currentSnapshot.activationRevision,
+        baseRevision: currentSnapshot.room.timer.revision,
+        actions: [],
+        snapshot: optimisticSnapshot,
+      };
+      queue.actions.push(action);
+      queue.snapshot = optimisticSnapshot;
+      let persisted = false;
+      try {
+        writePendingTimer(queue);
+        persisted = true;
+      } catch {
+        // The live in-memory timer still works if browser storage is unavailable.
       }
-      setConnected(true);
-      setServerError('');
+      setSnapshot(optimisticSnapshot);
+      if (persisted) {
+        void syncPendingRoomActions();
+      } else {
+        // Degraded fallback for browsers that block localStorage: attempt one
+        // direct request while keeping the optimistic local timer usable.
+        void updateTimer(currentSnapshot.roomSlug, action, currentSnapshot.room.timer.revision, controllerToken, currentSnapshot.room.id, currentSnapshot.activationRevision)
+          .then((updated) => { setSnapshot(updated); setConnected(true); setServerError(''); })
+          .catch((error) => { setConnected(false); setServerError(error instanceof Error ? error.message : 'Cronómetro local; sincronización pendiente.'); });
+      }
+      return;
+    }
+    try {
+      const current = readDemo();
+      const room = current.rooms.find((item) => item.id === snapshot.room.id);
+      if (!room) return;
+      const changed = withRoomStatus({ ...room, timer: transitionTimer(room.timer, room.phases, action) }, current.minimumJudgesPerRoom ?? 1);
+      const next = { ...current, rooms: current.rooms.map((item) => item.id === room.id ? changed : item), revision: current.revision + 1, updatedAt: Date.now() };
+      writeDemo(next);
+      setData(next);
+      await reloadRoom();
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se ha podido controlar el cronómetro.');
-      const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : undefined;
-      if (errorCode && ['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION'].includes(errorCode)) await reloadRoom();
     }
   };
 
@@ -384,7 +548,8 @@ export default function App() {
     }
   };
 
-  if (roomId) return <RoomScreen snapshot={snapshot} now={now} serverOffsetMs={serverOffsetMs} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('debate-control-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} />;
+  const pendingTimerSync = Boolean(roomId && readPendingTimer(roomId)?.actions.length);
+  if (roomId) return <RoomScreen snapshot={snapshot} now={now} serverOffsetMs={serverOffsetMs} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('debate-control-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} syncPending={pendingTimerSync} />
 
   if (!session) {
     return <div className="login-shell">
@@ -1070,7 +1235,7 @@ export default function App() {
       {overviewIncompatibilityIncidents.length > 0 && <section className="panel warning-notice" role="status" aria-live="polite"><div className="panel-title"><div><h3>Incompatibilidades detectadas ({overviewIncompatibilityIncidents.length})</h3><p>Estas asignaciones existentes requieren revisión. No se han eliminado automáticamente.</p></div></div><div className="pending-debates-list">{overviewIncompatibilityIncidents.map((incident) => <article className="pending-debate-item" key={[incident.type, incident.roomId, ...incident.teamIds, ...incident.judgeIds].join(':')}><div className="pending-debate-heading"><b>{incident.roomName}</b><span className="state-pill issue">{incident.type === 'institution' ? 'Institución' : incident.type === 'team-judge' ? 'Equipo–juez' : 'Juez–juez'}</span></div><p>{incident.message}</p><div className="pending-debate-meta"><span>{incident.teamIds.map((id) => data.teams.find((team) => team.id === id)?.name ?? id).join(' · ') || 'Sin equipo afectado'}</span><span>{incident.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name ?? id).join(' · ')}</span><button className="text-button" onClick={() => { setSelectedRound(data.rooms.find((room) => room.id === incident.roomId)?.roundId ?? activeRound); setView('rooms'); }}>Revisar asignación <ChevronRight size={14} /></button></div></article>)}</div></section>}
       <div className="stat-grid"><Stat label="Salas de la ronda" value={overviewCounts.total} icon={<Monitor />} /><Stat label="En debate" value={overviewCounts.running} icon={<Activity />} /><Stat label="Preparadas" value={overviewCounts.ready} icon={<Check />} /><Stat label="Pendientes" value={overviewCounts.unassigned} icon={<Clock3 />} /></div>
       {(data.rounds.find((round) => round.id === activeTournamentRoundId)?.scoreType ?? 'qualifying') === 'qualifying' && overviewPendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{overviewPendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
-      <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{overviewRooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} onOpen={() => void openRoom(room.id)} />)}</div>{!activeTournamentRoundId ? <Empty text="No hay una ronda activa." /> : overviewRooms.length === 0 && <Empty text="No hay salas creadas para la ronda activa." />}</section></>}
+      <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{overviewRooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} connectionStatus={roomConnectionStatuses[room.physicalRoomId]} onOpen={() => void openRoom(room.id)} />)}</div>{!activeTournamentRoundId ? <Empty text="No hay una ronda activa." /> : overviewRooms.length === 0 && <Empty text="No hay salas creadas para la ronda activa." />}</section></>}
 
       {view === 'tournament' && <TournamentView data={data} />}
 
@@ -1418,17 +1583,19 @@ function Stat({ label, value, icon }: { label: string; value: number; icon: Reac
 }
 function Empty({ text }: { text: string }) { return <div className="empty"><Monitor size={24} /><p>{text}</p></div>; }
 
-function RoomRow({ room, data, onOpen, now }: { room: Room; data: Tournament; onOpen: () => void; now: number }) {
+function RoomRow({ room, data, onOpen, now, connectionStatus }: { room: Room; data: Tournament; onOpen: () => void; now: number; connectionStatus?: RoomConnectionStatus }) {
   const favor = data.teams.find((team) => team.id === room.teamFavorId)?.name || 'Equipo pendiente';
   const contra = data.teams.find((team) => team.id === room.teamContraId)?.name || 'Equipo pendiente';
   const judges = room.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name).filter(Boolean);
   const phaseLabel = currentPhaseLabel(room);
   const phaseSideLabel = currentPhaseSideLabel(room);
   const title = room.timer.status === 'running' ? 'En curso' : room.timer.status === 'paused' ? 'Pausada' : room.timer.status === 'finished' ? 'Finalizada' : room.status === 'ready' ? 'Preparada' : 'Pendiente';
-  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small><small><Clock3 size={13} /> {phaseLabel}{phaseSideLabel ? ' · ' + phaseSideLabel : ''}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer, now))}</strong>}<ChevronRight size={17} /></div></button>;
+  const disconnectedFor = connectionStatus?.disconnectedAt == null ? null : Math.max(0, Math.floor((now - connectionStatus.disconnectedAt) / 1000));
+  const connectionLabel = connectionStatus?.connected ? 'Cronómetro conectado' : connectionStatus?.lastSeenAt == null ? 'Sin señal del cronómetro' : 'Desconectada hace ' + (disconnectedFor !== null && disconnectedFor >= 60 ? Math.floor(disconnectedFor / 60) + ' min ' + (disconnectedFor % 60) + ' s' : (disconnectedFor ?? 0) + ' s');
+  return <button className="room-row" onClick={onOpen}><div className={'room-icon ' + room.status}><Monitor size={18} /></div><div className="room-row-main"><b>{room.name}<span className={'state-pill ' + room.status}>{title}</span></b><p>{favor} <i>vs.</i> {contra}</p><small><Gavel size={13} /> {judges.length ? judges.join(' · ') : 'Sin jueces asignados'}</small><small><Clock3 size={13} /> {phaseLabel}{phaseSideLabel ? ' · ' + phaseSideLabel : ''}</small><small className={connectionStatus?.connected ? 'room-connection connected' : 'room-connection disconnected'}><i className={connectionStatus?.connected ? '' : 'disconnected'} />{connectionLabel}</small></div><div className="room-row-end">{room.timer.status === 'running' && <strong>{formatTime(secondsLeft(room.timer, now))}</strong>}<ChevronRight size={17} /></div></button>;
 }
 
-function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected }: {
+function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, controllerEnabled, soundEnabled, onToggleSound, connected, syncPending }: {
   snapshot: PublicRoom | null;
   now: number;
   serverOffsetMs: number;
@@ -1439,6 +1606,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
   soundEnabled: boolean;
   onToggleSound: () => void;
   connected: boolean;
+  syncPending: boolean;
 }) {
   const room = snapshot?.room;
   const phase = room?.phases[room.timer.phaseIndex];
@@ -1494,7 +1662,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
     <header className="timer-top">
       <a href="/gestion" className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></a>
       <div className="timer-top-actions">
-        <span className="public-pill"><i className={connected ? '' : 'disconnected'} />{connected ? 'SINCRONIZADO' : 'SIN CONEXIÓN'}</span>
+        <span className="public-pill"><i className={connected ? '' : 'disconnected'} />{!connected ? 'SIN CONEXIÓN' : syncPending ? 'PENDIENTE DE SINCRONIZAR' : 'SINCRONIZADO'}</span>
         <button className="button secondary sound-toggle" onClick={onToggleSound} aria-pressed={soundEnabled}><>{soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}{soundEnabled ? 'Avisos sonoros activados' : 'Activar sonido'}</></button>
       </div>
     </header>
