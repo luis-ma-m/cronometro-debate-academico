@@ -350,3 +350,44 @@ details[open]::details-content{block-size:auto;opacity:1;}
 .round-transition{animation:round-transition-lifecycle 45s linear both}
 @keyframes round-transition-lifecycle{0%{opacity:0}4.444%{opacity:1}95.556%{opacity:1}100%{opacity:0}}
 @media(prefers-reduced-motion:reduce){.round-transition{animation:none!important;opacity:1}.entity-picker-options,.entity-picker-option{transition:none!important}}
+
+
+/* Debate Control — timer-first hierarchy and warning palette */
+:root { --accent-tertiary: #1474BD; }
+.button.primary { background: var(--accent-tertiary); }
+.button.primary:hover { background: #0f5f9d; }
+.brand-mark { background: var(--accent-tertiary); }
+.nav-button.selected { box-shadow: inset 3px 0 var(--accent-tertiary); }
+.text-button, .picker-clear, .picker-expand { color: var(--accent-tertiary); }
+.stat-icon { color: var(--accent-tertiary); background: #e8f2fb; }
+.timer-shell { max-width: none; min-height: 100vh; padding: 10px clamp(10px, 1.8vw, 28px) 20px; display: flex; flex-direction: column; }
+.timer-top { flex: 0 0 auto; padding: 0 2px 10px; border-bottom-color: #e9edf3; }
+.timer-primary-card { flex: 1 0 auto; min-height: calc(90vh - 52px); display: flex; flex-direction: column; justify-content: center; padding: clamp(14px, 2.5vh, 30px) clamp(12px, 2.5vw, 42px); border-radius: 18px; }
+.timer-primary-card .timer-heading { padding: clamp(6px, 1vh, 12px) 0; }
+.timer-primary-card .timer-heading h1 { font-size: clamp(25px, 4vh, 46px); }
+.timer-primary-card .team-versus { margin: clamp(7px, 1.5vh, 18px) auto 8px; }
+.timer-primary-card .phase-heading { margin: clamp(8px, 1.5vh, 18px) 0 0; }
+.timer-primary-card .timer-digits { font-size: clamp(100px, 25vh, 30vw); line-height: 1; letter-spacing: -.065em; margin: clamp(8px, 1.5vh, 18px) 0; }
+.timer-primary-card .timer-track { width: min(88vw, 1300px); max-width: none; margin-bottom: clamp(10px, 1.5vh, 18px); height: 6px; }
+.timer-primary-card .timer-controls { margin-top: clamp(6px, 1.2vh, 14px); }
+.timer-primary-card .timer-status { gap: 12px; }
+.timer-digits.warning { color: #eab308; }
+.timer-digits.overtime { color: #dc2626; }
+.timer-digits.warning.blink, .timer-digits.overtime.blink { animation: timer-warning-blink .8s step-end infinite; }
+.timer-digits.warning.blink { --warning-color: #eab308; }
+.timer-digits.overtime.blink { --warning-color: #dc2626; }
+@keyframes timer-warning-blink { 0%, 49.99% { color: var(--warning-color); } 50%, 100% { color: #111827; } }
+.timer-note { display: none; }
+.timer-footer { margin-top: 16px; }
+@media(max-width:760px) {
+  .timer-shell { padding: 8px 8px 14px; }
+  .timer-primary-card { min-height: calc(90dvh - 50px); padding: 13px 9px; }
+  .timer-primary-card .timer-digits { font-size: clamp(76px, 20vw, 22vh); letter-spacing: -.05em; }
+  .timer-primary-card .timer-heading { padding: 6px 0; }
+  .timer-primary-card .team-versus { grid-template-columns: minmax(0,1fr) 28px minmax(0,1fr); }
+  .timer-primary-card .team-versus b { overflow-wrap: anywhere; }
+  .timer-status { flex-wrap: wrap; justify-content: center; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .timer-digits.warning.blink, .timer-digits.overtime.blink { animation: none; }
+}
