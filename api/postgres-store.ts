@@ -607,7 +607,9 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     if (replacements.Rondas) await persistRounds(client, replacements.Rondas);
     if (replacements.Equipos) await persistTeams(client, replacements.Equipos, false);
     if (replacements.Jueces) await persistTeams(client, replacements.Jueces, true);
-    if (replacements.Equipos && replacements.Jueces) await persistIncompatibilities(client, replacements.Equipos, replacements.Jueces);
+    if (replacements.Equipos || replacements.Jueces) {
+      await persistIncompatibilities(client, replacements.Equipos || data.rows.Equipos, replacements.Jueces || data.rows.Jueces);
+    }
     if (replacements.SalasFisicas) await persistPhysicalRooms(client, replacements.SalasFisicas);
     const rebuildAssignmentRelations = assignmentRelationsChanged(data, replacements);
     if (rebuildAssignmentRelations) {
