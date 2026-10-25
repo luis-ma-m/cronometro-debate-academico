@@ -438,7 +438,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "revision", String(nextRevision));
     setConfig(configRows, "updatedAt", String(now));
 
-    const replacements: Partial<Record<SheetName, SheetRow[]>> = {
+    const candidateReplacements: Partial<Record<SheetName, SheetRow[]>> = {
       Config: configRows,
       Rondas: tournament.rounds.map((round) => ({
         id: round.id, number: round.number, name: round.name,
@@ -453,7 +453,61 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
       SalasFisicas: tournament.physicalRooms.map((room) => ({ ...room, updatedAt: now })),
       Formatos: tournament.formats.map((format) => ({ ...format, phases: JSON.stringify(format.phases) })),
     };
-    const response = tournamentFromData({ ...data, rows: { ...data.rows, ...replacements } });
+
+    // Compare persisted semantics, not transient updatedAt values. The API still
+    // returns a complete tournament snapshot, but PostgreSQL only receives the
+    // entity sets that actually changed.
+    const sorted = <T>(items: T[], key: (item: T) => string) => [...items].sort((a, b) => key(a).localeCompare(key(b)));
+    const sameValue = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
+    const roundsChanged = !sameValue(
+      sorted(data.rows.Rondas, (row) => str(row.id)).map((row) => [str(row.id), num(row.number), str(row.name), bool(row.active), str(row.defaultFormatId), str(row.scoreType)]),
+      sorted(candidateReplacements.Rondas!, (row) => str(row.id)).map((row) => [str(row.id), num(row.number), str(row.name), bool(row.active), str(row.defaultFormatId), str(row.scoreType)]),
+    );
+    const teamsChanged = !sameValue(
+      sorted(data.rows.Equipos, (row) => str(row.id)).map((row) => [str(row.id), str(row.name), str(row.institution), bool(row.active), parseStringArray(row.incompatibleJudgeIds).sort()]),
+      sorted(candidateReplacements.Equipos!, (row) => str(row.id)).map((row) => [str(row.id), str(row.name), str(row.institution), bool(row.active), parseStringArray(row.incompatibleJudgeIds).sort()]),
+    );
+    const judgesChanged = !sameValue(
+      sorted(data.rows.Jueces, (row) => str(row.id)).map((row) => [str(row.id), str(row.name), str(row.institution), bool(row.active), parseStringArray(row.incompatibleJudgeIds).sort()]),
+      sorted(candidateReplacements.Jueces!, (row) => str(row.id)).map((row) => [str(row.id), str(row.name), str(row.institution), bool(row.active), parseStringArray(row.incompatibleJudgeIds).sort()]),
+    );
+    const roomSignature = (row: SheetRow) => [
+      str(row.id), str(row.roundId), str(row.physicalRoomId), str(row.formatId),
+      str(row.teamFavorId), str(row.teamContraId), str(row.notes),
+      parseJson<Phase[]>(row.phases, []),
+      parseStringArray(row.judgeIds).sort(),
+    ];
+    const roomsChanged = !sameValue(
+      sorted(data.rows.Salas, (row) => str(row.id)).map(roomSignature),
+      sorted(candidateReplacements.Salas!, (row) => str(row.id)).map(roomSignature),
+    );
+    const timerSignature = (row: SheetRow) => [
+      str(row.roomId), str(row.status), num(row.phaseIndex), num(row.remainingSeconds),
+      num(row.startedAt), num(row.lastResumedAt), num(row.revision), num(row.updatedAt),
+    ];
+    const timersChanged = !sameValue(
+      sorted(data.rows.Cronometros, (row) => str(row.roomId)).map(timerSignature),
+      sorted(candidateReplacements.Cronometros!, (row) => str(row.roomId)).map(timerSignature),
+    );
+    const physicalRoomsChanged = !sameValue(
+      sorted(data.rows.SalasFisicas, (row) => str(row.id)).map((row) => [str(row.id), str(row.slug), str(row.name), bool(row.active)]),
+      sorted(candidateReplacements.SalasFisicas!, (row) => str(row.id)).map((row) => [str(row.id), str(row.slug), str(row.name), bool(row.active)]),
+    );
+    const formatsChanged = !sameValue(
+      sorted(data.rows.Formatos, (row) => str(row.id)).map((row) => [str(row.id), str(row.name), num(row.version), parseJson<Phase[]>(row.phases, [])]),
+      sorted(candidateReplacements.Formatos!, (row) => str(row.id)).map((row) => [str(row.id), str(row.name), num(row.version), parseJson<Phase[]>(row.phases, [])]),
+    );
+
+    const replacements: Partial<Record<SheetName, SheetRow[]>> = { Config: configRows };
+    if (roundsChanged) replacements.Rondas = candidateReplacements.Rondas;
+    if (teamsChanged) replacements.Equipos = candidateReplacements.Equipos;
+    if (judgesChanged) replacements.Jueces = candidateReplacements.Jueces;
+    if (roomsChanged) replacements.Salas = candidateReplacements.Salas;
+    if (timersChanged) replacements.Cronometros = candidateReplacements.Cronometros;
+    if (physicalRoomsChanged) replacements.SalasFisicas = candidateReplacements.SalasFisicas;
+    if (formatsChanged) replacements.Formatos = candidateReplacements.Formatos;
+
+    const response = tournamentFromData({ ...data, rows: { ...data.rows, ...candidateReplacements } });
     try {
       await writeTables(data, replacements, [
         randomBytes(16).toString("hex"),
