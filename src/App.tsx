@@ -292,6 +292,9 @@ export default function App() {
       const result = apiConfigured ? await login(password) : password === 'contraseña' ? { token: 'demo-session', expiresAt: Date.now() + 8 * 60 * 60 * 1000 } : null;
       if (!result) throw new Error('Contraseña incorrecta.');
       localStorage.setItem(SESSION_KEY, JSON.stringify(result));
+      setDemoMode(false);
+      setConnected(false);
+      setAdminLoading(apiConfigured);
       setSession(result);
       setPassword('');
     } catch (error) { setLoginError(error instanceof Error ? error.message : 'No se ha podido iniciar sesión.'); }
@@ -310,6 +313,9 @@ export default function App() {
     const token = session?.token;
     localStorage.removeItem(SESSION_KEY);
     setSession(null);
+    setDemoMode(false);
+    setAdminLoading(false);
+    setConnected(false);
     setView('overview');
     if (apiConfigured && token) void apiLogout(token).catch(() => undefined);
   };
