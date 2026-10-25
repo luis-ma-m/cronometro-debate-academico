@@ -897,6 +897,22 @@ export default function App() {
         const previewChanged = signature(refreshedPreview) !== signature(preview);
         setActivationPreview(refreshedPreview);
         if (refreshedPreview.alreadyActive) {
+          // If the activation revision advanced since this dialog was opened,
+          // a previous request may have committed while its HTTP response was
+          // lost. Refresh the committed tournament instead of asking the user
+          // to repeat an already-completed irreversible operation.
+          if (refreshedPreview.activationRevision > preview.activationRevision) {
+            const latest = await getTournament(session.token);
+            setData(latest);
+            hasUnsavedRef.current = false;
+            setHasUnsavedChanges(false);
+            setFormatDirty(false);
+            setSelectedRound(refreshedPreview.targetRoundId);
+            setActivationPreview(null);
+            setLastSyncedAt(Date.now());
+            setConnected(true);
+            return;
+          }
           setActivationPreview(null);
           setServerError('Esa ronda ya está activa.');
           return;
@@ -912,7 +928,7 @@ export default function App() {
       let saved: Tournament;
       if (apiConfigured) {
         if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
-        saved = await apiActivateRound(session.token, effectivePreview.targetRoundId, effectiveForce);
+        saved = await apiActivateRound(session.token, effectivePreview.targetRoundId, effectiveForce, effectivePreview.activationRevision);
       } else {
         const target = data.rounds.find((round) => round.id === effectivePreview.targetRoundId);
         if (!target) throw new Error('No se encuentra la ronda seleccionada.');

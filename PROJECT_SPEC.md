@@ -1,5 +1,7 @@
 # Definición funcional — Debate Control
 
+> **Nota de vigencia:** este documento recoge la especificación original del proyecto. Las referencias a Google Sheets, Google Apps Script, LockService y el esquema inicial describen la arquitectura histórica, no la implementación operativa actual. La arquitectura vigente es Neon PostgreSQL + API de Vercel, con Upstash Redis limitado a sesiones, intentos fallidos y claves de control por sala. Consulta `docs/NEON_MIGRATION.md` y `docs/DEPLOYMENT.md` para el estado actual y el procedimiento de migración.
+
 ## Objetivo
 Crear una aplicación web para organizar un torneo académico LEDU. Se compone de gestión privada y cronómetros públicos por sala. Se reescribe el proyecto desde cero; el repositorio previo solo se considera referencia conceptual.
 
