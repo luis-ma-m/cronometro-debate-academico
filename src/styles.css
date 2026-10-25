@@ -414,3 +414,22 @@ details[open]::details-content{block-size:auto;opacity:1;}
 @media(max-width:760px) {
   .timer-room-metadata { margin-top: 12px; padding: 16px 12px; }
 }
+
+
+/* Room-device connection health is visible in the operational summary. */
+.room-connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+.room-connection.connected { color: var(--success, #15803d); }
+.room-connection.disconnected { color: var(--danger, #b91c1c); }
+.room-connection i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
