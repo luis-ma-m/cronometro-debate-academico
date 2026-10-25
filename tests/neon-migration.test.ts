@@ -56,6 +56,19 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain("WHERE id=$8 AND timer_revision=$9");
   });
 
+  it("limits tournament writes to changed entity sets and batches relation inserts", async () => {
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    expect(api).toContain("const candidateReplacements");
+    expect(api).toContain("if (roomsChanged) replacements.Salas");
+    expect(api).toContain("if (formatsChanged) replacements.Formatos");
+    expect(store).toContain("function assignmentRelationsChanged");
+    expect(store).toContain("const rebuildAssignmentRelations = assignmentRelationsChanged(data, replacements)");
+    expect(store).toContain("async function insertMany");
+    expect(store).not.toContain("Boolean(replacements.Equipos)");
+    expect(store).toContain("await insertMany(client, \"assignment_phases\"");
+  });
+
   it("persists timer audit and idempotency in the same write transaction", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
     const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
