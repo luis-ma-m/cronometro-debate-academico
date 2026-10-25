@@ -269,8 +269,9 @@ export default function App() {
         const fresh = await getPublicRoom(roomId);
         const responseReceivedAt = Date.now();
         setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
-        setConnected(true); setLastSyncedAt(responseReceivedAt); setServerError('');
+        setConnected(true); setLastSyncedAt(responseReceivedAt);
         const pending = readPendingTimer(roomId);
+        if (!pending?.actions.length) setServerError('');
         if (pending?.actions.length) {
           setSnapshot(pending.snapshot);
           void syncPendingRoomActions();
@@ -327,7 +328,7 @@ export default function App() {
         if (!stopped) {
           setConnected(true);
           setLastSyncedAt(Date.now());
-          setServerError('');
+          if (!readPendingTimer(roomId)?.actions.length) setServerError('');
         }
       } catch (error) {
         if (!stopped) {
