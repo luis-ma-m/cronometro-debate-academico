@@ -109,6 +109,8 @@ export default function App() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const hasUnsavedRef = useRef(false);
   const [connected, setConnected] = useState(false);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [formatDirty, setFormatDirty] = useState(false);
@@ -123,7 +125,9 @@ export default function App() {
   const controllerToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('control') ?? '';
 
   const reloadAdmin = useCallback(async () => {
+    if (demoMode) return;
     if (apiConfigured && session) {
+      setAdminLoading(true);
       try {
         const requestStartedAt = Date.now();
         const fresh = await getTournament(session.token);
@@ -152,9 +156,14 @@ export default function App() {
         setConnected(false);
         if (error instanceof Error && 'code' in error && (error as Error & { code?: string }).code === 'UNAUTHORIZED') { localStorage.removeItem(SESSION_KEY); setSession(null); }
         setServerError(error instanceof Error ? error.message : 'No se ha podido cargar el torneo.');
+      } finally {
+        setAdminLoading(false);
       }
-    } else if (!apiConfigured) setData(readDemo());
-  }, [session]);
+    } else if (!apiConfigured) {
+      setData(readDemo());
+      setAdminLoading(false);
+    }
+  }, [session, demoMode]);
 
   const reloadRoom = useCallback(async () => {
     if (!roomId) return;
@@ -288,6 +297,15 @@ export default function App() {
     } catch (error) { setLoginError(error instanceof Error ? error.message : 'No se ha podido iniciar sesión.'); }
   };
 
+  const loadDemoAfterFailure = () => {
+    setData(readDemo());
+    setDemoMode(true);
+    setConnected(false);
+    setServerError('');
+    setAdminLoading(false);
+    setLastSyncedAt(null);
+  };
+
   const logout = () => {
     const token = session?.token;
     localStorage.removeItem(SESSION_KEY);
@@ -365,6 +383,31 @@ export default function App() {
     return <div className="login-shell">
       <aside className="login-hero"><div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div><p className="eyebrow">OPERACIONES DEL TORNEO</p><h1>Un torneo.<br />Todas las salas.<br /><em>Una sola visión.</em></h1><p className="hero-copy">Organiza equipos, coordina al panel de jueces y sigue el estado de cada debate desde un único lugar.</p><div className="hero-tags"><span><ShieldCheck size={15} /> Gestión privada</span><span><Activity size={15} /> Actualización automática</span></div></aside>
       <main className="login-side"><form className="login-card" onSubmit={submitLogin}><span className="eyebrow">PANEL DE ORGANIZACIÓN</span><h2>Acceso al torneo</h2><p>Introduce la contraseña para gestionar rondas, equipos, jueces y salas.</p><label htmlFor="password">Contraseña</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Introduce la contraseña" required /><button className="button primary full" type="submit">Entrar al panel <ArrowRight size={17} /></button>{loginError && <p className="error">{loginError}</p>}<p className="security-note"><ShieldCheck size={15} /> {apiConfigured ? 'Autenticación validada por el backend.' : 'Modo de demostración: contraseña' + ' contraseña'}.</p><p className="subtle">Los cronómetros de sala se abren por enlace y no requieren iniciar sesión.</p></form></main>
+    </div>;
+  }
+
+  if (apiConfigured && session && !demoMode && !connected) {
+    return <div className="login-shell">
+      <main className="login-side">
+        <section className="login-card" aria-live="polite">
+          <span className="eyebrow">PANEL DE ORGANIZACIÓN</span>
+          <h2>{adminLoading ? 'Cargando torneo…' : 'No se ha podido cargar el torneo'}</h2>
+          <p>{adminLoading
+            ? 'Estamos recuperando los datos reales del torneo. No mostraremos datos de demostración mientras esperamos la respuesta.'
+            : serverError || 'No se ha podido establecer conexión con el backend.'}</p>
+          {adminLoading
+            ? <p className="subtle">Esto puede tardar unos segundos.</p>
+            : <div className="login-actions">
+                <button className="button primary full" type="button" onClick={() => void reloadAdmin()} disabled={adminLoading}>
+                  <RefreshCw size={17} /> Reintentar conexión
+                </button>
+                <button className="button full" type="button" onClick={loadDemoAfterFailure}>
+                  Cargar con datos demo
+                </button>
+              </div>}
+          <p className="security-note">El modo demo utiliza datos locales y no refleja necesariamente el estado real del torneo.</p>
+        </section>
+      </main>
     </div>;
   }
 
