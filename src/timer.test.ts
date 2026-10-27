@@ -126,6 +126,21 @@ describe('LEDU timer state machine', () => {
     expect(transitionTimer(last, LEDU_PHASES, 'next', 6000).status).toBe('finished');
   });
 
+  it('rejects a team assigned to multiple rooms in the same round, regardless of side', () => {
+    const room = (id: string, favor: string, contra: string) => ({
+      id, name: id.toUpperCase(), roundId: 'r1', teamFavorId: favor, teamContraId: contra,
+      judgeIds: [], phases: LEDU_PHASES,
+    });
+    const teams = [{ id: 't1', name: 'Equipo 1' }, { id: 't2', name: 'Equipo 2' }, { id: 't3', name: 'Equipo 3' }];
+    const errors = validateAssignments({
+      rounds: [{ id: 'r1', name: 'Ronda 1' }],
+      teams,
+      judges: [],
+      rooms: [room('a1', 't1', 't2'), room('a2', 't3', 't1')],
+    });
+    expect(errors.some((error) => error.includes('Equipo 1') && error.includes('misma ronda'))).toBe(true);
+  });
+
   it('validates duplicate assignments and room completeness', () => {
     const room = (id: string, favor: string, judges: string[]) => ({ id, name: id.toUpperCase(), roundId: 'r1', teamFavorId: favor, teamContraId: 't2', judgeIds: judges, phases: LEDU_PHASES });
     const errors = validateAssignments({
