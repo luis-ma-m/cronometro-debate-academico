@@ -768,11 +768,13 @@ export default function App() {
     const name = window.prompt('Nombre del orador/a');
     if (!name?.trim()) return;
     const speaker: Speaker = { id: makeId('speaker'), teamId, name: name.trim() };
-    void persist({ ...data, speakers: [...(data.speakers ?? []), speaker], updatedAt: Date.now() });
+    updateData((current) => ({ ...current, speakers: [...(current.speakers ?? []), speaker] }));
+    setServerError('');
   };
   const removeSpeaker = (speaker: Speaker) => {
     if (!window.confirm('¿Eliminar al orador/a "' + speaker.name + '"? Esta acción no se puede deshacer.')) return;
-    void persist({ ...data, speakers: (data.speakers ?? []).filter((item) => item.id !== speaker.id), updatedAt: Date.now() });
+    updateData((current) => ({ ...current, speakers: (current.speakers ?? []).filter((item) => item.id !== speaker.id) }));
+    setServerError('');
   };
   const addJudge = () => {
     const name = window.prompt('Nombre del juez/a');
