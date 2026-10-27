@@ -586,6 +586,19 @@ export default function App() {
   // Keep navigation selection separate from the operational round shown in Overview.
   const activeRound = selectedRound || data.rounds[0]?.id || '';
   const rooms = data.rooms.filter((room) => room.roundId === activeRound);
+  // Prevent a team already assigned to another room in this round from being selected again.
+  const teamAlreadyAssignedElsewhere = (teamId: string, roomId: string) =>
+    Boolean(teamId) && data.rooms.some((room) => room.roundId === activeRound && room.id !== roomId &&
+      (room.teamFavorId === teamId || room.teamContraId === teamId));
+  const teamAssignmentReason = (teamId: string, room: Room, side: 'favor' | 'contra') => {
+    if (teamId && teamId !== (side === 'favor' ? room.teamFavorId : room.teamContraId) &&
+      teamAlreadyAssignedElsewhere(teamId, room.id)) {
+      const assignedRoom = data.rooms.find((item) => item.roundId === activeRound && item.id !== room.id &&
+        (item.teamFavorId === teamId || item.teamContraId === teamId));
+      return 'Ya asignado en ' + (assignedRoom?.name ?? 'otra sala') + ' de esta ronda';
+    }
+    return undefined;
+  };
   const activeTournamentRoundId = resolveActiveRoundId(data);
   const overviewRooms = activeTournamentRoundId ? data.rooms.filter((room) => room.roundId === activeTournamentRoundId) : [];
   const overviewCounts = { total: overviewRooms.length, running: overviewRooms.filter((room) => room.timer.status === 'running').length, ready: overviewRooms.filter((room) => room.status === 'ready').length, unassigned: overviewRooms.filter((room) => room.status === 'unassigned').length, finished: overviewRooms.filter((room) => room.timer.status === 'finished').length };
@@ -1276,7 +1289,7 @@ export default function App() {
           <div id={'room-config-' + room.id} className="room-card-disclosure" aria-hidden={!expanded} ref={(node) => { if (node) node.inert = !expanded; }}>
             <div className="room-card-disclosure-inner">
               <div className="room-editor-heading"><label>Nombre de la sala<input className="table-input room-name-input" aria-label="Nombre de la sala" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} /></label><p className="muted">Enlace permanente: /sala/{data.physicalRooms.find((physical) => physical.id === room.physicalRoomId)?.slug ?? room.physicalRoomId}</p></div>
-              <div className="assign-grid"><label className="room-format-select">Formato de esta sala<select value={room.formatId} onChange={(event) => updateRoom(room.id, { formatId: event.target.value })}><option value="">Heredar formato de la ronda</option>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select><small>Se aplicará al activar la ronda.</small></label><SearchableEntityPicker label="Equipo a favor" options={data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => ({ id: team.id, name: team.name, active: team.active, disabledReason: team.id === room.teamContraId ? "Ya asignado como equipo en contra" : undefined }))} value={room.teamFavorId} onChange={(value) => updateRoom(room.id, { teamFavorId: value as string })} /><SearchableEntityPicker label="Equipo en contra" options={data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => ({ id: team.id, name: team.name, active: team.active, disabledReason: team.id === room.teamFavorId ? "Ya asignado como equipo a favor" : undefined }))} value={room.teamContraId} onChange={(value) => updateRoom(room.id, { teamContraId: value as string })} /></div>
+              <div className="assign-grid"><label className="room-format-select">Formato de esta sala<select value={room.formatId} onChange={(event) => updateRoom(room.id, { formatId: event.target.value })}><option value="">Heredar formato de la ronda</option>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select><small>Se aplicará al activar la ronda.</small></label><SearchableEntityPicker label="Equipo a favor" options={data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => ({ id: team.id, name: team.name, active: team.active, disabledReason: team.id === room.teamContraId ? "Ya asignado como equipo en contra" : teamAssignmentReason(team.id, room, "favor") }))} value={room.teamFavorId} onChange={(value) => updateRoom(room.id, { teamFavorId: value as string })} /><SearchableEntityPicker label="Equipo en contra" options={data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => ({ id: team.id, name: team.name, active: team.active, disabledReason: team.id === room.teamFavorId ? "Ya asignado como equipo a favor" : teamAssignmentReason(team.id, room, "contra") }))} value={room.teamContraId} onChange={(value) => updateRoom(room.id, { teamContraId: value as string })} /></div>
               <div className="judges-select"><SearchableEntityPicker label="Jueces asignados" multiple options={data.judges.map((judge) => {
                 const conflict = conflictingTeamForJudge(data, room, judge);
                 const teamConflict = [room.teamFavorId, room.teamContraId].map((id) => data.teams.find((team) => team.id === id)).find((team) => team?.incompatibleJudgeIds?.includes(judge.id));
