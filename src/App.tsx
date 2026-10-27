@@ -599,6 +599,15 @@ export default function App() {
     }
     return undefined;
   };
+  const judgeAlreadyAssignedElsewhere = (judgeId: string, roomId: string) =>
+    Boolean(judgeId) && data.rooms.some((room) => room.roundId === activeRound && room.id !== roomId && room.judgeIds.includes(judgeId));
+  const judgeAssignmentReason = (judgeId: string, room: Room) => {
+    if (judgeId && !room.judgeIds.includes(judgeId) && judgeAlreadyAssignedElsewhere(judgeId, room.id)) {
+      const assignedRoom = data.rooms.find((item) => item.roundId === activeRound && item.id !== room.id && item.judgeIds.includes(judgeId));
+      return 'Ya asignado en ' + (assignedRoom?.name ?? 'otra sala') + ' de esta ronda';
+    }
+    return undefined;
+  };
   const activeTournamentRoundId = resolveActiveRoundId(data);
   const overviewRooms = activeTournamentRoundId ? data.rooms.filter((room) => room.roundId === activeTournamentRoundId) : [];
   const overviewCounts = { total: overviewRooms.length, running: overviewRooms.filter((room) => room.timer.status === 'running').length, ready: overviewRooms.filter((room) => room.status === 'ready').length, unassigned: overviewRooms.filter((room) => room.status === 'unassigned').length, finished: overviewRooms.filter((room) => room.timer.status === 'finished').length };
@@ -1294,7 +1303,8 @@ export default function App() {
                 const conflict = conflictingTeamForJudge(data, room, judge);
                 const teamConflict = [room.teamFavorId, room.teamContraId].map((id) => data.teams.find((team) => team.id === id)).find((team) => team?.incompatibleJudgeIds?.includes(judge.id));
                 const judgeConflict = room.judgeIds.filter((id) => id !== judge.id).map((id) => data.judges.find((item) => item.id === id)).find((other) => other?.incompatibleJudgeIds?.includes(judge.id) || judge.incompatibleJudgeIds?.includes(other?.id ?? ''));
-                const reason = conflict ? 'Institución incompatible con ' + conflict.name : teamConflict ? 'Incompatible con el equipo ' + teamConflict.name : judgeConflict ? 'Incompatible con ' + judgeConflict.name : undefined;
+                const duplicateReason = judgeAssignmentReason(judge.id, room);
+                const reason = duplicateReason ?? (conflict ? 'Institución incompatible con ' + conflict.name : teamConflict ? 'Incompatible con el equipo ' + teamConflict.name : judgeConflict ? 'Incompatible con ' + judgeConflict.name : undefined);
                 return { id: judge.id, name: judge.name, active: judge.active, disabledReason: reason };
               })} value={room.judgeIds} onChange={(value) => updateRoom(room.id, { judgeIds: value as string[] })} /></div>
               <div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div>
