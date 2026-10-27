@@ -1257,9 +1257,8 @@ export default function App() {
       {view === 'scoring' && <ScoringView
         data={data}
         scoring={scoring}
-        rooms={data.rooms.filter((room) => room.roundId === activeRound)}
-        selectedRoundId={activeRound}
-        onSelectRound={setSelectedRound}
+        rooms={activeTournamentRoundId ? data.rooms.filter((room) => room.roundId === activeTournamentRoundId) : []}
+        selectedRoundId={activeTournamentRoundId}
         onUpdateRoundScoreType={updateRoundScoreType}
         scoreCategoryDraft={scoreCategoryDraft}
         onCategoryDraftChange={setScoreCategoryDraft}
@@ -1370,7 +1369,7 @@ function TournamentView({data}:{data:Tournament}) {
 }
 
 function ScoringView({
-  data, scoring, rooms, selectedRoundId, onSelectRound, onUpdateRoundScoreType, scoreCategoryDraft,
+  data, scoring, rooms, selectedRoundId, onUpdateRoundScoreType, scoreCategoryDraft,
   onCategoryDraftChange, onAddCategory, onUpdateCategory, onRemoveCategory,
   onSaveCategories, onSaveScorecard, saving,
 }: {
@@ -1378,7 +1377,6 @@ function ScoringView({
   scoring: { categories: ScoreCategory[]; scorecards: RoundScorecard[] };
   rooms: Room[];
   selectedRoundId: string;
-  onSelectRound: (id: string) => void;
   onUpdateRoundScoreType: (roundId: string, scoreType: 'qualifying' | 'elimination') => void;
   scoreCategoryDraft: string;
   onCategoryDraftChange: (value: string) => void;
@@ -1528,13 +1526,12 @@ function ScoringView({
   };
 
   return <>
-    <div className="page-heading"><div><p className="eyebrow">EVALUACIÓN</p><h2>Puntuaciones de ronda</h2><p className="muted">Actas de debates finalizados, historial por equipo y puntuación individual de oradores.</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">EVALUACIÓN</p><h2>Puntuaciones de la ronda activa</h2><p className="muted">Actas de los debates finalizados de la ronda activa, sin necesidad de seleccionar rondas manualmente.</p></div></div>
     <section className="panel scoring-panel">
-      <div className="panel-title"><div><h3>Ronda y tipo de competición</h3><p>Las rondas se consideran clasificatorias por defecto; cambia a eliminatoria cuando corresponda.</p></div></div>
-      <div className="scoring-round-selector"><label>Ronda<select value={selectedRoundId} onChange={(event) => { onSelectRound(event.target.value); setEditingRoomId(""); setDraft(null); }}>{data.rounds.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Tipo<select value={round?.scoreType ?? "qualifying"} onChange={(event) => {
+      <div className="panel-title"><div><h3>{round?.name ?? "Sin ronda activa"}</h3><p>La puntuación siempre corresponde a la ronda que está activa en el torneo.</p></div>{round && <label>Tipo de competición<select value={round.scoreType ?? "qualifying"} onChange={(event) => {
         const scoreType = event.target.value as "qualifying" | "elimination";
         onUpdateRoundScoreType(selectedRoundId, scoreType);
-      }}><option value="qualifying">Clasificatoria</option><option value="elimination">Eliminatoria</option></select></label></div>
+      }}><option value="qualifying">Clasificatoria</option><option value="elimination">Eliminatoria</option></select></label>}</div>
       {elimination ? <div className="notice warning-notice"><CircleHelp size={17} /><span>Esta ronda es eliminatoria. No se permite registrar puntuaciones ni aparecerá como pendiente.</span></div> : <>
         <div className="stat-grid scoring-stats"><Stat label="Debates finalizados" value={eligible.length} icon={<Check />} /><Stat label="Actas registradas" value={history.length} icon={<BookOpen />} /><Stat label="Pendientes de puntuación" value={pending.length} icon={<Clock3 />} /></div>
         <div className="score-category-settings">
