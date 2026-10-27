@@ -1258,7 +1258,7 @@ export default function App() {
         data={data}
         scoring={scoring}
         rooms={activeTournamentRoundId ? data.rooms.filter((room) => room.roundId === activeTournamentRoundId) : []}
-        selectedRoundId={activeTournamentRoundId}
+        selectedRoundId={activeTournamentRoundId ?? ''}
         onUpdateRoundScoreType={updateRoundScoreType}
         scoreCategoryDraft={scoreCategoryDraft}
         onCategoryDraftChange={setScoreCategoryDraft}
