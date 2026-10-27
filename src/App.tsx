@@ -1399,11 +1399,14 @@ function ScoringView({
   const history = scoring.scorecards.filter((card) => card.roundId === selectedRoundId);
   const [draft, setDraft] = useState<RoundScorecard | null>(null);
   const [scoreInputDraft, setScoreInputDraft] = useState<ScoreInputDraft>({ teamScores: {}, speakerScores: {} });
+  // Keep fault inputs as strings while editing so users can clear the field.
+  const [faultInputDraft, setFaultInputDraft] = useState<Record<string, string>>({});
   const currentRoom = rooms.find((room) => room.id === editingRoomId);
 
   const beginEdit = (room: Room) => {
     const existing = scoring.scorecards.find((card) => card.roomId === room.id);
     setScoreInputDraft({ teamScores: {}, speakerScores: {} });
+    setFaultInputDraft({});
     const teamIds = [room.teamFavorId, room.teamContraId];
     const teams = teamIds.map((teamId) => {
       const team = data.teams.find((item) => item.id === teamId);
@@ -1460,6 +1463,22 @@ function ScoringView({
       teams: current.teams.map((team) => team.teamId === teamId ? { ...team, ...patch,
         total: sumCategoryScores({ ...team.categoryScores, ...(patch.categoryScores ?? {}) }, categories) } : team) as RoundScorecard["teams"],
     } : current);
+  };
+  const updateFaultInput = (teamId: string, faultType: "minorFaults" | "majorFaults", raw: string) => {
+    const key = teamId + ":" + faultType;
+    setFaultInputDraft((current) => ({ ...current, [key]: raw }));
+    // An empty value is valid during editing; keep the last committed score until blur/save.
+    if (raw !== "" && /^\d+$/.test(raw)) {
+      updateTeamScore(teamId, { [faultType]: Math.max(0, Math.min(100, Number(raw))) });
+    }
+  };
+  const commitFaultInput = (teamId: string, faultType: "minorFaults" | "majorFaults") => {
+    const key = teamId + ":" + faultType;
+    const raw = faultInputDraft[key];
+    setFaultInputDraft((current) => { const next = { ...current }; delete next[key]; return next; });
+    if (raw === undefined) return;
+    const parsed = raw.trim() === "" ? 0 : Number(raw);
+    updateTeamScore(teamId, { [faultType]: Number.isInteger(parsed) ? Math.max(0, Math.min(100, parsed)) : 0 });
   };
   const updateCategoryScore = (teamId: string, categoryId: string, value: number) => {
     setDraft((current) => current ? {
@@ -1546,7 +1565,7 @@ function ScoringView({
       <div className="score-judges"><b>Jueces evaluadores</b><div>{draft.judges.map((judge) => <span key={judge.judgeId}>{judge.judgeName}</span>)}</div></div>
       {draft.teams.map((team) => <section className="team-score-editor" key={team.teamId}><div className="team-score-heading"><div><h3>{team.teamName}</h3><p>La puntuación total se calcula automáticamente.</p></div><div className="team-score-total"><small>TOTAL</small><b>{team.total}</b></div></div>
         <div className="score-category-inputs">{categories.map((category) => <label key={category.id}>{category.name}<input type="text" inputMode="decimal" minLength={0} aria-label={category.name + " de " + team.teamName} value={scoreInputDraft.teamScores[team.teamId + ":" + category.id] ?? String(team.categoryScores[category.id] ?? "")} onChange={(event) => updateTeamScoreInput(team.teamId, category.id, event.target.value)} onBlur={() => commitTeamScoreInput(team.teamId, category.id)} /></label>)}</div>
-        <div className="fault-inputs"><label>Faltas leves<input type="number" min={0} max={100} step={1} value={team.minorFaults} onChange={(event) => updateTeamScore(team.teamId, { minorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label><label>Faltas graves<input type="number" min={0} max={100} step={1} value={team.majorFaults} onChange={(event) => updateTeamScore(team.teamId, { majorFaults: Math.max(0, Math.min(100, Math.trunc(Number(event.target.value) || 0))) })} /></label></div>
+        <div className="fault-inputs"><label>Faltas leves<input type="text" inputMode="numeric" pattern="[0-9]*" aria-label={"Faltas leves de " + team.teamName} value={faultInputDraft[team.teamId + ":minorFaults"] ?? String(team.minorFaults)} onChange={(event) => updateFaultInput(team.teamId, "minorFaults", event.target.value)} onBlur={() => commitFaultInput(team.teamId, "minorFaults")} /></label><label>Faltas graves<input type="text" inputMode="numeric" pattern="[0-9]*" aria-label={"Faltas graves de " + team.teamName} value={faultInputDraft[team.teamId + ":majorFaults"] ?? String(team.majorFaults)} onChange={(event) => updateFaultInput(team.teamId, "majorFaults", event.target.value)} onBlur={() => commitFaultInput(team.teamId, "majorFaults")} /></label></div>
       </section>)}
       <section className="team-score-editor"><div className="team-score-heading"><div><h3>Puntuación de oradores</h3><p>Hasta ocho evaluaciones. Cada equipo solo puede asignar una vez cada posición; un orador puede ocupar varias posiciones.</p></div><button type="button" className="button secondary" disabled={draft.speakers.length >= 8 || !(data.speakers ?? []).some((speaker) => [draft.teamFavorId, draft.teamContraId].includes(speaker.teamId) && SPEAKER_POSITIONS.some((position) => !draft.speakers.some((row) => row.teamId === speaker.teamId && row.position === position.value)))} onClick={addSpeakerScore}><Plus size={14} /> Añadir orador</button></div>
         {draft.speakers.map((speaker, index) => <div className="speaker-score-row" key={speaker.speakerId + ":" + speaker.position + ":" + index}>
