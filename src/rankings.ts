@@ -25,14 +25,25 @@ export function buildSpeakerRankings(teams:Team[],speakers:Speaker[],rounds:Roun
  const teamNames=new Map(teams.map(t=>[t.id,t.name])),speakerNames=new Map(speakers.map(s=>[s.id,s.name]));
  const qualifying=scorecards.filter(card=>isQualifying(card,rounds));
  return SPEAKER_RANKINGS.map(category=>{
-  const sums=new Map<string,{speakerId:string;speakerName:string;teamId:string;itemTotal:number;evaluations:number}>();
+  const sums=new Map<string,{speakerId:string;speakerName:string;teamId:string;itemTotal:number;evaluations:number;roundTotals:Map<string,{total:number;count:number}>}>();
   for(const card of qualifying)for(const item of card.speakers??[]){
    if(category.key!=="all"&&item.position!==category.key)continue;
    if(!Number.isFinite(item.score)||!speakerNames.has(item.speakerId))continue;
-   const row=sums.get(item.speakerId)??{speakerId:item.speakerId,speakerName:item.speakerName||speakerNames.get(item.speakerId)||item.speakerId,teamId:item.teamId,itemTotal:0,evaluations:0};
-   row.itemTotal+=item.score;row.evaluations++;sums.set(item.speakerId,row);
+   const row=sums.get(item.speakerId)??{speakerId:item.speakerId,speakerName:item.speakerName||speakerNames.get(item.speakerId)||item.speakerId,teamId:item.teamId,itemTotal:0,evaluations:0,roundTotals:new Map<string,{total:number;count:number}>()};
+   row.evaluations++;
+   if(category.key==="all"){
+    const round=row.roundTotals.get(card.roundId)??{total:0,count:0};
+    round.total+=item.score;round.count++;row.roundTotals.set(card.roundId,round);
+   }else row.itemTotal+=item.score;
+   sums.set(item.speakerId,row);
   }
-  const sorted=[...sums.values()].map(row=>({...row,teamName:teamNames.get(row.teamId)??"Equipo desconocido"})).sort((a,b)=>b.itemTotal-a.itemTotal||a.speakerName.localeCompare(b.speakerName,"es"));
+  const sorted=[...sums.values()].map(row=>{
+   // "Mejor orador" counts each round once: multiple posture scores in the same round
+   // contribute their average, while the position-specific rankings remain cumulative.
+   if(category.key==="all")row.itemTotal=[...row.roundTotals.values()].reduce((total,round)=>total+round.total/round.count,0);
+   const {roundTotals:_,...result}=row;
+   return {...result,teamName:teamNames.get(row.teamId)??"Equipo desconocido"};
+  }).sort((a,b)=>b.itemTotal-a.itemTotal||a.speakerName.localeCompare(b.speakerName,"es"));
   let previous:number|undefined,rank=0;
   const rows=sorted.map((row,index)=>{if(previous===undefined||row.itemTotal!==previous)rank=index+1;previous=row.itemTotal;return {...row,rank};});
   return {...category,rows:rows as SpeakerRankingRow[]};
