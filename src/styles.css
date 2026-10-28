@@ -433,3 +433,28 @@ details[open]::details-content{block-size:auto;opacity:1;}
   background: currentColor;
   flex: 0 0 auto;
 }
+
+
+/* Compact judge cards: show the roster summary first and incompatibilities on demand. */
+.judge-card-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:start}
+.judge-card{min-width:0;overflow:hidden;padding:0;margin:0}
+.judge-card-header{display:flex;align-items:center;gap:10px;min-width:0;padding:10px 12px}
+.judge-card-toggle{display:flex;align-items:center;gap:12px;flex:1;min-width:0;min-height:38px;padding:4px 0;border:0;background:transparent;text-align:left;color:var(--text,#252a34)}
+.judge-card-name{min-width:0;flex:1;overflow-wrap:anywhere;font-size:13px;font-weight:800}
+.judge-card-institution{min-width:0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted,#667085);font-size:10px}
+.judge-card-actions{display:flex;align-items:center;gap:7px;flex-shrink:0}
+.judge-card-actions .state-pill{border:0;cursor:pointer}
+.judge-card-actions .icon-button{width:32px;height:32px;padding:7px}
+.judge-card .room-card-chevron{flex-shrink:0;transition:transform 220ms ease}
+.judge-card.expanded .room-card-chevron{transform:rotate(90deg)}
+.judge-card-disclosure{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows 240ms ease,opacity 220ms ease;border-top:0 solid var(--border,#e4e7ec)}
+.judge-card.expanded .judge-card-disclosure{grid-template-rows:1fr;opacity:1;border-top-width:1px}
+.judge-card-disclosure-inner{min-height:0;overflow:hidden;padding:0 14px}
+.judge-card.expanded .judge-card-disclosure-inner{padding:13px 14px 15px}
+.judge-edit-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.judge-edit-grid label{display:grid;gap:5px;font-size:11px;font-weight:650;color:#647188;min-width:0}
+.judge-edit-grid .table-input{border:1px solid #dce2eb;background:#fff;min-width:0}
+.judge-card-section{display:grid;gap:9px;margin-top:14px;padding-top:12px;border-top:1px solid #edf0f5}
+.judge-card-section>b{font-size:11px;color:#59667b}
+@media(max-width:1100px){.judge-card-list{grid-template-columns:1fr}}
+@media(max-width:760px){.judge-card-header{align-items:flex-start;flex-wrap:wrap}.judge-card-toggle{flex-basis:100%;flex-wrap:wrap;gap:8px}.judge-card-name{flex-basis:100%}.judge-card-institution{max-width:calc(100% - 100px)}.judge-card-actions{width:100%;justify-content:flex-end}.judge-card-actions .state-pill{margin-right:auto}.judge-edit-grid{grid-template-columns:1fr}}
