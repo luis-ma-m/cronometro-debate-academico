@@ -15,6 +15,7 @@ Aplicación web para coordinar torneos de debate académico LEDU desde un panel 
 - Cronómetros con inicio, pausa, reanudación, reinicio, avance, retroceso y finalización.
 - URLs públicas de sala; solo una clave vigente de control permite modificar el cronómetro.
 - Detección de revisiones obsoletas y reintentos idempotentes para evitar duplicar operaciones confirmadas.
+- **Tabulación local** en `/tabulacion`, que funciona solo en el navegador, sin API: liguilla de grupos (LEDU) o sistema suizo (UC3M), emparejamientos sin revanchas, asignación de jueces sin conflictos, actas por juez, desempates reglamentarios, premios de oradores y eliminatorias. Intercambia participantes y rondas con el panel. Consulta [docs/TABULACION.md](docs/TABULACION.md).
 
 El preset LEDU es una referencia editable. Comprueba el reglamento de la edición concreta antes del torneo.
 
@@ -48,7 +49,7 @@ Las pruebas de integración reales contra PostgreSQL solo se ejecutan si se prop
 
 ## Despliegue y migración
 
-Consulta [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) y [docs/NEON_MIGRATION.md](docs/NEON_MIGRATION.md).
+Consulta [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) y [docs/NEON_MIGRATION.md](docs/NEON_MIGRATION.md). La tabulación local no necesita configuración de servidor: está documentada en [docs/TABULACION.md](docs/TABULACION.md).
 
 Variables privadas necesarias en Vercel:
 
