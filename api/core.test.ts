@@ -53,6 +53,20 @@ function makeTournament(): Tournament {
 }
 
 describe("Vercel API core", () => {
+  it("accepts negative warning thresholds for overtime alerts", () => {
+    const tournament = makeTournament();
+    tournament.formats[0].phases[0].warningThresholdsSeconds = [30, 10, -10];
+    tournament.rooms[0].phases[0].warningThresholdsSeconds = [30, 10, -10];
+    expect(() => validateTournamentInput(tournament)).not.toThrow();
+  });
+
+  it("rejects non-finite warning thresholds", () => {
+    const tournament = makeTournament();
+    tournament.formats[0].phases[0].warningThresholdsSeconds = [30, Number.NaN];
+    tournament.rooms[0].phases[0].warningThresholdsSeconds = [30, Number.NaN];
+    expect(() => validateTournamentInput(tournament)).toThrow("Los umbrales de aviso deben contener segundos válidos.");
+  });
+
   it("retains the 12-phase LEDU reference preset for 41 minutes", () => {
     const phases = defaultPhases();
     expect(phases).toHaveLength(12);
