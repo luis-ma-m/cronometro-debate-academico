@@ -16,6 +16,8 @@ import { SearchableEntityPicker } from './components/SearchableEntityPicker';
 import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
 
 const SESSION_KEY = 'ledu-admin-session';
+/** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
+const DEMO_PASSWORD = 'gestor123';
 type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
 
 type ScoreInputDraft = { teamScores: Record<string, string>; speakerScores: Record<number, string> };
@@ -404,7 +406,7 @@ export default function App() {
     event.preventDefault();
     setLoginError('');
     try {
-      const result = apiConfigured ? await login(password) : password === 'contraseña' ? { token: 'demo-session', expiresAt: Date.now() + 8 * 60 * 60 * 1000 } : null;
+      const result = apiConfigured ? await login(password) : password === DEMO_PASSWORD ? { token: 'demo-session', expiresAt: Date.now() + 8 * 60 * 60 * 1000 } : null;
       if (!result) throw new Error('Contraseña incorrecta.');
       localStorage.setItem(SESSION_KEY, JSON.stringify(result));
       setDemoMode(false);
@@ -558,7 +560,7 @@ export default function App() {
   if (!session) {
     return <div className="login-shell">
       <aside className="login-hero"><div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div><p className="eyebrow">OPERACIONES DEL TORNEO</p><h1>Un torneo.<br />Todas las salas.<br /><em>Una sola visión.</em></h1><p className="hero-copy">Organiza equipos, coordina al panel de jueces y sigue el estado de cada debate desde un único lugar.</p><div className="hero-tags"><span><ShieldCheck size={15} /> Gestión privada</span><span><Activity size={15} /> Actualización automática</span></div></aside>
-      <main className="login-side"><form className="login-card" onSubmit={submitLogin}><span className="eyebrow">PANEL DE ORGANIZACIÓN</span><h2>Acceso al torneo</h2><p>Introduce la contraseña para gestionar rondas, equipos, jueces y salas.</p><label htmlFor="password">Contraseña</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Introduce la contraseña" required /><button className="button primary full" type="submit">Entrar al panel <ArrowRight size={17} /></button>{loginError && <p className="error">{loginError}</p>}<p className="security-note"><ShieldCheck size={15} /> {apiConfigured ? 'Autenticación validada por el backend.' : 'Modo de demostración: contraseña' + ' contraseña'}.</p><p className="subtle">Los cronómetros de sala se abren por enlace y no requieren iniciar sesión.</p></form></main>
+      <main className="login-side"><form className="login-card" onSubmit={submitLogin}><span className="eyebrow">PANEL DE ORGANIZACIÓN</span><h2>Acceso al torneo</h2><p>Introduce la contraseña para gestionar rondas, equipos, jueces y salas.</p><label htmlFor="password">Contraseña</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Introduce la contraseña" required /><button className="button primary full" type="submit">Entrar al panel <ArrowRight size={17} /></button>{loginError && <p className="error">{loginError}</p>}<p className="security-note"><ShieldCheck size={15} /> {apiConfigured ? 'Autenticación validada por el backend.' : 'Modo de demostración: contraseña ' + DEMO_PASSWORD}.</p><p className="subtle">Los cronómetros de sala se abren por enlace y no requieren iniciar sesión.</p></form></main>
     </div>;
   }
 

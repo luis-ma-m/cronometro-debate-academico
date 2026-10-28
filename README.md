@@ -35,7 +35,7 @@ npm install
 npm run dev
 ```
 
-Si no se configura `VITE_API_URL`, el entorno local utiliza el modo de demostración en el navegador. La contraseña de muestra no es una credencial de producción.
+Si no se configura `VITE_API_URL`, el entorno local utiliza el modo de demostración en el navegador. La contraseña de muestra es `gestor123`; solo sirve en este modo y no es una credencial de producción.
 
 ## Pruebas y compilación
 
