@@ -126,6 +126,8 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [preparingRoomId, setPreparingRoomId] = useState<string | null>(null);
   const [preparedRoomLink, setPreparedRoomLink] = useState<{ roomName: string; href: string } | null>(null);
+  // Reuse already fetched room-control links for the lifetime of this admin session.
+  const preparedRoomLinksRef = useRef<Record<string, { roomName: string; href: string }>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const hasUnsavedRef = useRef(false);
   const [connected, setConnected] = useState(false);
@@ -515,32 +517,58 @@ export default function App() {
 
   const openRoom = async (id: string, rotate = false) => {
     if (preparingRoomId) return;
+
+    const hasPendingChanges = hasUnsavedRef.current || hasUnsavedChanges || formatDirty;
+    if (hasPendingChanges && !window.confirm(
+      'Tienes cambios locales sin guardar. ¿Quieres guardarlos antes de abrir el cronómetro? Pulsa «Aceptar» para guardar y continuar; «Cancelar» para cancelar la apertura y seguir editando.'
+    )) return;
     if (rotate && !window.confirm('Regenerar el enlace de control invalida el enlace anterior para esta sala. ¿Continuar?')) return;
 
-    // Prepare the destination first. A real anchor, clicked in a second gesture,
-    // is more reliable than window.open() after asynchronous save/token calls.
+    const cachedLink = preparedRoomLinksRef.current[id];
+    // With no pending edits, a link already prepared in this session can be
+    // opened immediately: no tournament save and no token API request required.
+    if (!hasPendingChanges && !rotate && cachedLink) {
+      setPreparedRoomLink(null);
+      setServerError('');
+      const opened = window.open(cachedLink.href, '_blank');
+      if (opened) opened.opener = null;
+      else setPreparedRoomLink(cachedLink);
+      return;
+    }
+
     setPreparedRoomLink(null);
     setServerError('');
     setPreparingRoomId(id);
     try {
-      const saved = await persist();
+      // Never persist a clean tournament just to open a room.
+      const saved = hasPendingChanges ? await persist() : data;
       if (!saved) return;
 
-      let hash = '';
       const assignment = saved.rooms.find((room) => room.id === id);
       if (!assignment) throw new Error('La asignación ya no existe. Actualiza el panel.');
       const physical = saved.physicalRooms.find((room) => room.id === assignment.physicalRoomId);
       if (!physical) throw new Error('No se encuentra la sala física vinculada a esta asignación.');
+
+      // A cached link remains valid after ordinary edits. Reuse it rather than
+      // making another request for a token; rotation is the only exception.
+      if (cachedLink && !rotate) {
+        setPreparedRoomLink(cachedLink);
+        return;
+      }
+
+      let hash = '';
       if (apiConfigured) {
         if (!session) throw new Error('La sesión ha caducado. Vuelve a iniciar sesión.');
         const control = await getRoomControllerToken(session.token, physical.slug, rotate);
         hash = '#control=' + encodeURIComponent(control.token);
       }
 
-      setPreparedRoomLink({
+      const prepared = {
         roomName: physical.name,
         href: window.location.origin + '/sala/' + encodeURIComponent(physical.slug) + hash,
-      });
+      };
+      preparedRoomLinksRef.current[id] = prepared;
+      setPreparedRoomLink(prepared);
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se ha podido preparar el enlace de control de la sala.');
     } finally {
@@ -1225,7 +1253,7 @@ export default function App() {
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
       {preparingRoomId && <div className="notice warning-notice"><RefreshCw size={17} /><span>Guardando los cambios y preparando el enlace de la sala…</span></div>}
-      {preparedRoomLink && <div className="notice warning-notice room-link-ready"><Check size={17} /><span>La sala física <b>{preparedRoomLink.roomName}</b> está guardada. Su enlace permanente abre la ronda activa:</span><a className="button primary" href={preparedRoomLink.href} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} /> Abrir cronómetro</a><button className="text-button" onClick={() => setPreparedRoomLink(null)} aria-label="Cerrar enlace preparado"><X size={16} /></button></div>}
+      {preparedRoomLink && <div className="notice warning-notice room-link-ready"><Check size={17} /><span>Enlace listo para <b>{preparedRoomLink.roomName}</b>. Puedes abrir el cronómetro desde aquí; el enlace se reutilizará en las próximas aperturas de esta sesión.</span><a className="button primary" href={preparedRoomLink.href} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} /> Abrir cronómetro</a><button className="text-button" onClick={() => setPreparedRoomLink(null)} aria-label="Cerrar enlace preparado"><X size={16} /></button></div>}
       {hasUnsavedChanges && <div className="notice warning-notice"><CircleHelp size={17} /><span>Tienes cambios locales sin guardar. El panel seguirá actualizando los cronómetros sin descartar estas ediciones.</span><button className="text-button" onClick={() => { if (window.confirm('¿Descartar todos los cambios locales y volver a cargar los datos guardados?')) { hasUnsavedRef.current = false; setHasUnsavedChanges(false); setFormatDirty(false); void reloadAdmin(); } }}>Descartar y recargar</button></div>}
       {(assignmentWarnings.length > 0 || incompatibilityIncidents.length > 0) && view !== 'settings' && <div className="notice warning-notice"><CircleHelp size={17} /><span>Hay incidencias en las asignaciones: {[...assignmentWarnings, ...incompatibilityIncidents.map((issue) => issue.roomName + ': ' + issue.message)].slice(0,3).join(' ')}{assignmentWarnings.length + incompatibilityIncidents.length > 3 ? ' +' + (assignmentWarnings.length + incompatibilityIncidents.length - 3) + ' más.' : ''}</span></div>}
       {activationPreview && <div className="activation-backdrop" role="presentation">
