@@ -172,7 +172,7 @@ export function validatePhases(phases: unknown): asserts phases is Phase[] {
     if (!Number.isFinite(Number(phase.durationSeconds)) || Number(phase.durationSeconds) < 1 || Number(phase.durationSeconds) > 7200) {
       throw new ApiError("INVALID_PHASES", "La duración debe estar entre 1 y 7200 segundos.");
     }
-    if (phase.warningThresholdsSeconds !== undefined && (!Array.isArray(phase.warningThresholdsSeconds) || phase.warningThresholdsSeconds.some((item) => !Number.isFinite(Number(item)) || Number(item) < 0))) {
+    if (phase.warningThresholdsSeconds !== undefined && (!Array.isArray(phase.warningThresholdsSeconds) || phase.warningThresholdsSeconds.some((item) => !Number.isFinite(Number(item))))) {
       throw new ApiError("INVALID_PHASES", "Los umbrales de aviso deben contener segundos válidos.");
     }
   });
