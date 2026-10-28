@@ -614,7 +614,7 @@ export default function App() {
 
   // Keep navigation selection separate from the operational round shown in Overview.
   const activeRound = selectedRound || data.rounds[0]?.id || '';
-  const rooms = data.rooms.filter((room) => room.roundId === activeRound);
+  const rooms = data.rooms.filter((room) => room.roundId === activeRound).sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base', numeric: true }));
   // Prevent a team already assigned to another room in this round from being selected again.
   const teamAlreadyAssignedElsewhere = (teamId: string, roomId: string) =>
     Boolean(teamId) && data.rooms.some((room) => room.roundId === activeRound && room.id !== roomId &&
