@@ -48,13 +48,13 @@ test('un juez rellena el acta en el móvil y la mesa la recibe por WhatsApp', as
   expect(waUrl.startsWith('https://wa.me/34600112233?text=')).toBe(true);
   const message = decodeURIComponent(waUrl.split('?text=')[1]);
   expect(message).toContain('44 – 33 ítems netos');
-  expect(message).toMatch(/ACTA1-[0-9A-Z]+-[0-9a-f]{14}/);
+  expect(message).toMatch(/ACTA2-[0-9A-Za-z]+-[0-9a-f]{14}/);
 
   // Back at the desk: paste the WhatsApp message and accept the acta.
   await nav(desk, 'Actas');
   await desk.locator('.tab-whatsapp-inbox summary').click();
   const box = desk.getByLabel('Mensajes de WhatsApp con actas');
-  await box.fill('[10:31, 20/11/2026] Juez: ' + message.replace(/ACTA1-([0-9A-Z]+)-/, (_, data: string) => 'ACTA1-' + data.slice(0, 10) + (data[10] === 'A' ? 'B' : 'A') + data.slice(11) + '-'));
+  await box.fill('[10:31, 20/11/2026] Juez: ' + message.replace(/ACTA2-([0-9A-Za-z]+)-/, (_, data: string) => 'ACTA2-' + data.slice(0, 10) + (data[10] === 'A' ? 'B' : 'A') + data.slice(11) + '-'));
   await expect(desk.locator('.tab-inbox')).toContainText(/dañado|alterado/);
   await box.fill('[10:31, 20/11/2026] Juez: ' + message);
   await expect(desk.locator('.tab-inbox')).toContainText('Nueva');
