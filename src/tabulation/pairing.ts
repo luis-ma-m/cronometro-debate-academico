@@ -1,7 +1,7 @@
 import { createRng, hashSeed, shuffle } from './random';
 import { computeTournamentOutcomes, roundIsComplete, type DebateOutcome } from './results';
 import { buildTeamStandings } from './standings';
-import { makeTabId, qualifyingRounds, sameInstitution, type TabDebate, type TabRound, type TabTournament } from './types';
+import { isFallenAt, makeTabId, nextRoundNumber, qualifyingRounds, sameInstitution, type TabDebate, type TabRound, type TabTeam, type TabTournament } from './types';
 
 export interface PairingContext {
   timesMet(a: string, b: string): number;
@@ -166,10 +166,33 @@ export function drawSides(round: TabRound, seed: number): TabRound {
   };
 }
 
-/** Sequential venues over the active catalogue; an empty id means there are not enough venues. */
-export function assignVenues(tournament: Pick<TabTournament, 'venues'>, debates: TabDebate[]): TabDebate[] {
+/**
+ * Sequential venues over the active catalogue; an empty id means there are not enough venues. With a round number,
+ * debates against a fallen team are not played and get no venue.
+ */
+export function assignVenues(tournament: Pick<TabTournament, 'venues'> & { teams?: TabTeam[] }, debates: TabDebate[], roundNumber?: number): TabDebate[] {
   const venues = tournament.venues.filter((venue) => venue.active);
-  return debates.map((debate, index) => ({ ...debate, venueId: venues[index]?.id ?? '' }));
+  const fallen = roundNumber === undefined ? new Set<string>() : fallenTeamIds(tournament.teams ?? [], roundNumber);
+  let next = 0;
+  return debates.map((debate) => ({ ...debate, venueId: debate.teamIds.some((id) => fallen.has(id)) ? '' : venues[next++]?.id ?? '' }));
+}
+
+export function fallenTeamIds(teams: TabTeam[], roundNumber: number): Set<string> {
+  return new Set(teams.filter((team) => isFallenAt(team, roundNumber)).map((team) => team.id));
+}
+
+export const REST_TEAM_NAME = 'Descanso';
+
+/**
+ * Filler for an odd number of teams: fallen from round 1, so its rival always wins with the round's average items,
+ * and a swing team, so it never appears in the standings or the break.
+ */
+export function addRestTeam(tournament: TabTournament): TabTournament {
+  const names = new Set(tournament.teams.map((team) => team.name));
+  let name = REST_TEAM_NAME;
+  for (let n = 2; names.has(name); n++) name = REST_TEAM_NAME + ' ' + n;
+  const rest: TabTeam = { id: makeTabId('equipo'), name, institution: '', active: true, swing: true, breakEligible: false, incompatibleJudgeIds: [], fallenFromRound: 1 };
+  return { ...tournament, teams: [...tournament.teams, rest] };
 }
 
 export function pairingContext(tournament: TabTournament): PairingContext {
@@ -184,15 +207,20 @@ export function pairingContext(tournament: TabTournament): PairingContext {
 
 export interface GeneratedRound { round: TabRound | null; issues: string[]; warnings: string[] }
 
-/** Pairing order: current standings, exact ties drawn with the round seed, swing teams last. */
-export function swissOrder(tournament: TabTournament, seed: number, outcomes?: Map<string, DebateOutcome>): string[] {
+/** Pairing order: current standings, exact ties drawn with the round seed; swing teams and then fallen teams last. */
+export function swissOrder(tournament: TabTournament, seed: number, outcomes?: Map<string, DebateOutcome>, roundNumber = nextRoundNumber(tournament)): string[] {
   const active = tournament.teams.filter((team) => team.active);
-  const swing = active.filter((team) => team.swing).map((team) => team.id);
-  const regular = active.filter((team) => !team.swing).map((team) => team.id);
-  if (!qualifyingRounds(tournament).length) return [...shuffle(regular, createRng(seed)), ...swing];
-  const standings = buildTeamStandings(tournament, { outcomes }).filter((row) => regular.includes(row.teamId));
-  const ordered = [...standings].sort((x, y) => x.rank - y.rank || hashSeed(seed, x.teamId) - hashSeed(seed, y.teamId)).map((row) => row.teamId);
-  return [...ordered, ...regular.filter((id) => !ordered.includes(id)), ...swing];
+  const fallen = fallenTeamIds(active, roundNumber);
+  const pick = (test: (team: TabTeam) => boolean) => active.filter(test).map((team) => team.id);
+  const regular = pick((team) => !team.swing && !fallen.has(team.id));
+  const swing = pick((team) => team.swing && !fallen.has(team.id));
+  const down = pick((team) => fallen.has(team.id));
+  if (!qualifyingRounds(tournament).length) return [...shuffle(regular, createRng(seed)), ...swing, ...down];
+  const ranked = buildTeamStandings(tournament, { outcomes })
+    .sort((x, y) => x.rank - y.rank || hashSeed(seed, x.teamId) - hashSeed(seed, y.teamId))
+    .map((row) => row.teamId);
+  const inRankOrder = (ids: string[]) => [...ranked.filter((id) => ids.includes(id)), ...ids.filter((id) => !ranked.includes(id))];
+  return [...inRankOrder(regular), ...swing, ...inRankOrder(down)];
 }
 
 export function generateSwissRound(tournament: TabTournament, seed: number, now = Date.now()): GeneratedRound {
@@ -208,28 +236,42 @@ export function generateSwissRound(tournament: TabTournament, seed: number, now 
   if (pending.length) issues.push('Completa antes las actas de: ' + pending.map((round) => round.name).join(', ') + '.');
   const active = tournament.teams.filter((team) => team.active);
   if (active.length < 2) issues.push('Se necesitan al menos dos equipos activos.');
-  else if (active.length % 2) issues.push('Hay ' + active.length + ' equipos activos: el número debe ser par. Añade un equipo swing o desactiva uno.');
+  else if (active.length % 2) issues.push('Hay ' + active.length + ' equipos activos y el número debe ser par: añade un equipo «' + REST_TEAM_NAME + '» (o un swing) o desactiva uno.');
   if (issues.length) return { round: null, issues, warnings };
 
-  const order = swissOrder(tournament, seed, outcomes);
-  const result = pairInOrder(order, pairingContext(tournament));
+  const roundNumber = nextRoundNumber(tournament);
+  const order = swissOrder(tournament, seed, outcomes, roundNumber);
+  const fallen = fallenTeamIds(active, roundNumber);
+  const againstFallen = (pair: readonly string[]) => pair.some((id) => fallen.has(id));
+  // Fallen teams meet each other first, even if they already met, so no real team gets free items from them.
+  const fallenOrder = order.filter((id) => fallen.has(id));
+  const fallenPairs: Array<[string, string]> = [];
+  for (let i = 0; i + 1 < fallenOrder.length; i += 2) fallenPairs.push([fallenOrder[i], fallenOrder[i + 1]]);
+  const result = pairInOrder(order.filter((id) => !fallenPairs.some((pair) => pair.includes(id))), pairingContext(tournament));
   if (result.rematches) warnings.push(result.rematches + ' enfrentamiento(s) repetido(s) inevitable(s).');
   if (result.institutionClashes) warnings.push(result.institutionClashes + ' debate(s) entre equipos de la misma institución.');
+  let pairs = [...result.pairs, ...fallenPairs];
+  if (settings.blindQualifying) {
+    // Closed rounds (ADUMA art. 29): neither the room order nor the team listed first may reveal the ranking.
+    const rng = createRng(hashSeed(seed, 'blind'));
+    pairs = shuffle(pairs, rng).map(([a, b]): [string, string] => (rng() < 0.5 ? [a, b] : [b, a]));
+  }
+  pairs = [...pairs.filter((pair) => !againstFallen(pair)), ...pairs.filter(againstFallen)];
   const sideMode = settings.qualifyingSideMode;
-  const favors = sideMode === 'balanced' ? balanceSides(result.pairs, sideHistory(previous), createRng(hashSeed(seed, 'sides'))) : [];
-  const debates = assignVenues(tournament, result.pairs.map(([a, b], index) => ({
+  const favors = sideMode === 'balanced' ? balanceSides(pairs, sideHistory(previous), createRng(hashSeed(seed, 'sides'))) : [];
+  const debates = assignVenues(tournament, pairs.map(([a, b], index) => ({
     id: makeTabId('debate'), venueId: '', teamIds: [a, b] as [string, string], favorTeamId: favors[index], judgeIds: [], chairId: '',
-  })));
-  if (debates.some((debate) => !debate.venueId)) warnings.push('No hay salas activas suficientes para todos los debates.');
+  })), roundNumber);
+  if (debates.some((debate) => !debate.venueId && !againstFallen(debate.teamIds))) warnings.push('No hay salas activas suficientes para todos los debates.');
   const round: TabRound = {
     id: makeTabId('ronda'),
-    number: Math.max(0, ...tournament.rounds.map((item) => item.number)) + 1,
+    number: roundNumber,
     name: 'Ronda ' + (previous.length + 1),
     kind: 'qualifying',
     sideMode,
     panelSize: settings.qualifyingPanelSize,
     seed,
-    silent: false,
+    silent: settings.blindQualifying,
     debates,
     createdAt: now,
   };

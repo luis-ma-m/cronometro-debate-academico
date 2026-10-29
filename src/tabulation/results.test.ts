@@ -4,8 +4,8 @@ import { aggregatePanel, computeDebateOutcome, effectivePenalties, minorsFromWar
 import { ballots, debate, judge, makeTournament, result, team } from './test-fixtures';
 import type { TabRound } from './types';
 
-const qualifying: Pick<TabRound, 'kind' | 'sideMode'> = { kind: 'qualifying', sideMode: 'balanced' };
-const elimination: Pick<TabRound, 'kind' | 'sideMode'> = { kind: 'elimination', sideMode: 'balanced' };
+const qualifying: Pick<TabRound, 'kind' | 'sideMode' | 'number'> = { kind: 'qualifying', sideMode: 'balanced', number: 1 };
+const elimination: Pick<TabRound, 'kind' | 'sideMode' | 'number'> = { kind: 'elimination', sideMode: 'balanced', number: 6 };
 
 function ledu() {
   const tournament = makeTournament('ledu-groups', ['a', 'b'], ['j1', 'j2', 'j3', 'j4', 'j5']);

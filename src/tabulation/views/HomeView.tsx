@@ -1,38 +1,50 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Check, ClipboardList, Database, Download, Gavel, Plus, RotateCcw, Sparkles, Trash2, Upload, Users } from 'lucide-react';
+import { ArrowRight, Check, ClipboardList, Database, Download, Flag, Gavel, Plus, RotateCcw, ShieldCheck, Sparkles, Stethoscope, Trash2, Trophy, Upload, Users } from 'lucide-react';
 import { tournamentChampion } from '../bracket';
-import { parseTournamentExport, serializeTournamentExport, TabDataError } from '../normalize';
+import { parseBackupFile } from '../emergency';
+import { downloadEmergencyCopy } from '../ErrorBoundary';
+import { checkIntegrity, type IntegrityReport } from '../integrity';
+import { type LogVerification } from '../log';
+import { TabDataError } from '../normalize';
 import { clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, tournamentFromHandoff } from '../panelBridge';
-import { createTabTournament, PRESET_OPTIONS } from '../presets';
+import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS } from '../presets';
 import { roundIsComplete, type DebateOutcome } from '../results';
 import { createSampleTournament } from '../sample';
 import { MAX_BACKUPS, type TabStore, type TabStoreState } from '../store';
-import { eliminationRounds, qualifyingRounds, type PresetId, type TabTournament } from '../types';
-import { downloadFile, Field, fileSlug, formatNumber, Notice, type NoticeKind } from '../ui';
+import { eliminationRounds, isFallenAt, qualifyingRounds, type PresetId, type TabTournament } from '../types';
+import { BUILD_INFO, exportTournamentCopy, Field, formatNumber, IssueList, Notice, type NoticeKind } from '../ui';
 
 type CreatablePreset = Exclude<PresetId, 'custom'>;
 
-/** Short guidance on what to do next, following the order of a real tournament. */
-function nextStep(tournament: TabTournament, outcomes: Map<string, DebateOutcome>): string {
+interface NextStep { text: string; view: string; action: string; finished?: boolean }
+
+/** What to do next, following the order of a real tournament, and the screen where it is done. */
+function nextStep(tournament: TabTournament, outcomes: Map<string, DebateOutcome>): NextStep {
   const { settings } = tournament;
-  if (!tournament.teams.some((team) => team.active)) return 'Añade los equipos y sus oradores en Participantes.';
-  if (!tournament.judges.some((judge) => judge.active)) return 'Añade los jueces en Participantes.';
-  if (!tournament.venues.some((venue) => venue.active)) return 'Añade las salas en Participantes.';
+  const participants = { view: 'participantes', action: 'Ir a Participantes' };
+  const rounds = { view: 'rondas', action: 'Ir a Rondas' };
+  const activeTeams = tournament.teams.filter((team) => team.active && !team.swing).length;
+  if (!activeTeams) return { text: 'Añade los equipos y sus oradores.', ...participants };
+  if (!tournament.judges.some((judge) => judge.active)) return { text: 'Añade los jueces.', ...participants };
+  if (!tournament.venues.some((venue) => venue.active)) return { text: 'Añade las salas.', ...participants };
+  if (tournament.draftRound) return { text: 'Revisa el borrador de ' + tournament.draftRound.round.name + ' y pulsa «Confirmar ronda».', view: 'rondas', action: 'Revisar el borrador' };
   const qualifying = qualifyingRounds(tournament);
   const elimination = eliminationRounds(tournament);
   const incomplete = tournament.rounds.find((round) => !roundIsComplete(round, outcomes));
-  if (incomplete) {
-    if (incomplete.debates.some((debate) => !debate.judgeIds.length)) return 'Asigna los jueces de ' + incomplete.name + ' en Rondas.';
-    return 'Registra las actas de ' + incomplete.name + ' en Actas.';
-  }
+  if (incomplete) return { text: 'Registra las actas de ' + incomplete.name + '.', view: 'actas', action: 'Ir a las actas' };
   if (settings.stage === 'groups' && !qualifying.length) {
-    return tournament.groups.length ? 'Genera las jornadas de la liguilla en Rondas.' : 'Sortea los grupos en Rondas.';
+    return { text: tournament.groups.length ? 'Genera las jornadas de la liguilla.' : 'Sortea los grupos.', ...rounds };
   }
-  if (settings.stage === 'swiss' && qualifying.length < settings.swissRounds) return 'Genera la ronda ' + (qualifying.length + 1) + ' en Rondas.';
-  if (!elimination.length) return 'La fase clasificatoria ha terminado: revisa la clasificación y genera las eliminatorias en Rondas.';
+  if (settings.stage === 'swiss' && qualifying.length < settings.swissRounds) {
+    const odd = tournament.teams.filter((team) => team.active).length % 2;
+    return odd
+      ? { text: 'Hay un número impar de equipos: añade un equipo «Descanso» antes de la siguiente ronda.', ...participants }
+      : { text: 'Genera la ronda ' + (qualifying.length + 1) + ' con «Nueva ronda».', ...rounds };
+  }
+  if (!elimination.length) return { text: 'La fase clasificatoria ha terminado: revisa la clasificación y genera las eliminatorias en Rondas.', view: 'clasificacion', action: 'Ver la clasificación' };
   const champion = tournamentChampion(tournament, outcomes);
-  if (champion) return 'Torneo terminado. Campeón: ' + (tournament.teams.find((team) => team.id === champion)?.name ?? champion) + '.';
-  return 'Genera la siguiente eliminatoria en Rondas.';
+  if (champion) return { text: 'Torneo terminado. Campeón: ' + (tournament.teams.find((team) => team.id === champion)?.name ?? champion) + '.', view: 'clasificacion', action: 'Ver la clasificación', finished: true };
+  return { text: 'Genera la siguiente eliminatoria.', ...rounds };
 }
 
 export function HomeView({ store, state, outcomes, notify, onNavigate }: {
@@ -45,8 +57,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const tournament = state.tournament;
   const [name, setName] = useState('');
   const [presetId, setPresetId] = useState<CreatablePreset>('ledu-groups');
+  const [operator, setOperator] = useState(state.operator);
   const [handoffVersion, setHandoffVersion] = useState(0);
   const [backupVersion, setBackupVersion] = useState(0);
+  const [diagnosis, setDiagnosis] = useState<{ integrity: IntegrityReport; log: LogVerification & { issues: string[] } } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const handoff = useMemo(() => readHandoff(window.localStorage), [handoffVersion, state.tournaments]);
   const backups = useMemo(() => store.listBackups(), [store, tournament?.id, tournament?.revision, backupVersion]);
@@ -56,19 +70,44 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
+  useEffect(() => setDiagnosis(null), [tournament?.id]);
 
-  const debates = tournament?.rounds.flatMap((round) => round.debates) ?? [];
-  const completeDebates = debates.filter((debate) => outcomes.get(debate.id)?.status === 'complete').length;
+  const debates = tournament?.rounds.flatMap((round) => round.debates.map((debate) => ({ debate, round }))) ?? [];
+  const teams = tournament ? new Map(tournament.teams.map((team) => [team.id, team])) : new Map();
+  const played = debates.filter(({ debate, round }) => !debate.teamIds.some((id) => isFallenAt(teams.get(id), round.number)));
+  const completeDebates = played.filter(({ debate }) => outcomes.get(debate.id)?.status === 'complete').length;
+  const activeTeams = tournament?.teams.filter((team) => team.active && !team.swing).length ?? 0;
+  const expectedTeams = tournament?.settings.expectedTeams ?? 0;
+  const adumaOpen = tournament?.settings.presetId === 'aduma' || tournament?.settings.ballotMode === 'joint';
+  const next = tournament ? nextStep(tournament, outcomes) : null;
+
+  const readOnlyNotice = () => {
+    if (state.readOnly) notify('Esta pestaña es de solo lectura: pulsa «Tomar el control» para crear o importar torneos.', 'error');
+    return state.readOnly;
+  };
 
   const create = (sample: boolean) => {
+    if (readOnlyNotice()) return;
     store.create(sample ? createSampleTournament(presetId) : createTabTournament(name || 'Nuevo torneo', presetId));
     setName('');
-    notify(sample ? 'Torneo de ejemplo creado con 16 equipos, 12 jueces y 8 salas.' : 'Torneo creado. Revisa las reglas y añade los participantes.');
+    notify(sample ? 'Torneo de ejemplo creado para probar la herramienta.' : 'Torneo creado. Revisa las reglas y añade los participantes.');
     onNavigate(sample ? 'rondas' : 'reglas');
   };
 
+  const createAduma = (sample: boolean) => {
+    if (readOnlyNotice()) return;
+    const existing = state.tournaments.find((entry) => entry.name === ADUMA_DEFAULT_NAME);
+    if (!sample && existing && !window.confirm('Ya hay un torneo «' + existing.name + '» en este navegador. ¿Crear otro?')) return;
+    const created = sample ? { ...createSampleTournament('aduma'), name: 'Ensayo ADUMA (equipos de ejemplo)' } : createTabTournament(ADUMA_DEFAULT_NAME, 'aduma');
+    store.create(created);
+    notify(sample
+      ? 'Ensayo creado con 20 equipos, 30 jueces y 10 salas de ejemplo: genera rondas y simula resultados sin tocar el torneo real.'
+      : 'Torneo ADUMA creado con su reglamento (4 rondas suizas a ciegas, acta conjunta, cuartos 1–8, 3–6, 2–7, 4–5). Añade ahora los 20 equipos, los jueces, sus incompatibilidades y las salas.');
+    onNavigate(sample ? 'rondas' : 'participantes');
+  };
+
   const createFromPanel = () => {
-    if (!handoff) return;
+    if (!handoff || readOnlyNotice()) return;
     store.create(tournamentFromHandoff(handoff, presetId));
     clearHandoff(window.localStorage);
     setHandoffVersion((value) => value + 1);
@@ -80,7 +119,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     if (!handoff || !tournament) return;
     const merged = mergeHandoff(tournament, handoff);
     store.backup('Antes de actualizar desde el panel');
-    store.update(() => merged.tournament);
+    if (!store.update(() => merged.tournament, { type: 'tournament.import', message: 'Participantes actualizados desde el panel: ' + merged.added + ' nuevos y ' + merged.updated + ' modificados.' })) {
+      notify('No se han podido aplicar los datos del panel en esta pestaña.', 'error');
+      return;
+    }
     clearHandoff(window.localStorage);
     setHandoffVersion((value) => value + 1);
     notify('Participantes actualizados: ' + merged.added + ' nuevos y ' + merged.updated + ' modificados.' + (merged.warnings.length ? ' ' + merged.warnings.join(' ') : ''), merged.warnings.length ? 'warning' : 'success');
@@ -91,27 +133,41 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     event.target.value = '';
     if (!file) return;
     try {
-      const { tournament: imported, issues } = parseTournamentExport(await file.text());
+      const { tournament: imported, issues, log } = parseBackupFile(await file.text());
       let mode: 'replace' | 'copy' = 'copy';
       if (store.hasTournament(imported.id)) {
-        mode = window.confirm('Ya existe en este navegador un torneo con esta identidad («' + imported.name + '»).\n\nAceptar: reemplazarlo por la copia (se guarda una copia automática del actual).\nCancelar: importarlo como un torneo nuevo.') ? 'replace' : 'copy';
+        mode = window.confirm('Ya existe en este navegador un torneo con esta identidad («' + imported.name + '»).\n\nAceptar: reemplazarlo por la copia (se guarda antes una copia automática del actual y se conserva su registro).\nCancelar: importarlo como un torneo nuevo.') ? 'replace' : 'copy';
       }
-      store.importTournament(imported, mode);
-      notify('Copia importada' + (mode === 'replace' ? ' y reemplazada.' : '.') + (issues.length ? ' ' + issues.join(' ') : ''), issues.length ? 'warning' : 'success');
+      store.importTournament(imported, mode, log);
+      notify('Copia importada' + (mode === 'replace' ? ' y reemplazada.' : '.') + (log.length ? ' Incluye ' + log.length + ' entradas de registro.' : '') + (issues.length ? ' ' + issues.join(' ') : ''), issues.length ? 'warning' : 'success');
     } catch (error) {
       notify(error instanceof TabDataError ? error.message : 'No se ha podido leer el archivo.', 'error');
     }
   };
 
   const requestPersistence = async () => {
-    const persisted = await navigator.storage?.persist?.();
+    const persisted = await navigator.storage?.persist?.().catch(() => false);
     notify(persisted ? 'El navegador conservará estos datos aunque necesite espacio.' : 'El navegador no ha concedido el almacenamiento persistente: exporta copias con frecuencia.', persisted ? 'success' : 'warning');
+  };
+
+  const diagnose = () => {
+    if (!tournament) return;
+    setDiagnosis({ integrity: checkIntegrity(tournament), log: store.verifyLog() });
   };
 
   const sortedTournaments = [...state.tournaments].sort((x, y) => y.updatedAt - x.updatedAt);
 
   return <>
-    <div className="page-heading"><div><p className="eyebrow">INICIO</p><h2>Tabulación del torneo</h2><p className="muted">Emparejamientos, jueces, actas por juez, clasificación y eliminatorias para debate académico. Todo se calcula y se guarda en este navegador, sin servidor.</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">INICIO</p><h2>Tabulación del torneo</h2><p className="muted">Emparejamientos, jueces, actas, clasificación y eliminatorias para debate académico. Todo se calcula y se guarda en este navegador, sin servidor.</p></div></div>
+
+    {!adumaOpen && <section className="panel tab-aduma">
+      <div className="panel-title"><div><h3><Trophy size={18} /> V Torneo Nacional ADUMA · 10.º aniversario</h3>
+        <p>20 equipos · 4 rondas suizas a ciegas (victorias → ítems → enfrentamiento directo → faltas) · acta conjunta · incompatibilidades objetivas y subjetivas · equipos caídos · cuartos, semifinales y final según el art. 31.</p></div></div>
+      <div className="tab-actions">
+        <button type="button" className="button primary tab-big-button" onClick={() => createAduma(false)}><Plus size={18} /> Crear Torneo ADUMA</button>
+        <button type="button" className="button secondary" onClick={() => createAduma(true)}><Sparkles size={16} /> Crear ensayo ADUMA con equipos de ejemplo</button>
+      </div>
+    </section>}
 
     {handoff && <section className="panel tab-handoff">
       <div className="panel-title"><div><h3>Datos recibidos del panel</h3><p>«{handoff.tournamentName}» · {handoff.teams.length} equipos, {handoff.speakers.length} oradores, {handoff.judges.length} jueces y {handoff.venues.length} salas · enviados el {new Date(handoff.createdAt).toLocaleString('es-ES')}</p></div></div>
@@ -126,12 +182,20 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     {tournament && <section className="panel">
       <div className="panel-title"><div><h3>{tournament.name}</h3><p>{PRESET_OPTIONS.find((option) => option.id === tournament.settings.presetId)?.label ?? 'Reglas personalizadas'} · {tournament.settings.stage === 'groups' ? 'liguilla de grupos' : 'sistema suizo'}{tournament.sample ? ' · torneo de ejemplo' : ''}</p></div></div>
       <div className="stat-grid">
-        <div className="stat-card"><span className="stat-icon"><Users size={19} /></span><div><span>Equipos activos</span><b>{tournament.teams.filter((team) => team.active && !team.swing).length}</b></div></div>
-        <div className="stat-card"><span className="stat-icon"><Gavel size={19} /></span><div><span>Jueces activos</span><b>{tournament.judges.filter((judge) => judge.active).length}</b></div></div>
-        <div className="stat-card"><span className="stat-icon"><Database size={19} /></span><div><span>Rondas</span><b>{tournament.rounds.length}</b></div></div>
-        <div className="stat-card"><span className="stat-icon"><ClipboardList size={19} /></span><div><span>Actas completas</span><b>{completeDebates}/{debates.length}</b></div></div>
+        <div className={'stat-card' + (expectedTeams && activeTeams !== expectedTeams ? ' tab-stat-warning' : '')}><span className="stat-icon"><Users size={19} /></span><div><span>Equipos activos</span><b>{activeTeams}{expectedTeams ? '/' + expectedTeams : ''}</b></div></div>
+        <div className="stat-card"><span className="stat-icon"><Gavel size={19} /></span><div><span>Jueces disponibles</span><b>{tournament.judges.filter((judge) => judge.active).length}</b></div></div>
+        <div className="stat-card"><span className="stat-icon"><Database size={19} /></span><div><span>Rondas</span><b>{tournament.rounds.length}{tournament.draftRound ? ' + borrador' : ''}</b></div></div>
+        <div className="stat-card"><span className="stat-icon"><ClipboardList size={19} /></span><div><span>Actas completas</span><b>{completeDebates}/{played.length}</b></div></div>
       </div>
-      <Notice kind="info"><b>Siguiente paso:</b> {nextStep(tournament, outcomes)}</Notice>
+      {next && <div className={'tab-next-step' + (next.finished ? ' finished' : '')}>
+        <span className="tab-next-icon">{next.finished ? <Trophy size={20} /> : <Flag size={20} />}</span>
+        <div><small>Siguiente paso</small><b>{next.text}</b></div>
+        <button type="button" className="button primary" onClick={() => onNavigate(next.view)}>{next.action} <ArrowRight size={16} /></button>
+      </div>}
+      <form className="tab-inline-form" onSubmit={(event) => { event.preventDefault(); store.setOperator(operator); notify('Las próximas entradas del registro llevarán el nombre «' + operator.trim() + '».'); }}>
+        <Field label="Operador de la mesa de tabulación" hint="Se anota en cada entrada del registro."><input value={operator} maxLength={60} onChange={(event) => setOperator(event.target.value)} placeholder="Nombre de quien tabula" /></Field>
+        <button type="submit" className="button secondary" disabled={operator.trim() === state.operator}><Check size={16} /> Guardar nombre</button>
+      </form>
     </section>}
 
     <div className="tab-two-columns">
@@ -156,30 +220,50 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           <div><b>{entry.name}</b><small>Modificado {entry.updatedAt ? new Date(entry.updatedAt).toLocaleString('es-ES') : '—'}</small></div>
           {entry.id === tournament?.id ? <span className="state-pill ready"><Check size={12} /> Abierto</span>
             : <button type="button" className="button secondary" onClick={() => { store.open(entry.id); notify('Torneo abierto.'); }}>Abrir</button>}
-          <button type="button" className="icon-button danger-action" aria-label={'Borrar ' + entry.name} onClick={() => {
-            if (window.confirm('¿Borrar «' + entry.name + '» de este navegador? Exporta antes una copia si quieres conservarlo.')) { store.remove(entry.id); notify('Torneo borrado.'); }
+          <button type="button" className="icon-button danger-action" aria-label={'Borrar ' + entry.name} disabled={state.readOnly} onClick={() => {
+            if (window.confirm('¿Borrar «' + entry.name + '» de este navegador, con su registro y sus copias automáticas? Exporta antes una copia si quieres conservarlo.')) { store.remove(entry.id); notify('Torneo borrado.'); }
           }}><Trash2 size={15} /></button>
         </li>)}</ul>
       </section>
     </div>
 
-    <section className="panel">
-      <div className="panel-title"><div><h3>Copias de seguridad</h3><p>Los datos viven solo en este navegador: si se borran los datos del sitio (o Safari los elimina tras días sin uso) se pierden. Exporta una copia tras cada ronda.</p></div></div>
+    {tournament && <section className="panel">
+      <div className="panel-title"><div><h3><Stethoscope size={18} /> Diagnóstico</h3><p>Comprueba que los datos son coherentes (identificadores, referencias, dobles reservas, instituciones escritas de dos formas…) y que el registro no se ha alterado. Hazlo antes de cada ronda.</p></div></div>
       <div className="tab-actions">
-        <button type="button" className="button primary" disabled={!tournament} onClick={() => tournament && downloadFile('tabulacion-' + fileSlug(tournament.name) + '-' + new Date().toISOString().slice(0, 10) + '.json', serializeTournamentExport(tournament), 'application/json')}><Download size={16} /> Exportar copia (.json)</button>
-        <button type="button" className="button secondary" onClick={() => fileInput.current?.click()}><Upload size={16} /> Importar copia</button>
+        <button type="button" className="button primary" onClick={diagnose}><ShieldCheck size={16} /> Comprobar ahora</button>
+        <button type="button" className="button secondary" onClick={downloadEmergencyCopy}><Download size={16} /> Copia de emergencia</button>
+      </div>
+      {diagnosis && <>
+        {!diagnosis.integrity.errors.length && !diagnosis.integrity.warnings.length && diagnosis.log.ok
+          ? <Notice kind="success">Todo en orden: datos coherentes y registro verificado ({diagnosis.log.segments} tramo{diagnosis.log.segments === 1 ? '' : 's'}{diagnosis.log.pending ? ', ' + diagnosis.log.pending + ' entradas pendientes de sellar' : ''}).</Notice>
+          : <>
+            <IssueList items={diagnosis.integrity.errors} kind="error" />
+            <IssueList items={diagnosis.integrity.warnings} />
+            {!diagnosis.log.ok && <IssueList items={diagnosis.log.problems} kind="error" />}
+            <IssueList items={diagnosis.log.issues} />
+          </>}
+      </>}
+      <p className="muted">Versión en uso: {BUILD_INFO}. Usa la misma durante todo el torneo.</p>
+    </section>}
+
+    <section className="panel">
+      <div className="panel-title"><div><h3>Copias de seguridad</h3><p>Los datos viven solo en este navegador: si se borran los datos del sitio (o Safari los elimina tras días sin uso) se pierden. Cada ronda confirmada descarga un ZIP con una copia completa; exporta también una copia cuando termines de pasar actas.</p></div></div>
+      <div className="tab-actions">
+        <button type="button" className="button primary" disabled={!tournament} onClick={() => { if (exportTournamentCopy(store) !== null) notify('Copia exportada con el registro.'); }}><Download size={16} /> Exportar copia (.json)</button>
+        <button type="button" className="button secondary" disabled={state.readOnly} onClick={() => fileInput.current?.click()}><Upload size={16} /> Importar copia</button>
         <input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={(event) => void importFile(event)} />
-        <button type="button" className="button secondary" disabled={!tournament} onClick={() => { notify(store.backup('Copia manual') ? 'Copia automática guardada en el navegador.' : 'No hay espacio para otra copia en el navegador.', 'success'); setBackupVersion((value) => value + 1); }}><Database size={16} /> Guardar copia en el navegador</button>
+        <button type="button" className="button secondary" disabled={!tournament || state.readOnly} onClick={() => { notify(store.backup('Copia manual') ? 'Copia guardada en el navegador.' : 'No hay espacio para otra copia en el navegador.', 'success'); setBackupVersion((value) => value + 1); }}><Database size={16} /> Guardar copia en el navegador</button>
         <button type="button" className="text-button" onClick={() => void requestPersistence()}>Pedir almacenamiento persistente</button>
       </div>
+      <p className="muted">«Importar copia» acepta la copia exportada, el archivo <code>privado/copia-torneo.json</code> del ZIP de cualquier ronda y la copia de emergencia.</p>
       {tournament && <>
         <h4 className="tab-subtitle">Copias automáticas de «{tournament.name}»</h4>
         {backups.length ? <ul className="tab-list">{backups.map((backup) => <li key={backup.slot}>
           <div><b>{backup.label}</b><small>{new Date(backup.createdAt).toLocaleString('es-ES')}</small></div>
-          <button type="button" className="button secondary" onClick={() => {
-            if (window.confirm('¿Restaurar la copia «' + backup.label + '»? El estado actual se guardará antes como otra copia.')) { store.restoreBackup(backup.slot); setBackupVersion((value) => value + 1); notify('Copia restaurada.'); }
+          <button type="button" className="button secondary" disabled={state.readOnly} onClick={() => {
+            if (window.confirm('¿Restaurar la copia «' + backup.label + '»? El estado actual se guardará antes como otra copia y el registro anotará la restauración.')) { store.restoreBackup(backup.slot); setBackupVersion((value) => value + 1); notify('Copia restaurada.'); }
           }}><RotateCcw size={15} /> Restaurar</button>
-        </li>)}</ul> : <p className="muted">Se crean automáticamente antes de generar o borrar rondas, importar o aplicar un reglamento (máximo {MAX_BACKUPS}).</p>}
+        </li>)}</ul> : <p className="muted">Se crean automáticamente antes de confirmar o borrar rondas, importar o aplicar un reglamento (máximo {MAX_BACKUPS}).</p>}
       </>}
       <p className="muted">Uso del almacenamiento del navegador: {formatNumber(state.usageBytes / 1048576)} MB.</p>
     </section>

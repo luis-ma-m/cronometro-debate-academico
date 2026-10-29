@@ -1,8 +1,9 @@
 import type { Judge, Room, Speaker, Team, Tournament } from '../domain';
 import { createTimer, resolvePhases, validateAssignments, withRoomStatus } from '../timer';
+import { pickChair } from './adjudication';
 import { createTabTournament } from './presets';
 import { randomSeed } from './random';
-import type { PresetId, TabJudge, TabTeam, TabTournament } from './types';
+import { isFallenAt, sameInstitution, type PresetId, type TabDebate, type TabJudge, type TabTeam, type TabTournament } from './types';
 
 /**
  * Versioned hand-offs between the admin panel and the local tabulation. Each side only reads the other's
@@ -134,23 +135,28 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   const issues: string[] = [];
   const warnings: string[] = [];
   const venues = new Map(tournament.venues.map((venue) => [venue.id, venue.name]));
+  const teams = new Map(tournament.teams.map((team) => [team.id, team]));
   const debates: PanelOutboxDebate[] = [];
+  let fallen = 0;
   for (const debate of round.debates) {
     const [a, b] = debate.teamIds;
+    if (debate.teamIds.some((id) => isFallenAt(teams.get(id), round.number))) { fallen++; continue; }
     const venueName = venues.get(debate.venueId) ?? '';
     if (!venueName) { issues.push('Hay debates sin sala: asigna una sala a cada debate antes de enviarlo.'); continue; }
     if (!a || !b) { issues.push(venueName + ': faltan equipos.'); continue; }
     const favor = debate.favorTeamId ?? a;
+    const panel = tournament.settings.conflictPolicy === 'lastResort' ? panelAcceptedJudges(tournament, debate, venueName, warnings) : debate;
     debates.push({
       physicalRoomId: debate.venueId,
       venueName,
       teamFavorId: favor,
       teamContraId: favor === a ? b : a,
-      judgeIds: [...debate.judgeIds].sort(),
-      chairId: debate.chairId,
+      judgeIds: [...panel.judgeIds].sort(),
+      chairId: panel.chairId,
       sidesProvisional: !debate.favorTeamId,
     });
   }
+  if (fallen) warnings.push(fallen + ' debate(s) contra un equipo caído no se envían al panel: no se disputan.');
   const provisional = debates.filter((debate) => debate.sidesProvisional).length;
   if (provisional) warnings.push(provisional + ' debate(s) sin postura sorteada: se enviarán con una postura provisional que podrás intercambiar en el panel.');
   if (debates.some((debate) => !debate.judgeIds.length)) warnings.push('Hay debates sin jueces.');
@@ -168,6 +174,30 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
     issues,
     warnings,
   };
+}
+
+/**
+ * The panel refuses institution, team–judge and judge–judge conflicts, which ADUMA may seat as a last resort: those
+ * judges stay in the tabulation but are left out of the push, with a warning. The chair is kept whenever possible.
+ */
+function panelAcceptedJudges(tournament: TabTournament, debate: TabDebate, venueName: string, warnings: string[]): Pick<TabDebate, 'judgeIds' | 'chairId'> {
+  const judges = new Map(tournament.judges.map((judge) => [judge.id, judge]));
+  const debateTeams = debate.teamIds.map((id) => tournament.teams.find((team) => team.id === id)).filter((team): team is TabTeam => Boolean(team));
+  const kept: TabJudge[] = [];
+  const ordered = [...debate.judgeIds].sort((x, y) => Number(y === debate.chairId) - Number(x === debate.chairId));
+  for (const id of ordered) {
+    const judge = judges.get(id);
+    if (!judge) continue;
+    const team = debateTeams.find((item) => sameInstitution(item.institution, judge.institution) || item.incompatibleJudgeIds.includes(judge.id));
+    const colleague = kept.find((other) => other.incompatibleJudgeIds.includes(judge.id) || judge.incompatibleJudgeIds.includes(other.id));
+    if (team || colleague) {
+      warnings.push(venueName + ': ' + judge.name + ' no se envía al panel (incompatible con ' + (team ? team.name : colleague!.name) + '); el panel no admite incompatibilidades.');
+      continue;
+    }
+    kept.push(judge);
+  }
+  const judgeIds = kept.map((judge) => judge.id);
+  return { judgeIds, chairId: judgeIds.includes(debate.chairId) ? debate.chairId : pickChair(judgeIds, judges) };
 }
 
 export interface ApplyOutboxResult { rooms: Room[] | null; issues: string[]; summary: string[]; changed: number }

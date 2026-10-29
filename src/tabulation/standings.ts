@@ -37,6 +37,7 @@ export interface TeamStanding {
   opponents: string[];
 }
 
+/** `winner` is empty when both teams fell (both lose). */
 interface Match { a: string; b: string; winner: string; votes: Record<string, number>; points: Record<string, number | null> }
 
 type Criterion = (teamId: string, block: string[]) => number;
@@ -62,21 +63,28 @@ export function buildTeamStandings(tournament: TabTournament, options: Standings
   const records = new Map(scope.map((team) => [team.id, emptyStanding(team.id, team.name, team.institution)]));
   const scoredValues = new Map<string, number[]>(scope.map((team) => [team.id, []]));
   const matches: Match[] = [];
-  const deferred: Array<{ match: Match; teamId: string }> = [];
+  const deferred: Array<{ match: Match; teamId: string; kind: 'stage' | 'round'; roundId: string }> = [];
+  // ADUMA: the rival of a fallen team receives the mean of every team's items in the round's other rooms.
+  const roundTotals = new Map<string, { sum: number; count: number }>();
 
   for (const round of rounds) {
     for (const debate of round.debates) {
       const outcome = outcomes.get(debate.id);
-      if (!outcome || outcome.status !== 'complete' || outcome.lines.length !== 2 || !outcome.winnerTeamId) continue;
+      if (!outcome || outcome.status !== 'complete' || outcome.lines.length !== 2 || (!outcome.winnerTeamId && !outcome.noWinner)) continue;
       const [first, second] = outcome.lines;
       const match: Match = {
         a: first.teamId,
         b: second.teamId,
-        winner: outcome.winnerTeamId,
+        winner: outcome.winnerTeamId ?? '',
         votes: { [first.teamId]: first.votes, [second.teamId]: second.votes },
         points: { [first.teamId]: first.points, [second.teamId]: second.points },
       };
       matches.push(match);
+      if (!outcome.noWinner && outcome.lines.every((line) => line.points !== null && !line.forfeitWin && !line.forfeitLoss && !line.fallenWin && !line.fallenLoss)) {
+        const totals = roundTotals.get(round.id) ?? { sum: 0, count: 0 };
+        for (const line of outcome.lines) { totals.sum += line.points!; totals.count++; }
+        roundTotals.set(round.id, totals);
+      }
       for (const line of outcome.lines) {
         const record = records.get(line.teamId);
         if (!record) continue;
@@ -94,18 +102,25 @@ export function buildTeamStandings(tournament: TabTournament, options: Standings
         record.opponents.push(line.opponentId);
         if (line.points !== null) {
           record.points += line.points;
-          if (!line.forfeitWin && !line.forfeitLoss) scoredValues.get(line.teamId)?.push(line.points);
-        } else if (line.forfeitWin) deferred.push({ match, teamId: line.teamId });
+          if (!line.forfeitWin && !line.forfeitLoss && !line.fallenWin && !line.fallenLoss) scoredValues.get(line.teamId)?.push(line.points);
+        } else if (line.deferred) deferred.push({ match, teamId: line.teamId, kind: line.deferred, roundId: round.id });
         else record.pendingPoints++;
       }
     }
   }
   // LEDU art. 36: a forfeit winner scores its average from the rest of the stage.
-  for (const { match, teamId } of deferred) {
+  // ADUMA (equipo caído): the winner scores the round's average; both stay pending until they can be computed.
+  for (const { match, teamId, kind, roundId } of deferred) {
     const record = records.get(teamId)!;
-    const values = scoredValues.get(teamId) ?? [];
-    if (!values.length) { record.pendingPoints++; continue; }
-    const average = values.reduce((total, value) => total + value, 0) / values.length;
+    let average: number | null = null;
+    if (kind === 'round') {
+      const totals = roundTotals.get(roundId);
+      if (totals?.count) average = totals.sum / totals.count;
+    } else {
+      const values = scoredValues.get(teamId) ?? [];
+      if (values.length) average = values.reduce((total, value) => total + value, 0) / values.length;
+    }
+    if (average === null) { record.pendingPoints++; continue; }
     record.points += average;
     match.points[teamId] = average;
   }
@@ -143,6 +158,8 @@ export function buildTeamStandings(tournament: TabTournament, options: Standings
     headToHeadPoints: headToHead('points'),
     speakerPoints: stat((record) => record.speakerPoints),
     fewestPenalties: stat((record) => -(record.majors * 1e6 + record.minors * 1e3 + record.warnings)),
+    fewestMajors: stat((record) => -record.majors),
+    fewestMinors: stat((record) => -record.minors),
   };
   const chain: Criterion[] = [stat((record) => record.wins), ...tournament.settings.tiebreaks.map((key) => criteria[key])];
 
@@ -199,6 +216,8 @@ export interface SpeakerStanding {
   average: number;
   count: number;
   value: number;
+  /** Qualifying debates the speaker's team won against a fallen team, so nobody could score them (ADUMA). */
+  fallenRivalDebates: number;
 }
 
 export interface SpeakerRanking { key: SpeakerRole | 'all'; title: string; rows: SpeakerStanding[] }
@@ -214,6 +233,7 @@ export function buildSpeakerStandings(tournament: TabTournament, options: Omit<S
   const speakers = new Map(tournament.speakers.map((speaker) => [speaker.id, speaker]));
   const rounds = qualifyingRounds(tournament).filter((round) => options.upToRoundNumber === undefined || round.number <= options.upToRoundNumber);
   const values = new Map<string, Map<string, number[]>>(SPEAKER_RANKINGS.map((ranking) => [ranking.key, new Map()]));
+  const fallenRivals = new Map<string, number>();
   const push = (key: string, speakerId: string, value: number) => {
     const bucket = values.get(key)!;
     bucket.set(speakerId, [...(bucket.get(speakerId) ?? []), value]);
@@ -222,13 +242,16 @@ export function buildSpeakerStandings(tournament: TabTournament, options: Omit<S
     for (const debate of round.debates) {
       const outcome = outcomes.get(debate.id);
       if (outcome?.status !== 'complete') continue;
-      const perDebate = new Map<string, number[]>();
+      for (const line of outcome.lines) if (line.fallenWin) fallenRivals.set(line.teamId, (fallenRivals.get(line.teamId) ?? 0) + 1);
       for (const speech of outcome.speeches) {
         if (!speech.speakerId || !speakers.has(speech.speakerId) || teams.get(speech.teamId)?.swing) continue;
         push(speech.role, speech.speakerId, speech.score);
-        perDebate.set(speech.speakerId, [...(perDebate.get(speech.speakerId) ?? []), speech.score]);
       }
-      for (const [speakerId, scores] of perDebate) push('all', speakerId, scores.reduce((total, score) => total + score, 0) / scores.length);
+      // One value per speaker and debate (the mean of their turns, or the member's score in a joint acta).
+      for (const total of outcome.speakerTotals) {
+        if (!speakers.has(total.speakerId) || teams.get(total.teamId)?.swing) continue;
+        push('all', total.speakerId, total.score);
+      }
     }
   }
   return SPEAKER_RANKINGS.map((ranking) => {
@@ -238,7 +261,7 @@ export function buildSpeakerStandings(tournament: TabTournament, options: Omit<S
       const average = total / list.length;
       return {
         speakerId, name: speaker.name, teamId: speaker.teamId, teamName: teams.get(speaker.teamId)?.name ?? 'Equipo desconocido',
-        rank: 0, tied: false, total, average, count: list.length,
+        rank: 0, tied: false, total, average, count: list.length, fallenRivalDebates: fallenRivals.get(speaker.teamId) ?? 0,
         value: round6(tournament.settings.speakerMetric === 'sum' ? total : average),
       };
     });

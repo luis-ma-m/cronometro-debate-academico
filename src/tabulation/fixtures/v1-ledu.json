@@ -1,0 +1,1266 @@
+{
+ "schemaVersion": 1,
+ "id": "torneo-66581d2c900291b6",
+ "name": "Torneo de ejemplo · LEDU · liguilla de grupos",
+ "createdAt": 1800000000000,
+ "updatedAt": 1800000000000,
+ "revision": 0,
+ "seed": 7,
+ "settings": {
+  "presetId": "ledu-groups",
+  "stage": "groups",
+  "groupCount": 4,
+  "groupAdvance": 2,
+  "swissRounds": 5,
+  "avoidSameInstitution": true,
+  "breakSize": 8,
+  "bracketMode": "fixed",
+  "qualifyingPanelSize": 3,
+  "eliminationPanelSize": 3,
+  "qualifyingSideMode": "draw",
+  "scoreMin": 0,
+  "scoreMax": 100,
+  "scoresIncludePenalties": false,
+  "trimExtremes": true,
+  "speakerScores": true,
+  "speakerScoreMin": 0,
+  "speakerScoreMax": 10,
+  "speakerScoreStep": 0.5,
+  "speakerMetric": "sum",
+  "warningConversion": "ledu",
+  "minorPoints": 7,
+  "minorsPerMajor": 3,
+  "majorMode": "forfeit",
+  "majorPoints": 0,
+  "forfeitLoserPoints": 25,
+  "forfeitWinnerPoints": "average",
+  "tiebreaks": [
+   "headToHead",
+   "headToHeadBallots",
+   "headToHeadPoints",
+   "pointsAverage",
+   "fewestPenalties"
+  ],
+  "tiebreakFallback": "manual"
+ },
+ "teams": [
+  {
+   "id": "sample-team-01",
+   "name": "Málaga A",
+   "institution": "Universidad de Málaga",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-02",
+   "name": "Sevilla A",
+   "institution": "Universidad de Sevilla",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-03",
+   "name": "Granada A",
+   "institution": "Universidad de Granada",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-04",
+   "name": "Córdoba A",
+   "institution": "Universidad de Córdoba",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-05",
+   "name": "Complutense A",
+   "institution": "Universidad Complutense de Madrid",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-06",
+   "name": "Carlos III A",
+   "institution": "Universidad Carlos III de Madrid",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-07",
+   "name": "València A",
+   "institution": "Universitat de València",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-08",
+   "name": "Navarra A",
+   "institution": "Universidad de Navarra",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-09",
+   "name": "Málaga B",
+   "institution": "Universidad de Málaga",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-10",
+   "name": "Sevilla B",
+   "institution": "Universidad de Sevilla",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-11",
+   "name": "Granada B",
+   "institution": "Universidad de Granada",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-12",
+   "name": "Córdoba B",
+   "institution": "Universidad de Córdoba",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-13",
+   "name": "Complutense B",
+   "institution": "Universidad Complutense de Madrid",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-14",
+   "name": "Carlos III B",
+   "institution": "Universidad Carlos III de Madrid",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-15",
+   "name": "València B",
+   "institution": "Universitat de València",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  },
+  {
+   "id": "sample-team-16",
+   "name": "Navarra B",
+   "institution": "Universidad de Navarra",
+   "active": true,
+   "swing": false,
+   "breakEligible": true,
+   "incompatibleJudgeIds": []
+  }
+ ],
+ "speakers": [
+  {
+   "id": "sample-team-01-speaker-1",
+   "teamId": "sample-team-01",
+   "name": "Lucía García"
+  },
+  {
+   "id": "sample-team-01-speaker-2",
+   "teamId": "sample-team-01",
+   "name": "Pablo Martínez"
+  },
+  {
+   "id": "sample-team-01-speaker-3",
+   "teamId": "sample-team-01",
+   "name": "Carmen López"
+  },
+  {
+   "id": "sample-team-01-speaker-4",
+   "teamId": "sample-team-01",
+   "name": "Javier Sánchez"
+  },
+  {
+   "id": "sample-team-02-speaker-1",
+   "teamId": "sample-team-02",
+   "name": "Hugo Sánchez"
+  },
+  {
+   "id": "sample-team-02-speaker-2",
+   "teamId": "sample-team-02",
+   "name": "Julia Pérez"
+  },
+  {
+   "id": "sample-team-02-speaker-3",
+   "teamId": "sample-team-02",
+   "name": "Mario Gómez"
+  },
+  {
+   "id": "sample-team-02-speaker-4",
+   "teamId": "sample-team-02",
+   "name": "Lucía Fernández"
+  },
+  {
+   "id": "sample-team-03-speaker-1",
+   "teamId": "sample-team-03",
+   "name": "Martina Fernández"
+  },
+  {
+   "id": "sample-team-03-speaker-2",
+   "teamId": "sample-team-03",
+   "name": "Álvaro Ruiz"
+  },
+  {
+   "id": "sample-team-03-speaker-3",
+   "teamId": "sample-team-03",
+   "name": "Elena Díaz"
+  },
+  {
+   "id": "sample-team-03-speaker-4",
+   "teamId": "sample-team-03",
+   "name": "Hugo Moreno"
+  },
+  {
+   "id": "sample-team-04-speaker-1",
+   "teamId": "sample-team-04",
+   "name": "Daniel Moreno"
+  },
+  {
+   "id": "sample-team-04-speaker-2",
+   "teamId": "sample-team-04",
+   "name": "Paula Muñoz"
+  },
+  {
+   "id": "sample-team-04-speaker-3",
+   "teamId": "sample-team-04",
+   "name": "Diego Álvarez"
+  },
+  {
+   "id": "sample-team-04-speaker-4",
+   "teamId": "sample-team-04",
+   "name": "Martina Romero"
+  },
+  {
+   "id": "sample-team-05-speaker-1",
+   "teamId": "sample-team-05",
+   "name": "Sofía Romero"
+  },
+  {
+   "id": "sample-team-05-speaker-2",
+   "teamId": "sample-team-05",
+   "name": "Adrián Navarro"
+  },
+  {
+   "id": "sample-team-05-speaker-3",
+   "teamId": "sample-team-05",
+   "name": "Irene Torres"
+  },
+  {
+   "id": "sample-team-05-speaker-4",
+   "teamId": "sample-team-05",
+   "name": "Daniel Domínguez"
+  },
+  {
+   "id": "sample-team-06-speaker-1",
+   "teamId": "sample-team-06",
+   "name": "Pablo Domínguez"
+  },
+  {
+   "id": "sample-team-06-speaker-2",
+   "teamId": "sample-team-06",
+   "name": "Carmen García"
+  },
+  {
+   "id": "sample-team-06-speaker-3",
+   "teamId": "sample-team-06",
+   "name": "Javier Martínez"
+  },
+  {
+   "id": "sample-team-06-speaker-4",
+   "teamId": "sample-team-06",
+   "name": "Sofía López"
+  },
+  {
+   "id": "sample-team-07-speaker-1",
+   "teamId": "sample-team-07",
+   "name": "Julia López"
+  },
+  {
+   "id": "sample-team-07-speaker-2",
+   "teamId": "sample-team-07",
+   "name": "Mario Sánchez"
+  },
+  {
+   "id": "sample-team-07-speaker-3",
+   "teamId": "sample-team-07",
+   "name": "Lucía Pérez"
+  },
+  {
+   "id": "sample-team-07-speaker-4",
+   "teamId": "sample-team-07",
+   "name": "Pablo Gómez"
+  },
+  {
+   "id": "sample-team-08-speaker-1",
+   "teamId": "sample-team-08",
+   "name": "Álvaro Gómez"
+  },
+  {
+   "id": "sample-team-08-speaker-2",
+   "teamId": "sample-team-08",
+   "name": "Elena Fernández"
+  },
+  {
+   "id": "sample-team-08-speaker-3",
+   "teamId": "sample-team-08",
+   "name": "Hugo Ruiz"
+  },
+  {
+   "id": "sample-team-08-speaker-4",
+   "teamId": "sample-team-08",
+   "name": "Julia Díaz"
+  },
+  {
+   "id": "sample-team-09-speaker-1",
+   "teamId": "sample-team-09",
+   "name": "Paula Díaz"
+  },
+  {
+   "id": "sample-team-09-speaker-2",
+   "teamId": "sample-team-09",
+   "name": "Diego Moreno"
+  },
+  {
+   "id": "sample-team-09-speaker-3",
+   "teamId": "sample-team-09",
+   "name": "Martina Muñoz"
+  },
+  {
+   "id": "sample-team-09-speaker-4",
+   "teamId": "sample-team-09",
+   "name": "Álvaro Álvarez"
+  },
+  {
+   "id": "sample-team-10-speaker-1",
+   "teamId": "sample-team-10",
+   "name": "Adrián Álvarez"
+  },
+  {
+   "id": "sample-team-10-speaker-2",
+   "teamId": "sample-team-10",
+   "name": "Irene Romero"
+  },
+  {
+   "id": "sample-team-10-speaker-3",
+   "teamId": "sample-team-10",
+   "name": "Daniel Navarro"
+  },
+  {
+   "id": "sample-team-10-speaker-4",
+   "teamId": "sample-team-10",
+   "name": "Paula Torres"
+  },
+  {
+   "id": "sample-team-11-speaker-1",
+   "teamId": "sample-team-11",
+   "name": "Carmen Torres"
+  },
+  {
+   "id": "sample-team-11-speaker-2",
+   "teamId": "sample-team-11",
+   "name": "Javier Domínguez"
+  },
+  {
+   "id": "sample-team-11-speaker-3",
+   "teamId": "sample-team-11",
+   "name": "Sofía García"
+  },
+  {
+   "id": "sample-team-11-speaker-4",
+   "teamId": "sample-team-11",
+   "name": "Adrián Martínez"
+  },
+  {
+   "id": "sample-team-12-speaker-1",
+   "teamId": "sample-team-12",
+   "name": "Mario Martínez"
+  },
+  {
+   "id": "sample-team-12-speaker-2",
+   "teamId": "sample-team-12",
+   "name": "Lucía López"
+  },
+  {
+   "id": "sample-team-12-speaker-3",
+   "teamId": "sample-team-12",
+   "name": "Pablo Sánchez"
+  },
+  {
+   "id": "sample-team-12-speaker-4",
+   "teamId": "sample-team-12",
+   "name": "Carmen Pérez"
+  },
+  {
+   "id": "sample-team-13-speaker-1",
+   "teamId": "sample-team-13",
+   "name": "Elena Pérez"
+  },
+  {
+   "id": "sample-team-13-speaker-2",
+   "teamId": "sample-team-13",
+   "name": "Hugo Gómez"
+  },
+  {
+   "id": "sample-team-13-speaker-3",
+   "teamId": "sample-team-13",
+   "name": "Julia Fernández"
+  },
+  {
+   "id": "sample-team-13-speaker-4",
+   "teamId": "sample-team-13",
+   "name": "Mario Ruiz"
+  },
+  {
+   "id": "sample-team-14-speaker-1",
+   "teamId": "sample-team-14",
+   "name": "Diego Ruiz"
+  },
+  {
+   "id": "sample-team-14-speaker-2",
+   "teamId": "sample-team-14",
+   "name": "Martina Díaz"
+  },
+  {
+   "id": "sample-team-14-speaker-3",
+   "teamId": "sample-team-14",
+   "name": "Álvaro Moreno"
+  },
+  {
+   "id": "sample-team-14-speaker-4",
+   "teamId": "sample-team-14",
+   "name": "Elena Muñoz"
+  },
+  {
+   "id": "sample-team-15-speaker-1",
+   "teamId": "sample-team-15",
+   "name": "Irene Muñoz"
+  },
+  {
+   "id": "sample-team-15-speaker-2",
+   "teamId": "sample-team-15",
+   "name": "Daniel Álvarez"
+  },
+  {
+   "id": "sample-team-15-speaker-3",
+   "teamId": "sample-team-15",
+   "name": "Paula Romero"
+  },
+  {
+   "id": "sample-team-15-speaker-4",
+   "teamId": "sample-team-15",
+   "name": "Diego Navarro"
+  },
+  {
+   "id": "sample-team-16-speaker-1",
+   "teamId": "sample-team-16",
+   "name": "Javier Navarro"
+  },
+  {
+   "id": "sample-team-16-speaker-2",
+   "teamId": "sample-team-16",
+   "name": "Sofía Torres"
+  },
+  {
+   "id": "sample-team-16-speaker-3",
+   "teamId": "sample-team-16",
+   "name": "Adrián Domínguez"
+  },
+  {
+   "id": "sample-team-16-speaker-4",
+   "teamId": "sample-team-16",
+   "name": "Irene García"
+  }
+ ],
+ "judges": [
+  {
+   "id": "sample-judge-01",
+   "name": "Daniel López (juez)",
+   "institution": "Universidad de Málaga",
+   "active": true,
+   "rating": 5,
+   "canChair": true,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-02",
+   "name": "Carmen Ruiz (juez)",
+   "institution": "Universidad de Sevilla",
+   "active": true,
+   "rating": 5,
+   "canChair": true,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-03",
+   "name": "Hugo Romero (juez)",
+   "institution": "Universidad de Granada",
+   "active": true,
+   "rating": 4,
+   "canChair": true,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-04",
+   "name": "Paula Martínez (juez)",
+   "institution": "Universidad de Córdoba",
+   "active": true,
+   "rating": 4,
+   "canChair": true,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-05",
+   "name": "Javier Fernández (juez)",
+   "institution": "Jueces independientes",
+   "active": true,
+   "rating": 4,
+   "canChair": true,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-06",
+   "name": "Julia Álvarez (juez)",
+   "institution": "Jueces independientes",
+   "active": true,
+   "rating": 3,
+   "canChair": false,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-07",
+   "name": "Diego García (juez)",
+   "institution": "Jueces independientes",
+   "active": true,
+   "rating": 3,
+   "canChair": false,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-08",
+   "name": "Sofía Gómez (juez)",
+   "institution": "Jueces independientes",
+   "active": true,
+   "rating": 3,
+   "canChair": false,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-09",
+   "name": "Mario Muñoz (juez)",
+   "institution": "Jueces independientes",
+   "active": true,
+   "rating": 3,
+   "canChair": false,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-10",
+   "name": "Martina Domínguez (juez)",
+   "institution": "Jueces independientes",
+   "active": true,
+   "rating": 2,
+   "canChair": false,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-11",
+   "name": "Adrián Pérez (juez)",
+   "institution": "Jueces independientes",
+   "active": true,
+   "rating": 2,
+   "canChair": false,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  },
+  {
+   "id": "sample-judge-12",
+   "name": "Lucía Moreno (juez)",
+   "institution": "Jueces independientes",
+   "active": true,
+   "rating": 2,
+   "canChair": false,
+   "incompatibleJudgeIds": [],
+   "unavailableRoundIds": []
+  }
+ ],
+ "venues": [
+  {
+   "id": "sample-venue-1",
+   "name": "Aula 1",
+   "active": true
+  },
+  {
+   "id": "sample-venue-2",
+   "name": "Aula 2",
+   "active": true
+  },
+  {
+   "id": "sample-venue-3",
+   "name": "Aula 3",
+   "active": true
+  },
+  {
+   "id": "sample-venue-4",
+   "name": "Aula 4",
+   "active": true
+  },
+  {
+   "id": "sample-venue-5",
+   "name": "Aula 5",
+   "active": true
+  },
+  {
+   "id": "sample-venue-6",
+   "name": "Aula 6",
+   "active": true
+  },
+  {
+   "id": "sample-venue-7",
+   "name": "Aula 7",
+   "active": true
+  },
+  {
+   "id": "sample-venue-8",
+   "name": "Aula 8",
+   "active": true
+  }
+ ],
+ "groups": [
+  {
+   "id": "grupo-1e25ed6a4ddd8202",
+   "name": "Grupo A",
+   "teamIds": [
+    "sample-team-10",
+    "sample-team-03",
+    "sample-team-06",
+    "sample-team-08"
+   ]
+  },
+  {
+   "id": "grupo-61e664fd65878f5b",
+   "name": "Grupo B",
+   "teamIds": [
+    "sample-team-04",
+    "sample-team-11",
+    "sample-team-14",
+    "sample-team-16"
+   ]
+  },
+  {
+   "id": "grupo-f35a6de89c03927d",
+   "name": "Grupo C",
+   "teamIds": [
+    "sample-team-12",
+    "sample-team-05",
+    "sample-team-09",
+    "sample-team-15"
+   ]
+  },
+  {
+   "id": "grupo-fdf62ccbda7c497e",
+   "name": "Grupo D",
+   "teamIds": [
+    "sample-team-02",
+    "sample-team-13",
+    "sample-team-01",
+    "sample-team-07"
+   ]
+  }
+ ],
+ "rounds": [
+  {
+   "id": "ronda-715485ac3a99bb86",
+   "number": 1,
+   "name": "Jornada 1",
+   "kind": "qualifying",
+   "sideMode": "draw",
+   "panelSize": 3,
+   "seed": 1436657177,
+   "silent": false,
+   "debates": [
+    {
+     "id": "debate-d0c0849e9c399667",
+     "venueId": "sample-venue-1",
+     "teamIds": [
+      "sample-team-10",
+      "sample-team-08"
+     ],
+     "favorTeamId": "sample-team-08",
+     "judgeIds": [
+      "sample-judge-03"
+     ],
+     "chairId": "sample-judge-03",
+     "result": {
+      "lineup": {
+       "sample-team-10": {
+        "introductor": "sample-team-10-speaker-1",
+        "first_rebuttal": "sample-team-10-speaker-2",
+        "second_rebuttal": "sample-team-10-speaker-3",
+        "concluder": "sample-team-10-speaker-4"
+       },
+       "sample-team-08": {
+        "introductor": "sample-team-08-speaker-1",
+        "first_rebuttal": "sample-team-08-speaker-2",
+        "second_rebuttal": "sample-team-08-speaker-3",
+        "concluder": "sample-team-08-speaker-4"
+       }
+      },
+      "ballots": [
+       {
+        "judgeId": "sample-judge-03",
+        "totals": {
+         "sample-team-10": 68,
+         "sample-team-08": 66
+        },
+        "speeches": {
+         "sample-team-10": {
+          "introductor": 5,
+          "first_rebuttal": 6.5,
+          "second_rebuttal": 4.5,
+          "concluder": 6.5
+         },
+         "sample-team-08": {
+          "introductor": 6,
+          "first_rebuttal": 5,
+          "second_rebuttal": 7,
+          "concluder": 4.5
+         }
+        }
+       }
+      ],
+      "penalties": {},
+      "notes": "Resultado simulado",
+      "updatedAt": 1793218950182
+     }
+    },
+    {
+     "id": "debate-90e3fb700d9922b8",
+     "venueId": "sample-venue-2",
+     "teamIds": [
+      "sample-team-03",
+      "sample-team-06"
+     ],
+     "favorTeamId": "sample-team-03",
+     "judgeIds": [
+      "sample-judge-04"
+     ],
+     "chairId": "sample-judge-04",
+     "result": {
+      "lineup": {
+       "sample-team-03": {
+        "introductor": "sample-team-03-speaker-1",
+        "first_rebuttal": "sample-team-03-speaker-2",
+        "second_rebuttal": "sample-team-03-speaker-3",
+        "concluder": "sample-team-03-speaker-4"
+       },
+       "sample-team-06": {
+        "introductor": "sample-team-06-speaker-1",
+        "first_rebuttal": "sample-team-06-speaker-2",
+        "second_rebuttal": "sample-team-06-speaker-3",
+        "concluder": "sample-team-06-speaker-4"
+       }
+      },
+      "ballots": [
+       {
+        "judgeId": "sample-judge-04",
+        "totals": {
+         "sample-team-03": 68,
+         "sample-team-06": 70
+        },
+        "speeches": {
+         "sample-team-03": {
+          "introductor": 4,
+          "first_rebuttal": 5.5,
+          "second_rebuttal": 5,
+          "concluder": 7.5
+         },
+         "sample-team-06": {
+          "introductor": 5.5,
+          "first_rebuttal": 7.5,
+          "second_rebuttal": 7,
+          "concluder": 5.5
+         }
+        }
+       }
+      ],
+      "penalties": {},
+      "notes": "Resultado simulado",
+      "updatedAt": 1793218950182
+     }
+    },
+    {
+     "id": "debate-211979d316b68fce",
+     "venueId": "sample-venue-3",
+     "teamIds": [
+      "sample-team-04",
+      "sample-team-16"
+     ],
+     "favorTeamId": "sample-team-04",
+     "judgeIds": [
+      "sample-judge-02"
+     ],
+     "chairId": "sample-judge-02",
+     "result": {
+      "lineup": {
+       "sample-team-04": {
+        "introductor": "sample-team-04-speaker-1",
+        "first_rebuttal": "sample-team-04-speaker-2",
+        "second_rebuttal": "sample-team-04-speaker-3",
+        "concluder": "sample-team-04-speaker-4"
+       },
+       "sample-team-16": {
+        "introductor": "sample-team-16-speaker-1",
+        "first_rebuttal": "sample-team-16-speaker-2",
+        "second_rebuttal": "sample-team-16-speaker-3",
+        "concluder": "sample-team-16-speaker-4"
+       }
+      },
+      "ballots": [
+       {
+        "judgeId": "sample-judge-02",
+        "totals": {
+         "sample-team-04": 80,
+         "sample-team-16": 49
+        },
+        "speeches": {
+         "sample-team-04": {
+          "introductor": 6.5,
+          "first_rebuttal": 5.5,
+          "second_rebuttal": 7,
+          "concluder": 9
+         },
+         "sample-team-16": {
+          "introductor": 4,
+          "first_rebuttal": 3.5,
+          "second_rebuttal": 6.5,
+          "concluder": 4
+         }
+        }
+       }
+      ],
+      "penalties": {},
+      "notes": "Resultado simulado",
+      "updatedAt": 1793218950182
+     }
+    },
+    {
+     "id": "debate-1fb4f39d49beaaca",
+     "venueId": "sample-venue-4",
+     "teamIds": [
+      "sample-team-11",
+      "sample-team-14"
+     ],
+     "favorTeamId": "sample-team-11",
+     "judgeIds": [
+      "sample-judge-01"
+     ],
+     "chairId": "sample-judge-01",
+     "result": {
+      "lineup": {
+       "sample-team-11": {
+        "introductor": "sample-team-11-speaker-1",
+        "first_rebuttal": "sample-team-11-speaker-2",
+        "second_rebuttal": "sample-team-11-speaker-3",
+        "concluder": "sample-team-11-speaker-4"
+       },
+       "sample-team-14": {
+        "introductor": "sample-team-14-speaker-1",
+        "first_rebuttal": "sample-team-14-speaker-2",
+        "second_rebuttal": "sample-team-14-speaker-3",
+        "concluder": "sample-team-14-speaker-4"
+       }
+      },
+      "ballots": [
+       {
+        "judgeId": "sample-judge-01",
+        "totals": {
+         "sample-team-11": 64,
+         "sample-team-14": 43
+        },
+        "speeches": {
+         "sample-team-11": {
+          "introductor": 4,
+          "first_rebuttal": 3.5,
+          "second_rebuttal": 6,
+          "concluder": 5.5
+         },
+         "sample-team-14": {
+          "introductor": 5.5,
+          "first_rebuttal": 4,
+          "second_rebuttal": 5,
+          "concluder": 4.5
+         }
+        }
+       }
+      ],
+      "penalties": {},
+      "notes": "Resultado simulado",
+      "updatedAt": 1793218950182
+     }
+    },
+    {
+     "id": "debate-a79fee2f40a23d12",
+     "venueId": "sample-venue-5",
+     "teamIds": [
+      "sample-team-12",
+      "sample-team-15"
+     ],
+     "favorTeamId": "sample-team-12",
+     "judgeIds": [
+      "sample-judge-06"
+     ],
+     "chairId": "sample-judge-06",
+     "result": {
+      "lineup": {
+       "sample-team-12": {
+        "introductor": "sample-team-12-speaker-1",
+        "first_rebuttal": "sample-team-12-speaker-2",
+        "second_rebuttal": "sample-team-12-speaker-3",
+        "concluder": "sample-team-12-speaker-4"
+       },
+       "sample-team-15": {
+        "introductor": "sample-team-15-speaker-1",
+        "first_rebuttal": "sample-team-15-speaker-2",
+        "second_rebuttal": "sample-team-15-speaker-3",
+        "concluder": "sample-team-15-speaker-4"
+       }
+      },
+      "ballots": [
+       {
+        "judgeId": "sample-judge-06",
+        "totals": {
+         "sample-team-12": 74,
+         "sample-team-15": 69
+        },
+        "speeches": {
+         "sample-team-12": {
+          "introductor": 6,
+          "first_rebuttal": 8,
+          "second_rebuttal": 7.5,
+          "concluder": 5
+         },
+         "sample-team-15": {
+          "introductor": 8,
+          "first_rebuttal": 6,
+          "second_rebuttal": 6,
+          "concluder": 8
+         }
+        }
+       }
+      ],
+      "penalties": {},
+      "notes": "Resultado simulado",
+      "updatedAt": 1793218950182
+     }
+    },
+    {
+     "id": "debate-c575f7c631b427e7",
+     "venueId": "sample-venue-6",
+     "teamIds": [
+      "sample-team-05",
+      "sample-team-09"
+     ],
+     "favorTeamId": "sample-team-05",
+     "judgeIds": [
+      "sample-judge-10"
+     ],
+     "chairId": "sample-judge-10",
+     "result": {
+      "lineup": {
+       "sample-team-05": {
+        "introductor": "sample-team-05-speaker-1",
+        "first_rebuttal": "sample-team-05-speaker-2",
+        "second_rebuttal": "sample-team-05-speaker-3",
+        "concluder": "sample-team-05-speaker-4"
+       },
+       "sample-team-09": {
+        "introductor": "sample-team-09-speaker-1",
+        "first_rebuttal": "sample-team-09-speaker-2",
+        "second_rebuttal": "sample-team-09-speaker-3",
+        "concluder": "sample-team-09-speaker-4"
+       }
+      },
+      "ballots": [
+       {
+        "judgeId": "sample-judge-10",
+        "totals": {
+         "sample-team-05": 46,
+         "sample-team-09": 79
+        },
+        "speeches": {
+         "sample-team-05": {
+          "introductor": 4,
+          "first_rebuttal": 7,
+          "second_rebuttal": 3,
+          "concluder": 4
+         },
+         "sample-team-09": {
+          "introductor": 8,
+          "first_rebuttal": 6,
+          "second_rebuttal": 7.5,
+          "concluder": 5
+         }
+        }
+       }
+      ],
+      "penalties": {},
+      "notes": "Resultado simulado",
+      "updatedAt": 1793218950182
+     }
+    },
+    {
+     "id": "debate-342fd5212cecdd4c",
+     "venueId": "sample-venue-7",
+     "teamIds": [
+      "sample-team-02",
+      "sample-team-07"
+     ],
+     "favorTeamId": "sample-team-02",
+     "judgeIds": [
+      "sample-judge-11",
+      "sample-judge-09",
+      "sample-judge-12"
+     ],
+     "chairId": "sample-judge-09",
+     "result": {
+      "lineup": {
+       "sample-team-02": {
+        "introductor": "sample-team-02-speaker-1",
+        "first_rebuttal": "sample-team-02-speaker-2",
+        "second_rebuttal": "sample-team-02-speaker-3",
+        "concluder": "sample-team-02-speaker-4"
+       },
+       "sample-team-07": {
+        "introductor": "sample-team-07-speaker-1",
+        "first_rebuttal": "sample-team-07-speaker-2",
+        "second_rebuttal": "sample-team-07-speaker-3",
+        "concluder": "sample-team-07-speaker-4"
+       }
+      },
+      "ballots": [
+       {
+        "judgeId": "sample-judge-11",
+        "totals": {
+         "sample-team-02": 56,
+         "sample-team-07": 48
+        },
+        "speeches": {
+         "sample-team-02": {
+          "introductor": 3,
+          "first_rebuttal": 6,
+          "second_rebuttal": 2.5,
+          "concluder": 5
+         },
+         "sample-team-07": {
+          "introductor": 5.5,
+          "first_rebuttal": 3,
+          "second_rebuttal": 4,
+          "concluder": 5
+         }
+        }
+       },
+       {
+        "judgeId": "sample-judge-09",
+        "totals": {
+         "sample-team-02": 59,
+         "sample-team-07": 49
+        },
+        "speeches": {
+         "sample-team-02": {
+          "introductor": 6,
+          "first_rebuttal": 5,
+          "second_rebuttal": 4.5,
+          "concluder": 2.5
+         },
+         "sample-team-07": {
+          "introductor": 3,
+          "first_rebuttal": 4,
+          "second_rebuttal": 2.5,
+          "concluder": 3
+         }
+        }
+       },
+       {
+        "judgeId": "sample-judge-12",
+        "totals": {
+         "sample-team-02": 57,
+         "sample-team-07": 38
+        },
+        "speeches": {
+         "sample-team-02": {
+          "introductor": 2.5,
+          "first_rebuttal": 3.5,
+          "second_rebuttal": 5.5,
+          "concluder": 5
+         },
+         "sample-team-07": {
+          "introductor": 3.5,
+          "first_rebuttal": 2,
+          "second_rebuttal": 3,
+          "concluder": 5.5
+         }
+        }
+       }
+      ],
+      "penalties": {},
+      "notes": "Resultado simulado",
+      "updatedAt": 1793218950182
+     }
+    },
+    {
+     "id": "debate-9f89485875e21454",
+     "venueId": "sample-venue-8",
+     "teamIds": [
+      "sample-team-13",
+      "sample-team-01"
+     ],
+     "favorTeamId": "sample-team-13",
+     "judgeIds": [
+      "sample-judge-05",
+      "sample-judge-08",
+      "sample-judge-07"
+     ],
+     "chairId": "sample-judge-05",
+     "result": {
+      "lineup": {
+       "sample-team-13": {
+        "introductor": "sample-team-13-speaker-1",
+        "first_rebuttal": "sample-team-13-speaker-2",
+        "second_rebuttal": "sample-team-13-speaker-3",
+        "concluder": "sample-team-13-speaker-4"
+       },
+       "sample-team-01": {
+        "introductor": "sample-team-01-speaker-1",
+        "first_rebuttal": "sample-team-01-speaker-2",
+        "second_rebuttal": "sample-team-01-speaker-3",
+        "concluder": "sample-team-01-speaker-4"
+       }
+      },
+      "ballots": [
+       {
+        "judgeId": "sample-judge-05",
+        "totals": {
+         "sample-team-13": 64,
+         "sample-team-01": 75
+        },
+        "speeches": {
+         "sample-team-13": {
+          "introductor": 4,
+          "first_rebuttal": 6.5,
+          "second_rebuttal": 7,
+          "concluder": 6
+         },
+         "sample-team-01": {
+          "introductor": 5,
+          "first_rebuttal": 6,
+          "second_rebuttal": 6.5,
+          "concluder": 5
+         }
+        }
+       },
+       {
+        "judgeId": "sample-judge-08",
+        "totals": {
+         "sample-team-13": 57,
+         "sample-team-01": 79
+        },
+        "speeches": {
+         "sample-team-13": {
+          "introductor": 4.5,
+          "first_rebuttal": 6.5,
+          "second_rebuttal": 3.5,
+          "concluder": 6.5
+         },
+         "sample-team-01": {
+          "introductor": 5,
+          "first_rebuttal": 6.5,
+          "second_rebuttal": 8,
+          "concluder": 5.5
+         }
+        }
+       },
+       {
+        "judgeId": "sample-judge-07",
+        "totals": {
+         "sample-team-13": 61,
+         "sample-team-01": 59
+        },
+        "speeches": {
+         "sample-team-13": {
+          "introductor": 5,
+          "first_rebuttal": 6,
+          "second_rebuttal": 4.5,
+          "concluder": 6
+         },
+         "sample-team-01": {
+          "introductor": 5.5,
+          "first_rebuttal": 5.5,
+          "second_rebuttal": 8.5,
+          "concluder": 7
+         }
+        }
+       }
+      ],
+      "penalties": {},
+      "notes": "Resultado simulado",
+      "updatedAt": 1793218950182
+     }
+    }
+   ],
+   "createdAt": 1800000000000
+  }
+ ],
+ "breakSeeds": [],
+ "manualOrder": [],
+ "sample": true
+}

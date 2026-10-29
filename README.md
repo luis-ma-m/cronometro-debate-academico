@@ -15,7 +15,7 @@ Aplicación web para coordinar torneos de debate académico LEDU desde un panel 
 - Cronómetros con inicio, pausa, reanudación, reinicio, avance, retroceso y finalización.
 - URLs públicas de sala; solo una clave vigente de control permite modificar el cronómetro.
 - Detección de revisiones obsoletas y reintentos idempotentes para evitar duplicar operaciones confirmadas.
-- **Tabulación local** en `/tabulacion`, que funciona solo en el navegador, sin API: liguilla de grupos (LEDU) o sistema suizo (UC3M), emparejamientos sin revanchas, asignación de jueces sin conflictos, actas por juez, desempates reglamentarios, premios de oradores y eliminatorias. Intercambia participantes y rondas con el panel. Consulta [docs/TABULACION.md](docs/TABULACION.md).
+- **Tabulación local** en `/tabulacion`, que funciona solo en el navegador, sin API: liguilla de grupos (LEDU), sistema suizo (UC3M) o el V Torneo Nacional ADUMA (acta conjunta, rondas a ciegas, equipos caídos, incompatibilidades objetivas y subjetivas). Incluye emparejamientos sin revanchas, borradores de ronda editables con ZIP de cada ronda, asignación de jueces, actas enviadas por los jueces desde el móvil por WhatsApp (sin servidor), desempates reglamentarios, premios de oradores, eliminatorias y un registro auditable. Intercambia participantes y rondas con el panel. Consulta [docs/TABULACION.md](docs/TABULACION.md) y, para ADUMA, [docs/ADUMA-OPERACION.md](docs/ADUMA-OPERACION.md).
 
 El preset LEDU es una referencia editable. Comprueba el reglamento de la edición concreta antes del torneo.
 

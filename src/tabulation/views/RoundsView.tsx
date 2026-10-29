@@ -1,90 +1,264 @@
-import { useMemo, useState } from 'react';
-import { Dices, Gavel, Printer, Send, Shuffle, Sparkles, Star, Trash2, Trophy, X } from 'lucide-react';
-import { allocateJudges, judgeTeamConflict, judgesConflict, roundIssues } from '../adjudication';
-import { computeBreak, generateFirstElimination, generateNextElimination, tournamentChampion } from '../bracket';
+import { useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { Check, ClipboardList, Copy, Dices, Download, FileText, Gavel, MessageCircle, MonitorPlay, MoreHorizontal, Projector, RotateCcw, Search, Send, Shuffle, Sparkles, Star, Trash2, Trophy, Undo2, X } from 'lucide-react';
+import { allocateJudgesForRound, judgesConflict, teamConflicts, type RoundProblem } from '../adjudication';
+import { computeBreak, tournamentChampion } from '../bracket';
+import {
+  applyDraftEdit, auditRound, checkRound, confirmDraft, createRoundDraft, diffRounds, draftProblems, editRound, reopenRound, undoDraftEdit, withoutDraft,
+  type DraftEdit,
+} from '../draft';
+import { asciiSlug, latestLogStamp, roundSheet } from '../exports';
 import { drawGroups, generateGroupStage, restingTeams } from '../groups';
-import { assignVenues, drawSides, generateSwissRound } from '../pairing';
+import type { LogInput } from '../log';
+import { drawSides, fallenTeamIds } from '../pairing';
 import { buildOutbox, writeOutbox } from '../panelBridge';
-import { randomSeed } from '../random';
-import { roundIsComplete } from '../results';
+import { hashSeed, randomSeed } from '../random';
+import { roundIsComplete, type DebateOutcome } from '../results';
+import { roundPdf } from '../roundPdf';
+import { buildRoundZip } from '../roundZip';
 import { simulateRoundResults } from '../sample';
-import type { TabStore } from '../store';
-import { eliminationRounds, qualifyingRounds, type TabDebate, type TabRound, type TabTournament } from '../types';
-import { Empty, IssueList, lookups, STATUS_LABELS, type ViewProps } from '../ui';
+import { eliminationRounds, qualifyingRounds, type TabDebate, type TabJudge, type TabRound, type TabRoundDraft, type TabTournament } from '../types';
+import { copyText, downloadBytes, Empty, IssueList, lookups, Notice, STATUS_LABELS, type ViewProps } from '../ui';
+import { actaLinkMessage, buildActaLink, whatsAppNumber, whatsAppUrl } from '../whatsapp';
 
-export function RoundsView({ tournament, outcomes, update, notify, store, onNavigate }: ViewProps & { store: TabStore; onNavigate: (view: string) => void }) {
-  const [selectedId, setSelectedId] = useState(() => tournament.rounds.at(-1)?.id ?? '');
-  const round = tournament.rounds.find((item) => item.id === selectedId) ?? tournament.rounds.at(-1);
+const DRAFT_TAB = '__borrador__';
+type Look = ReturnType<typeof lookups>;
+type Compute = (current: TabTournament) => { next: TabTournament; meta: LogInput } | null;
+
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+function debateLabel(look: Look, debate: TabDebate, index: number): string {
+  return (debate.venueId && look.venues.get(debate.venueId)?.name) || 'Debate ' + (index + 1);
+}
+
+/** A number from the public draw is used as is; any other text (a word, a date) is turned into a seed. */
+function seedFrom(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return randomSeed();
+  return /^\d{1,9}$/.test(trimmed) ? Number(trimmed) : hashSeed(trimmed);
+}
+
+export function RoundsView({ tournament, outcomes, update, notify, store, projection, onProject, onNavigate }: ViewProps & {
+  projection: boolean;
+  onProject: () => void;
+  onNavigate: (view: string) => void;
+}) {
+  const draft = tournament.draftRound;
+  const [selectedId, setSelectedId] = useState(() => (draft ? DRAFT_TAB : tournament.rounds.at(-1)?.id ?? ''));
+  const [screenId, setScreenId] = useState<string | null>(null);
+  const [seedText, setSeedText] = useState('');
+  const [acknowledged, setAcknowledged] = useState('');
   const look = useMemo(() => lookups(tournament), [tournament]);
   const { settings } = tournament;
   const qualifying = qualifyingRounds(tournament);
   const elimination = eliminationRounds(tournament);
   const qualifyingDone = qualifying.length > 0 && qualifying.every((item) => roundIsComplete(item, outcomes))
     && (settings.stage === 'groups' || qualifying.length >= settings.swissRounds);
-  const breakPreview = useMemo(() => (qualifyingDone && !elimination.length ? computeBreak(tournament, outcomes) : null), [qualifyingDone, elimination.length, tournament, outcomes]);
+  const breakPreview = useMemo(() => (qualifyingDone && !elimination.length && !draft ? computeBreak(tournament, outcomes) : null), [qualifyingDone, elimination.length, draft, tournament, outcomes]);
   const champion = tournamentChampion(tournament, outcomes);
+  const showDraft = selectedId === DRAFT_TAB && draft;
+  const round = showDraft ? null : tournament.rounds.find((item) => item.id === selectedId) ?? tournament.rounds.at(-1) ?? null;
+  const screenRound = screenId ? tournament.rounds.find((item) => item.id === screenId) ?? null : null;
+  const canCreate = !draft && !champion && (settings.stage === 'swiss'
+    ? (qualifying.length < settings.swissRounds && !elimination.length) || qualifyingDone
+    : qualifyingDone);
 
-  const addRounds = (rounds: TabRound[], warnings: string[], extra: Partial<TabTournament> = {}) => {
-    store.backup('Antes de generar ' + rounds.map((item) => item.name).join(', '));
-    update((current) => ({ ...current, ...extra, rounds: [...current.rounds, ...rounds] }));
-    setSelectedId(rounds[0].id);
-    notify(rounds.map((item) => item.name).join(', ') + ' generada' + (rounds.length > 1 ? 's' : '') + '. Asigna ahora los jueces.' + (warnings.length ? ' ' + warnings.join(' ') : ''), warnings.length ? 'warning' : 'success');
+  /** Computes the change on the freshest saved state and applies it with its log entry. */
+  const applyLogged = (compute: Compute): boolean => {
+    const current = store.getState().tournament;
+    if (!current) return false;
+    const first = compute(current);
+    if (!first) return false;
+    return update((latest) => (latest === current ? first.next : compute(latest)?.next ?? latest), first.meta);
   };
 
-  const generateQualifying = () => {
-    if (settings.stage === 'groups') {
-      const result = generateGroupStage(tournament, randomSeed());
-      if (result.issues.length) { notify(result.issues.join(' '), 'error'); return; }
-      addRounds(result.rounds, result.warnings);
+  const newRound = () => {
+    const seed = seedFrom(seedText);
+    const typed = seedText.trim();
+    const result = createRoundDraft(tournament, seed);
+    if (result.champion) { notify('El torneo ha terminado. Campeón: ' + look.teamName(result.champion) + '.'); return; }
+    if (!result.draft) { notify(result.issues.join(' '), 'error'); return; }
+    const created = result.draft;
+    const ok = applyLogged((current) => (current.draftRound ? null : {
+      next: { ...current, draftRound: created },
+      meta: {
+        type: 'round.draft',
+        message: 'Borrador de ' + created.round.name + ' generado con la semilla ' + seed + (typed ? ' (sorteo público: «' + typed + '»)' : '') + '.',
+        details: { seed, kind: created.kind, debates: created.round.debates.map((debate) => ({ teams: debate.teamIds, venue: debate.venueId, judges: debate.judgeIds, chair: debate.chairId })), warnings: result.warnings },
+      },
+    }));
+    if (!ok) return;
+    setSeedText('');
+    setSelectedId(DRAFT_TAB);
+    setScreenId(null);
+    notify('Borrador de ' + created.round.name + ' listo: revísalo, cambia lo que haga falta y pulsa «Confirmar ronda».' + (result.warnings.length ? ' ' + result.warnings.join(' ') : ''), result.warnings.length ? 'warning' : 'success');
+  };
+
+  const exportZip = (roundId: string, automatic: boolean) => {
+    const saved = store.getState().tournament;
+    const target = saved?.rounds.find((item) => item.id === roundId);
+    if (!saved || !target) return;
+    try {
+      const log = store.readLog().entries;
+      const zip = buildRoundZip(saved, target, log, Date.now());
+      downloadBytes(zip.filename, zip.bytes, 'application/zip');
+      store.log({ type: 'round.export', message: (automatic ? 'ZIP automático' : 'ZIP') + ' de ' + target.name + ' descargado: ' + zip.filename + '.', details: { stamp: latestLogStamp(log), warnings: zip.warnings } });
+      notify((automatic ? target.name + ' confirmada. ' : '') + 'Descargado ' + zip.filename + ': CSV, TXT y PDF para publicar y una copia privada del torneo con su registro.' + (zip.warnings.length ? ' ' + zip.warnings.join(' ') : ''), zip.warnings.length ? 'warning' : 'success');
+    } catch (error) {
+      store.logError('No se ha podido generar el ZIP de ' + target.name + ': ' + errorText(error));
+      notify('No se ha podido generar el ZIP (' + errorText(error) + '). La ronda está guardada: prueba «Descargar ZIP» o exporta una copia desde la barra superior.', 'error');
+    }
+  };
+
+  const exportPdf = (target: TabRound) => {
+    try {
+      const bytes = roundPdf(tournament, target, latestLogStamp(store.readLog().entries), Date.now());
+      downloadBytes(asciiSlug(tournament.name) + '-' + asciiSlug(target.name) + '.pdf', bytes, 'application/pdf');
+    } catch (error) {
+      store.logError('No se ha podido generar el PDF de ' + target.name + ': ' + errorText(error));
+      notify('No se ha podido generar el PDF (' + errorText(error) + '): usa el TXT o el CSV del ZIP.', 'error');
+    }
+  };
+
+  const confirm = () => {
+    const current = store.getState().tournament;
+    const pending = current?.draftRound;
+    if (!current || !pending) return;
+    const check = draftProblems(current, pending);
+    if (check.errors.length) { notify('El borrador tiene errores que impiden confirmarlo: ' + check.errors.join(' '), 'error'); return; }
+    if (check.warnings.length && acknowledged !== check.warnings.join('|')) { notify('Revisa los avisos y marca «Confirmo bajo mi responsabilidad» para confirmar.', 'error'); return; }
+    const preview = confirmDraft(current, pending.round.id);
+    if (preview.errors.length) { notify(preview.errors.join(' '), 'error'); return; }
+    store.backup('Antes de confirmar ' + pending.round.name);
+    const manual = diffRounds(current, pending.generated, pending.round);
+    const ok = applyLogged((latest) => {
+      const confirmed = confirmDraft(latest, pending.round.id);
+      return confirmed.errors.length || confirmed.alreadyConfirmed ? null : {
+        next: confirmed.tournament,
+        meta: {
+          type: 'round.confirm',
+          message: pending.round.name + ' confirmada ' + (manual.length ? 'con ' + manual.length + ' cambio(s) manual(es)' : 'tal como salió del sorteo') + (check.warnings.length ? '; avisos aceptados: ' + check.warnings.length : '') + '.',
+          details: {
+            seed: pending.seed, manualChanges: manual, acceptedWarnings: check.warnings,
+            debates: pending.round.debates.map((debate) => ({ teams: debate.teamIds, venue: debate.venueId, judges: debate.judgeIds, chair: debate.chairId })),
+          },
+        },
+      };
+    });
+    if (!ok) { notify('No se ha podido confirmar la ronda.', 'error'); return; }
+    setAcknowledged('');
+    setSelectedId(pending.round.id);
+    // Only what is safely stored is exported.
+    if (!store.flush() || store.getState().status !== 'saved') {
+      notify('La ronda se ha confirmado, pero el navegador no la ha podido guardar: todavía no se exporta. Resuelve el aviso de guardado y pulsa «Descargar ZIP».', 'error');
       return;
     }
-    const result = generateSwissRound(tournament, randomSeed());
-    if (!result.round) { notify(result.issues.join(' '), 'error'); return; }
-    addRounds([result.round], result.warnings);
+    exportZip(pending.round.id, true);
+    setScreenId(pending.round.id);
   };
 
-  const generateElimination = () => {
-    const result = elimination.length ? generateNextElimination(tournament, randomSeed()) : generateFirstElimination(tournament, randomSeed());
-    if (result.champion) { notify('El torneo ha terminado. Campeón: ' + look.teamName(result.champion) + '.'); return; }
-    if (!result.round) { notify(result.issues.join(' '), 'error'); return; }
-    addRounds([result.round], [], { breakSeeds: result.breakSeeds });
+  const editDraft = (edit: DraftEdit) => applyLogged((current) => {
+    const pending = current.draftRound;
+    if (!pending) return null;
+    const result = applyDraftEdit(current, pending, edit);
+    return result.change ? { next: { ...current, draftRound: result.draft }, meta: { type: 'draft.edit', message: pending.round.name + ' (borrador) · ' + result.change } } : null;
+  });
+
+  const undo = () => applyLogged((current) => {
+    const pending = current.draftRound;
+    if (!pending) return null;
+    const result = undoDraftEdit(current, pending);
+    return result.change ? { next: { ...current, draftRound: result.draft }, meta: { type: 'draft.edit', message: pending.round.name + ' (borrador) · ' + result.change } } : null;
+  });
+
+  const discard = (pending: TabRoundDraft) => {
+    if (!window.confirm('¿Descartar el borrador de ' + pending.round.name + '? Tendrás que generar la ronda de nuevo.')) return;
+    if (applyLogged((current) => (current.draftRound ? { next: withoutDraft(current), meta: { type: 'draft.discard', message: 'Borrador de ' + current.draftRound.round.name + ' descartado' + (current.draftRound.editHistory.length ? ' después de cambios manuales' : '') + '.' } } : null))) {
+      setSelectedId(tournament.rounds.at(-1)?.id ?? '');
+      notify('Borrador descartado.');
+    }
+  };
+
+  const regenerate = (pending: TabRoundDraft) => {
+    if (!window.confirm('¿Volver a sortear ' + pending.round.name + '? Se pierden los cambios manuales de este borrador.')) return;
+    const seed = randomSeed();
+    const result = createRoundDraft(withoutDraft(tournament), seed);
+    if (!result.draft) { notify(result.issues.join(' '), 'error'); return; }
+    const created = result.draft;
+    if (applyLogged((current) => (current.draftRound?.round.id === pending.round.id ? {
+      next: { ...current, draftRound: created },
+      meta: { type: 'round.draft', message: 'Borrador de ' + created.round.name + ' vuelto a sortear con la semilla ' + seed + '; se descarta el anterior.', details: { seed, debates: created.round.debates.map((debate) => debate.teamIds) } },
+    } : null))) notify('Nuevo sorteo de ' + created.round.name + '.' + (result.warnings.length ? ' ' + result.warnings.join(' ') : ''), result.warnings.length ? 'warning' : 'success');
+  };
+
+  const editConfirmed = (roundId: string, edit: DraftEdit) => applyLogged((current) => {
+    const target = current.rounds.find((item) => item.id === roundId);
+    if (!target) return null;
+    if ('debateId' in edit && target.debates.find((debate) => debate.id === edit.debateId)?.result) return null;
+    const result = editRound(current, target, edit);
+    return result.change ? { next: { ...current, rounds: current.rounds.map((item) => (item.id === roundId ? result.round : item)) }, meta: { type: 'round.edit', message: target.name + ' · ' + result.change } } : null;
+  });
+
+  const completeJudges = (target: TabRound) => {
+    const applied = applyLogged((current) => {
+      const latest = current.rounds.find((item) => item.id === target.id);
+      if (!latest) return null;
+      // Debates that already have an acta keep their panel.
+      const allocation = allocateJudgesForRound(current, latest, { replace: false, seed: randomSeed() });
+      const debates = latest.debates.map((debate) => (debate.result ? debate : allocation.debates.find((item) => item.id === debate.id) ?? debate));
+      const next = { ...latest, debates };
+      const changes = diffRounds(current, latest, next);
+      return changes.length ? { next: { ...current, rounds: current.rounds.map((item) => (item.id === target.id ? next : item)) }, meta: { type: 'round.edit', message: target.name + ' · jueces completados automáticamente: ' + changes.join(' ') } } : null;
+    });
+    notify(applied ? 'Paneles completados con los jueces disponibles.' : 'No hay asientos de juez que se puedan completar.', applied ? 'success' : 'warning');
+  };
+
+  const reopen = (target: TabRound) => {
+    const result = reopenRound(store.getState().tournament ?? tournament, target.id);
+    if (result.errors.length) { notify(result.errors.join(' '), 'error'); return; }
+    if (!window.confirm('¿Reabrir ' + target.name + ' como borrador? Podrás cambiarla y volver a confirmarla; al confirmar se descargará un ZIP nuevo que sustituye al anterior.')) return;
+    store.backup('Antes de reabrir ' + target.name);
+    if (applyLogged((current) => {
+      const again = reopenRound(current, target.id);
+      return again.errors.length ? null : { next: again.tournament, meta: { type: 'round.reopen', message: target.name + ' reabierta como borrador.' } };
+    })) {
+      setSelectedId(DRAFT_TAB);
+      setScreenId(null);
+      notify(target.name + ' vuelve a ser un borrador.' + (result.warnings.length ? ' ' + result.warnings.join(' ') : ''), result.warnings.length ? 'warning' : 'success');
+    }
+  };
+
+  const removeRound = (target: TabRound) => {
+    const withResults = target.debates.filter((debate) => debate.result).length;
+    if (!window.confirm('¿Eliminar ' + target.name + '?' + (withResults ? ' Tiene ' + withResults + ' acta(s) que se perderán.' : '') + ' Se guardará antes una copia automática.')) return;
+    store.backup('Antes de eliminar ' + target.name);
+    if (update((current) => ({
+      ...current,
+      rounds: current.rounds.filter((item) => item.id !== target.id),
+      breakSeeds: current.rounds.some((item) => item.kind === 'elimination' && item.id !== target.id) ? current.breakSeeds : [],
+    }), { type: 'round.remove', message: target.name + ' eliminada' + (withResults ? ' con ' + withResults + ' acta(s)' : '') + '.' })) {
+      setSelectedId('');
+      setScreenId(null);
+    }
+  };
+
+  const generateGroupRounds = () => {
+    const result = generateGroupStage(tournament, randomSeed());
+    if (result.issues.length) { notify(result.issues.join(' '), 'error'); return; }
+    store.backup('Antes de generar las jornadas');
+    if (update((current) => ({ ...current, rounds: [...current.rounds, ...result.rounds] }), { type: 'round.generate', message: 'Jornadas de la liguilla generadas: ' + result.rounds.map((item) => item.name).join(', ') + '.' })) {
+      setSelectedId(result.rounds[0]?.id ?? '');
+      notify('Jornadas generadas. Asigna ahora los jueces.' + (result.warnings.length ? ' ' + result.warnings.join(' ') : ''), result.warnings.length ? 'warning' : 'success');
+    }
   };
 
   const drawTheGroups = () => {
     if (tournament.groups.length && !window.confirm('¿Volver a sortear los grupos?')) return;
     const teams = tournament.teams.filter((team) => team.active && !team.swing);
     if (teams.length < 2) { notify('Añade al menos dos equipos activos.', 'error'); return; }
-    update((current) => ({ ...current, groups: drawGroups(teams, current.settings.groupCount, randomSeed()) }));
-    notify('Grupos sorteados. Puedes mover equipos entre grupos antes de generar las jornadas.');
-  };
-
-  const setRound = (roundId: string, mutate: (round: TabRound) => TabRound) =>
-    update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === roundId ? mutate(item) : item)) }));
-  const setDebate = (roundId: string, debateId: string, patch: Partial<TabDebate>) =>
-    setRound(roundId, (item) => ({ ...item, debates: item.debates.map((debate) => (debate.id === debateId ? { ...debate, ...patch } : debate)) }));
-
-  const lastRound = tournament.rounds.at(-1);
-  const removeRound = (target: TabRound) => {
-    const withResults = target.debates.some((debate) => debate.result);
-    if (!window.confirm('¿Eliminar ' + target.name + '?' + (withResults ? ' Tiene actas registradas que se perderán.' : '') + ' Se guardará antes una copia automática.')) return;
-    store.backup('Antes de eliminar ' + target.name);
-    update((current) => ({
-      ...current,
-      rounds: current.rounds.filter((item) => item.id !== target.id),
-      breakSeeds: current.rounds.some((item) => item.kind === 'elimination' && item.id !== target.id) ? current.breakSeeds : [],
-    }));
-    setSelectedId('');
-  };
-
-  const redoPairing = (target: TabRound) => {
-    if (!window.confirm('¿Rehacer el emparejamiento de ' + target.name + ' con un nuevo sorteo?')) return;
-    const without = { ...tournament, rounds: tournament.rounds.filter((item) => item.id !== target.id) };
-    const result = generateSwissRound(without, randomSeed());
-    if (!result.round) { notify(result.issues.join(' '), 'error'); return; }
-    store.backup('Antes de rehacer ' + target.name);
-    const replacement = { ...result.round, id: target.id, number: target.number, name: target.name };
-    update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === target.id ? replacement : item)) }));
-    notify(target.name + ' emparejada de nuevo.' + (result.warnings.length ? ' ' + result.warnings.join(' ') : ''), result.warnings.length ? 'warning' : 'success');
+    const seed = randomSeed();
+    if (update((current) => ({ ...current, groups: drawGroups(teams, current.settings.groupCount, seed) }), { type: 'round.generate', message: 'Grupos sorteados con la semilla ' + seed + '.' })) {
+      notify('Grupos sorteados. Puedes mover equipos entre grupos antes de generar las jornadas.');
+    }
   };
 
   const sendToPanel = (target: TabRound) => {
@@ -96,199 +270,377 @@ export function RoundsView({ tournament, outcomes, update, notify, store, onNavi
       notify('No hay espacio en el navegador para preparar el envío.', 'error');
       return;
     }
-    setRound(target.id, (item) => ({ ...item, pushedAt: Date.now() }));
+    update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === target.id ? { ...item, pushedAt: Date.now() } : item)) }), { type: 'round.export', message: target.name + ' enviada al panel de cronómetros.' });
     notify('Emparejamientos de ' + target.name + ' listos para el panel. En el panel (en este mismo navegador) abre «Rondas y salas», elige la ronda y pulsa «Cargar desde tabulación».' + (warnings.length ? ' ' + warnings.join(' ') : ''), warnings.length ? 'warning' : 'success');
   };
 
+  const audit = (target: TabRound) => {
+    const result = auditRound(tournament, target.id);
+    notify(result.reproducible
+      ? 'Auditoría superada: con la semilla ' + target.seed + ' y las rondas anteriores se obtiene exactamente este emparejamiento.'
+      : 'Diferencias con el sorteo de la semilla ' + target.seed + ' (cambios manuales, anotados en el registro, o actas anteriores corregidas después): ' + result.differences.join(' '), result.reproducible ? 'success' : 'warning');
+  };
+
   return <>
-    <div className="page-heading tab-no-project"><div><p className="eyebrow">SORTEO Y EMPAREJAMIENTOS</p><h2>Rondas</h2><p className="muted">{settings.stage === 'groups'
+    <div className={'page-heading' + (screenRound ? ' tab-no-project' : '')}><div><p className="eyebrow">SORTEO Y EMPAREJAMIENTOS</p><h2>Rondas</h2><p className="muted">{settings.stage === 'groups'
       ? 'Liguilla: se sortean los grupos y se generan todas las jornadas. Después, el cuadro cruza primeros y segundos de grupos distintos.'
-      : 'Sistema suizo: la primera ronda se sortea; las siguientes emparejan por clasificación (1.º–2.º, 3.º–4.º…) sin repetir rival y beneficiando al mejor clasificado.'}</p></div></div>
+      : 'Sistema suizo: «Nueva ronda» prepara un borrador con salas y jueces que puedes cambiar a mano; al confirmarlo se descarga un ZIP con la ronda en CSV, TXT y PDF y se muestra en pantalla.'}</p></div></div>
 
-    {champion && <div className="success-notice tab-champion"><Trophy size={18} /><span>Campeón del torneo: <b>{look.teamName(champion)}</b></span></div>}
+    {screenRound && <RoundScreen tournament={tournament} round={screenRound} projection={projection} onProject={onProject} onClose={() => setScreenId(null)} />}
 
-    <section className="panel tab-no-project">
-      <div className="panel-title"><div><h3>{settings.stage === 'groups' ? 'Liguilla de grupos' : 'Rondas clasificatorias'}</h3>
-        <p>{settings.stage === 'groups' ? tournament.groups.length + ' grupos · pasan ' + settings.groupAdvance + ' por grupo' : qualifying.length + ' de ' + settings.swissRounds + ' rondas generadas'}</p></div>
-        <div className="tab-actions">
-          {settings.stage === 'groups' && !qualifying.length && <button type="button" className="button secondary" onClick={drawTheGroups}><Dices size={16} /> {tournament.groups.length ? 'Volver a sortear' : 'Sortear grupos'}</button>}
-          {(settings.stage === 'swiss' ? qualifying.length < settings.swissRounds : !qualifying.length && tournament.groups.length > 0) && !elimination.length &&
-            <button type="button" className="button primary" onClick={generateQualifying}><Shuffle size={16} /> {settings.stage === 'groups' ? 'Generar jornadas' : 'Generar ronda ' + (qualifying.length + 1)}</button>}
+    <div className={screenRound ? 'tab-no-project' : ''}>
+      {champion && <div className="success-notice tab-champion"><Trophy size={18} /><span>Campeón del torneo: <b>{look.teamName(champion)}</b></span></div>}
+
+      <section className="panel tab-no-project">
+        <div className="panel-title"><div><h3>{settings.stage === 'groups' ? 'Liguilla de grupos' : 'Rondas'}</h3>
+          <p>{settings.stage === 'groups' ? tournament.groups.length + ' grupos · pasan ' + settings.groupAdvance + ' por grupo' : qualifying.length + ' de ' + settings.swissRounds + ' rondas clasificatorias' + (settings.blindQualifying ? ' · a ciegas' : '') + (elimination.length ? ' · ' + elimination.length + ' eliminatoria(s)' : '')}</p></div>
+          {draft && <button type="button" className="button primary" onClick={() => setSelectedId(DRAFT_TAB)}><Check size={16} /> Revisar el borrador de {draft.round.name}</button>}
         </div>
-      </div>
-      {settings.stage === 'groups' && (tournament.groups.length ? <div className="tab-groups">{tournament.groups.map((group) => <div key={group.id} className="tab-group">
-        <h4>{group.name}</h4>
-        <ul>{group.teamIds.map((teamId) => <li key={teamId}>
-          <span>{look.teamName(teamId)}<small>{look.teams.get(teamId)?.institution}</small></span>
-          {!qualifying.length && <select aria-label={'Mover ' + look.teamName(teamId)} value={group.id} onChange={(event) => update((current) => ({
-            ...current,
-            groups: current.groups.map((item) => ({ ...item, teamIds: item.id === event.target.value ? [...item.teamIds, teamId] : item.teamIds.filter((id) => id !== teamId) })),
-          }))}>{tournament.groups.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>}
-        </li>)}</ul>
-      </div>)}</div> : <p className="muted">Sortea los grupos: el sorteo equilibra los tamaños y separa a los equipos de una misma institución siempre que es posible.</p>)}
-    </section>
+        {settings.stage === 'groups' && !qualifying.length && <div className="tab-actions">
+          <button type="button" className="button secondary" onClick={drawTheGroups}><Dices size={16} /> {tournament.groups.length ? 'Volver a sortear' : 'Sortear grupos'}</button>
+          {tournament.groups.length > 0 && <button type="button" className="button primary" onClick={generateGroupRounds}><Shuffle size={16} /> Generar jornadas</button>}
+        </div>}
+        {canCreate && <form className="tab-inline-form" onSubmit={(event) => { event.preventDefault(); newRound(); }}>
+          <label className="tab-field"><span>Semilla del sorteo (opcional)</span><input value={seedText} onChange={(event) => setSeedText(event.target.value)} placeholder="Vacío: aleatoria" maxLength={40} /><small>Escribe el número o la palabra del sorteo público para que cualquiera pueda reproducirlo.</small></label>
+          <button type="submit" className="button primary"><Shuffle size={16} /> {settings.stage === 'swiss' && qualifying.length < settings.swissRounds ? 'Nueva ronda (Ronda ' + (qualifying.length + 1) + ')' : elimination.length ? 'Nueva eliminatoria' : 'Generar eliminatorias'}</button>
+        </form>}
+        {settings.stage === 'groups' && <GroupsList tournament={tournament} look={look} editable={!qualifying.length} update={update} />}
+      </section>
 
-    {(qualifyingDone || elimination.length > 0) && <section className="panel tab-no-project">
-      <div className="panel-title"><div><h3>Eliminatorias</h3><p>{settings.stage === 'groups' ? 'Pasan ' + settings.groupAdvance + ' por grupo' : 'Corte a ' + settings.breakSize + ' equipos'} · {settings.bracketMode === 'fixed' ? 'cuadro fijo' : 're-siembra en cada ronda'} · solo votos de los jueces</p></div>
-        {!champion && <button type="button" className="button primary" onClick={generateElimination} disabled={Boolean(breakPreview?.issues.length)}><Trophy size={16} /> {elimination.length ? 'Generar siguiente eliminatoria' : 'Generar eliminatorias'}</button>}
-      </div>
-      {breakPreview && <>
-        <IssueList items={breakPreview.issues} kind="error" />
-        {breakPreview.qualifiers.length > 0 && <ol className="tab-seeds">{breakPreview.qualifiers.map((item) => <li key={item.teamId}>
-          <b>{item.seed}.</b> {look.teamName(item.teamId)}{item.groupIndex !== null && <small> · {tournament.groups[item.groupIndex]?.name} ({item.groupPosition}.º)</small>}
-        </li>)}</ol>}
+      {(qualifyingDone || elimination.length > 0) && <section className="panel tab-no-project">
+        <div className="panel-title"><div><h3>Eliminatorias</h3><p>{settings.stage === 'groups' ? 'Pasan ' + settings.groupAdvance + ' por grupo' : 'Corte a ' + settings.breakSize + ' equipos'} · {settings.bracketMode === 'fixed' ? 'cuadro fijo' : 're-siembra en cada ronda'}{settings.bracketSeedOrder.length ? ' · orden ' + settings.bracketSeedOrder.join('-') : ''}</p></div></div>
+        {breakPreview && <>
+          <IssueList items={breakPreview.issues} kind="error" />
+          {breakPreview.qualifiers.length > 0 && <ol className="tab-seeds">{breakPreview.qualifiers.map((item) => <li key={item.teamId}>
+            <b>{item.seed}.</b> {look.teamName(item.teamId)}{item.groupIndex !== null && <small> · {tournament.groups[item.groupIndex]?.name} ({item.groupPosition}.º)</small>}
+          </li>)}</ol>}
+        </>}
+        {elimination.length > 0 && <div className="tab-bracket">{elimination.map((item) => <div key={item.id} className="tab-bracket-round">
+          <h4>{item.name}</h4>
+          {[...item.debates].sort((x, y) => (x.bracketSlot ?? 0) - (y.bracketSlot ?? 0)).map((debate) => {
+            const winner = outcomes.get(debate.id)?.winnerTeamId;
+            return <div key={debate.id} className="tab-bracket-match">{debate.teamIds.map((teamId) => <span key={teamId} className={winner === teamId ? 'winner' : winner ? 'loser' : ''}>{look.teamName(teamId)}</span>)}</div>;
+          })}
+        </div>)}</div>}
+      </section>}
+
+      {!tournament.rounds.length && !draft ? <Empty text="Todavía no hay rondas." /> : <>
+        <div className="round-tabs tab-no-project">
+          {tournament.rounds.map((item) => {
+            const fallen = fallenTeamIds(tournament.teams, item.number);
+            const held = item.debates.filter((debate) => !debate.teamIds.some((id) => fallen.has(id)));
+            const done = held.filter((debate) => outcomes.get(debate.id)?.status === 'complete').length;
+            return <button key={item.id} type="button" className={!showDraft && item.id === round?.id ? 'selected' : ''} onClick={() => setSelectedId(item.id)}>
+              {item.name}<span className={'tab-tab-count' + (done === held.length ? ' ok' : '')}>{done === held.length ? '✓' : done + '/' + held.length}</span>
+            </button>;
+          })}
+          {draft && <button type="button" className={'tab-draft-tab' + (showDraft ? ' selected' : '')} onClick={() => setSelectedId(DRAFT_TAB)}>{draft.round.name} · borrador</button>}
+        </div>
+        {showDraft && draft ? <DraftPanel tournament={tournament} draft={draft} look={look} acknowledged={acknowledged} onAcknowledge={setAcknowledged}
+          onEdit={editDraft} onUndo={undo} onConfirm={confirm} onDiscard={() => discard(draft)} onRegenerate={() => regenerate(draft)} />
+          : round && <RoundPanel tournament={tournament} round={round} outcomes={outcomes} look={look}
+            isLast={round.number === Math.max(...tournament.rounds.map((item) => item.number)) && !draft}
+            onEdit={(edit) => editConfirmed(round.id, edit)} onCompleteJudges={() => completeJudges(round)}
+            onDrawSides={() => {
+              if (!window.confirm('¿Sortear ahora las posturas que faltan? Hazlo solo si el reglamento permite sortearlas desde la organización.')) return;
+              const seed = randomSeed();
+              update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === round.id ? drawSides(item, seed) : item)) }), { type: 'round.edit', message: round.name + ' · posturas sorteadas por la organización (semilla ' + seed + ').' });
+            }}
+            onZip={() => exportZip(round.id, false)} onPdf={() => exportPdf(round)} onScreen={() => setScreenId(round.id)} onAudit={() => audit(round)}
+            onReopen={() => reopen(round)} onRemove={() => removeRound(round)} onSend={() => sendToPanel(round)} onOpenBallots={() => onNavigate('actas')}
+            whatsapp={tournament.settings.ballotMode === 'joint' ? <WhatsAppLinks tournament={tournament} round={round} notify={notify} onSent={(message) => store.log({ type: 'acta.link', message })} /> : null}
+            onSimulate={tournament.sample ? () => {
+              const result = simulateRoundResults(tournament, round.id);
+              update(() => result.tournament, { type: 'acta.save', message: 'Resultados simulados de ' + round.name + ' (torneo de ejemplo).' });
+              notify(result.skipped ? result.skipped + ' debate(s) sin jueces no se han simulado.' : 'Resultados simulados para probar la herramienta.', result.skipped ? 'warning' : 'success');
+            } : undefined} />}
       </>}
-      {elimination.length > 0 && <div className="tab-bracket">{elimination.map((item) => <div key={item.id} className="tab-bracket-round">
-        <h4>{item.name}</h4>
-        {[...item.debates].sort((x, y) => (x.bracketSlot ?? 0) - (y.bracketSlot ?? 0)).map((debate) => {
-          const winner = outcomes.get(debate.id)?.winnerTeamId;
-          return <div key={debate.id} className="tab-bracket-match">{debate.teamIds.map((teamId) => <span key={teamId} className={winner === teamId ? 'winner' : winner ? 'loser' : ''}>{look.teamName(teamId)}</span>)}</div>;
-        })}
-      </div>)}</div>}
-    </section>}
-
-    {!tournament.rounds.length ? <Empty text="Todavía no hay rondas generadas." /> : <>
-      <div className="round-tabs tab-no-project">{tournament.rounds.map((item) => <button key={item.id} type="button" className={item.id === round?.id ? 'selected' : ''} onClick={() => setSelectedId(item.id)}>
-        {item.name}{roundIsComplete(item, outcomes) ? ' ✓' : ''}
-      </button>)}</div>
-      {round && <RoundPanel tournament={tournament} round={round} outcomes={outcomes} look={look} setRound={setRound} setDebate={setDebate} notify={notify}
-        isLast={round.id === lastRound?.id} onRemove={() => removeRound(round)}
-        onRedo={round.kind === 'qualifying' && settings.stage === 'swiss' && round.id === lastRound?.id && !round.debates.some((debate) => debate.result) ? () => redoPairing(round) : undefined}
-        onSend={() => sendToPanel(round)} onSimulate={tournament.sample ? () => {
-          const result = simulateRoundResults(tournament, round.id);
-          update(() => result.tournament);
-          notify(result.skipped ? result.skipped + ' debate(s) sin jueces no se han simulado.' : 'Resultados simulados para probar la herramienta.', result.skipped ? 'warning' : 'success');
-        } : undefined}
-        onOpenBallots={() => onNavigate('actas')} />}
-    </>}
+    </div>
   </>;
 }
 
-function RoundPanel({ tournament, round, outcomes, look, setRound, setDebate, notify, isLast, onRemove, onRedo, onSend, onSimulate, onOpenBallots }: {
+function GroupsList({ tournament, look, editable, update }: { tournament: TabTournament; look: Look; editable: boolean; update: ViewProps['update'] }) {
+  if (!tournament.groups.length) return <p className="muted">Sortea los grupos: el sorteo equilibra los tamaños y separa a los equipos de una misma institución siempre que es posible.</p>;
+  return <div className="tab-groups">{tournament.groups.map((group) => <div key={group.id} className="tab-group">
+    <h4>{group.name}</h4>
+    <ul>{group.teamIds.map((teamId) => <li key={teamId}>
+      <span>{look.teamName(teamId)}<small>{look.teams.get(teamId)?.institution}</small></span>
+      {editable && <select aria-label={'Mover ' + look.teamName(teamId)} value={group.id} onChange={(event) => update((current) => ({
+        ...current,
+        groups: current.groups.map((item) => ({ ...item, teamIds: item.id === event.target.value ? [...item.teamIds, teamId] : item.teamIds.filter((id) => id !== teamId) })),
+      }))}>{tournament.groups.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select>}
+    </li>)}</ul>
+  </div>)}</div>;
+}
+
+function DraftPanel({ tournament, draft, look, acknowledged, onAcknowledge, onEdit, onUndo, onConfirm, onDiscard, onRegenerate }: {
   tournament: TabTournament;
-  round: TabRound;
-  outcomes: ViewProps['outcomes'];
-  look: ReturnType<typeof lookups>;
-  setRound: (roundId: string, mutate: (round: TabRound) => TabRound) => void;
-  setDebate: (roundId: string, debateId: string, patch: Partial<TabDebate>) => void;
-  notify: ViewProps['notify'];
-  isLast: boolean;
-  onRemove: () => void;
-  onRedo?: () => void;
-  onSend: () => void;
-  onSimulate?: () => void;
-  onOpenBallots: () => void;
+  draft: TabRoundDraft;
+  look: Look;
+  acknowledged: string;
+  onAcknowledge: (key: string) => void;
+  onEdit: (edit: DraftEdit) => void;
+  onUndo: () => void;
+  onConfirm: () => void;
+  onDiscard: () => void;
+  onRegenerate: () => void;
 }) {
-  const issues = useMemo(() => roundIssues(tournament, round), [tournament, round]);
-  const resting = round.kind === 'qualifying' ? restingTeams(tournament, round) : [];
-  const usedJudges = new Set(round.debates.flatMap((debate) => debate.judgeIds));
-  const activeVenues = tournament.venues.filter((venue) => venue.active || round.debates.some((debate) => debate.venueId === venue.id));
-  const teams = tournament.teams.filter((team) => team.active || round.debates.some((debate) => debate.teamIds.includes(team.id)));
-  const missingSides = round.debates.filter((debate) => !debate.favorTeamId).length;
-  const totalIssues = [...issues.values()].reduce((total, list) => total + list.length, 0);
-
-  const allocate = (replace: boolean) => {
-    if (replace && round.debates.some((debate) => debate.judgeIds.length) && !window.confirm('¿Sustituir todos los jueces asignados en ' + round.name + '?')) return;
-    const result = allocateJudges(tournament, round.id, { replace });
-    setRound(round.id, (item) => ({ ...item, debates: item.debates.map((debate) => result.debates.find((next) => next.id === debate.id) ?? debate) }));
-    notify(result.warnings.length ? result.warnings.join(' ') : 'Jueces asignados sin conflictos.', result.warnings.length ? 'warning' : 'success');
-  };
-
-  return <section className="panel tab-round">
+  const problems = useMemo(() => draftProblems(tournament, draft), [tournament, draft]);
+  const changes = useMemo(() => diffRounds(tournament, draft.generated, draft.round), [tournament, draft]);
+  const warningKey = problems.warnings.join('|');
+  const accepted = !problems.warnings.length || acknowledged === warningKey;
+  return <section className="panel tab-round tab-draft">
     <div className="panel-title">
-      <div><h3>{round.name}</h3><p>{round.kind === 'elimination' ? 'Eliminatoria · solo votos' : 'Clasificatoria'} · {round.sideMode === 'draw' ? 'posturas por sorteo' : 'posturas fijadas por la tabulación'}{round.pushedAt ? ' · enviada al panel el ' + new Date(round.pushedAt).toLocaleString('es-ES') : ''}</p></div>
-      <div className="tab-actions tab-no-project">
-        <label className="check-item">Jueces por debate <select value={round.panelSize} onChange={(event) => setRound(round.id, (item) => ({ ...item, panelSize: Number(event.target.value) }))}>{[1, 3, 5, 7].map((size) => <option key={size} value={size}>{size}</option>)}</select></label>
-        <label className="check-item" title="Ronda cerrada: sus resultados no se muestran al proyectar la clasificación."><input type="checkbox" checked={round.silent} onChange={(event) => setRound(round.id, (item) => ({ ...item, silent: event.target.checked }))} />Ronda cerrada</label>
-      </div>
+      <div><h3>{draft.round.name} · borrador</h3>
+        <p>Semilla {draft.seed} · generado el {new Date(draft.createdAt).toLocaleString('es-ES')} · {changes.length ? changes.length + ' cambio(s) manual(es), todos anotados en el registro' : 'tal como salió del sorteo'}. Nada se publica hasta confirmar.</p></div>
     </div>
     <div className="tab-actions tab-no-project">
-      <button type="button" className="button primary" onClick={() => allocate(false)}><Gavel size={16} /> Asignar jueces</button>
-      <button type="button" className="button secondary" onClick={() => allocate(true)}>Reasignar todos</button>
-      <button type="button" className="button secondary" onClick={() => setRound(round.id, (item) => ({ ...item, debates: assignVenues(tournament, item.debates) }))}>Asignar salas</button>
-      {round.sideMode === 'draw' && missingSides > 0 && <button type="button" className="button secondary" onClick={() => {
-        if (!window.confirm('¿Sortear ahora la postura de ' + missingSides + ' debate(s)? Hazlo solo si el reglamento permite sortearlas desde la organización.')) return;
-        setRound(round.id, (item) => drawSides(item, randomSeed()));
-      }}><Dices size={16} /> Sortear posturas</button>}
-      <button type="button" className="button secondary" onClick={onSend}><Send size={16} /> Enviar al panel</button>
-      <button type="button" className="button secondary" onClick={() => window.print()}><Printer size={16} /> Imprimir</button>
-      <button type="button" className="button ghost" onClick={onOpenBallots}>Ir a las actas</button>
-      {onSimulate && <button type="button" className="button ghost" onClick={onSimulate}><Sparkles size={16} /> Simular resultados</button>}
-      {onRedo && <button type="button" className="button ghost" onClick={onRedo}><Shuffle size={16} /> Rehacer emparejamiento</button>}
-      {isLast && <button type="button" className="button ghost danger-action" onClick={onRemove}><Trash2 size={16} /> Eliminar ronda</button>}
+      <button type="button" className="button secondary" disabled={!draft.editHistory.length} onClick={onUndo}><Undo2 size={16} /> Deshacer</button>
+      <button type="button" className="button secondary" onClick={() => onEdit({ kind: 'allocate', seed: randomSeed() })}><Gavel size={16} /> Reasignar todos los jueces</button>
+      <button type="button" className="button ghost" onClick={onRegenerate}><Shuffle size={16} /> Volver a sortear</button>
+      <button type="button" className="button ghost danger-action" onClick={onDiscard}><Trash2 size={16} /> Descartar borrador</button>
     </div>
-    {totalIssues > 0 && <p className="tab-issue-count tab-no-project">{totalIssues} incidencia(s) en esta ronda: revísalas en la tabla.</p>}
-    <div className="tournament-table-wrap tab-draw">
-      <table>
-        <thead><tr><th>Sala</th><th>Equipo</th><th>Equipo</th><th>A favor</th><th>Jueces (★ principal)</th><th className="tab-no-print">Acta</th></tr></thead>
-        <tbody>{round.debates.map((debate) => {
-          const outcome = outcomes.get(debate.id);
-          const status = STATUS_LABELS[outcome?.status ?? 'empty'];
-          const debateIssues = issues.get(debate.id) ?? [];
-          const teamOptions = (slot: 0 | 1) => teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>).concat(
-            debate.teamIds[slot] && !teams.some((team) => team.id === debate.teamIds[slot]) ? [<option key="missing" value={debate.teamIds[slot]}>{look.teamName(debate.teamIds[slot])}</option>] : []);
-          const setTeam = (slot: 0 | 1, teamId: string) => {
-            const teamIds: [string, string] = slot === 0 ? [teamId, debate.teamIds[1]] : [debate.teamIds[0], teamId];
-            setDebate(round.id, debate.id, { teamIds, favorTeamId: debate.favorTeamId && teamIds.includes(debate.favorTeamId) ? debate.favorTeamId : undefined });
-          };
-          return <tr key={debate.id} className={debateIssues.length ? 'tab-row-issue' : ''}>
-            <td>
-              <select className="tab-cell-select" aria-label="Sala" value={debate.venueId} onChange={(event) => setDebate(round.id, debate.id, { venueId: event.target.value })}>
-                <option value="">Sin sala</option>{activeVenues.map((venue) => <option key={venue.id} value={venue.id}>{venue.name}</option>)}
-              </select>
-              <span className="tab-print-only">{look.venueName(debate.venueId)}</span>
-            </td>
-            {([0, 1] as const).map((slot) => <td key={slot}>
-              <select className="tab-cell-select" aria-label={'Equipo ' + (slot + 1)} value={debate.teamIds[slot]} onChange={(event) => setTeam(slot, event.target.value)}>
-                <option value="">—</option>{teamOptions(slot)}
-              </select>
-              <span className="tab-print-only">{look.teamName(debate.teamIds[slot])}</span>
-            </td>)}
-            <td>
-              <select className="tab-cell-select" aria-label="Equipo a favor" value={debate.favorTeamId ?? ''} onChange={(event) => setDebate(round.id, debate.id, { favorTeamId: event.target.value || undefined })}>
-                <option value="">{round.sideMode === 'draw' ? 'Por sortear' : '—'}</option>
-                {debate.teamIds.filter(Boolean).map((teamId) => <option key={teamId} value={teamId}>{look.teamName(teamId)}</option>)}
-              </select>
-              <span className="tab-print-only">{debate.favorTeamId ? look.teamName(debate.favorTeamId) : 'Por sortear'}</span>
-            </td>
-            <td>
-              <div className="tab-judges">
-                {debate.judgeIds.map((judgeId) => <span key={judgeId} className={'tab-judge-chip' + (judgeId === debate.chairId ? ' chair' : '')}>
-                  <button type="button" className="tab-chip-star tab-no-print" title="Marcar como juez principal" aria-label={'Marcar a ' + look.judgeName(judgeId) + ' como juez principal'} onClick={() => setDebate(round.id, debate.id, { chairId: judgeId })}><Star size={12} /></button>
-                  {judgeId === debate.chairId && <span className="tab-print-only">★ </span>}
-                  {look.judgeName(judgeId)}
-                  <button type="button" className="tab-chip-remove tab-no-print" aria-label={'Quitar a ' + look.judgeName(judgeId)} onClick={() => {
-                    const judgeIds = debate.judgeIds.filter((id) => id !== judgeId);
-                    setDebate(round.id, debate.id, { judgeIds, chairId: debate.chairId === judgeId ? judgeIds[0] ?? '' : debate.chairId });
-                  }}><X size={12} /></button>
-                </span>)}
-                <select className="tab-cell-select tab-add-judge tab-no-print" aria-label="Añadir juez" value="" onChange={(event) => {
-                  const judgeId = event.target.value;
-                  if (!judgeId) return;
-                  setDebate(round.id, debate.id, { judgeIds: [...debate.judgeIds, judgeId], chairId: debate.chairId || judgeId });
-                }}>
-                  <option value="">+ Añadir juez…</option>
-                  {tournament.judges.filter((judge) => judge.active && !debate.judgeIds.includes(judge.id)).map((judge) => {
-                    const reasons = [
-                      ...debate.teamIds.map((teamId) => look.teams.get(teamId)).filter((team): team is NonNullable<typeof team> => Boolean(team)).map((team) => judgeTeamConflict(judge, team)),
-                      debate.judgeIds.some((id) => { const other = look.judges.get(id); return other ? judgesConflict(judge, other) : false; }) ? 'incompatible con el panel' : null,
-                      usedJudges.has(judge.id) ? 'ya asignado en esta ronda' : null,
-                      judge.unavailableRoundIds.includes(round.id) ? 'no disponible' : null,
-                    ].filter(Boolean);
-                    return <option key={judge.id} value={judge.id}>{judge.name}{reasons.length ? ' — ' + reasons.join(', ') : ''}</option>;
-                  })}
-                </select>
-              </div>
-            </td>
-            <td className="tab-no-print"><span className={'state-pill ' + status.className}>{status.label}</span></td>
-          </tr>;
-        })}</tbody>
-      </table>
+    <DebateTable tournament={tournament} round={draft.round} problems={problems.byDebate} look={look} onEdit={onEdit} />
+    {changes.length > 0 && <details className="tab-changes"><summary>Cambios respecto al sorteo ({changes.length})</summary><ul>{changes.map((line, index) => <li key={index}>{line}</li>)}</ul></details>}
+    {(problems.errors.length > 0 || problems.warnings.length > 0) && <div className="tab-review">
+      {problems.errors.length > 0 && <><h4 className="tab-review-title error">Errores que impiden confirmar ({problems.errors.length})</h4><IssueList items={problems.errors} kind="error" /></>}
+      {problems.warnings.length > 0 && <><h4 className="tab-review-title">Avisos para revisar ({problems.warnings.length})</h4><IssueList items={problems.warnings} /></>}
+    </div>}
+    <p className="muted tab-confirm-hint">Al confirmar se guarda la ronda, se descarga el ZIP (CSV, TXT, PDF y copia privada) y se muestra en pantalla.</p>
+    <div className="tab-confirm-bar">
+      <div className="tab-confirm-status">
+        <span className={'state-pill ' + (problems.errors.length ? 'tab-invalid' : 'ready')}>{problems.errors.length ? problems.errors.length + (problems.errors.length === 1 ? ' error' : ' errores') : 'Sin errores'}</span>
+        {problems.warnings.length > 0 && <span className="state-pill paused">{problems.warnings.length + (problems.warnings.length === 1 ? ' aviso' : ' avisos')}</span>}
+        {changes.length > 0 && <span className="state-pill">{changes.length + (changes.length === 1 ? ' cambio manual' : ' cambios manuales')}</span>}
+      </div>
+      {problems.warnings.length > 0 && <label className="check-item tab-acknowledge"><input type="checkbox" checked={accepted} onChange={(event) => onAcknowledge(event.target.checked ? warningKey : '')} />Confirmo bajo mi responsabilidad: he revisado los {problems.warnings.length} aviso(s)</label>}
+      <button type="button" className="button primary tab-big-button" disabled={problems.errors.length > 0 || !accepted} onClick={onConfirm}><Check size={18} /> Confirmar ronda</button>
     </div>
-    {[...issues.entries()].some(([, list]) => list.length) && <div className="tab-no-project tab-no-print">{round.debates.map((debate) => {
-      const list = issues.get(debate.id) ?? [];
-      return list.length ? <div key={debate.id} className="tab-debate-issues"><b>{look.venueName(debate.venueId)} · {look.teamName(debate.teamIds[0])} – {look.teamName(debate.teamIds[1])}</b><IssueList items={list} /></div> : null;
-    })}</div>}
+  </section>;
+}
+
+function RoundPanel({ tournament, round, outcomes, look, isLast, onEdit, onCompleteJudges, onDrawSides, onZip, onPdf, onScreen, onAudit, onReopen, onRemove, onSend, onOpenBallots, onSimulate, whatsapp }: {
+  tournament: TabTournament;
+  round: TabRound;
+  outcomes: Map<string, DebateOutcome>;
+  look: Look;
+  isLast: boolean;
+  onEdit: (edit: DraftEdit) => void;
+  onCompleteJudges: () => void;
+  onDrawSides: () => void;
+  onZip: () => void;
+  onPdf: () => void;
+  onScreen: () => void;
+  onAudit: () => void;
+  onReopen: () => void;
+  onRemove: () => void;
+  onSend: () => void;
+  onOpenBallots: () => void;
+  onSimulate?: () => void;
+  whatsapp: ReactNode;
+}) {
+  const check = useMemo(() => checkRound(tournament, round), [tournament, round]);
+  const resting = round.kind === 'qualifying' && tournament.settings.stage === 'groups' ? restingTeams(tournament, round) : [];
+  const missingSides = round.debates.filter((debate) => !debate.favorTeamId).length;
+  const withActas = round.debates.filter((debate) => debate.result).length;
+  return <section className="panel tab-round">
+    <div className="panel-title">
+      <div><h3>{round.name}</h3><p>{round.kind === 'elimination' ? 'Eliminatoria' : 'Clasificatoria'}{round.silent ? ' · a ciegas' : ''} · semilla {round.seed} · {round.sideMode === 'draw' ? 'posturas por sorteo en sala' : 'posturas fijadas por la tabulación'}{round.pushedAt ? ' · enviada al panel el ' + new Date(round.pushedAt).toLocaleString('es-ES') : ''}</p></div>
+    </div>
+    <div className="tab-toolbar tab-no-project">
+      <div className="tab-toolbar-group">
+        <button type="button" className="button primary" onClick={onScreen}><MonitorPlay size={16} /> Ver en pantalla</button>
+        <button type="button" className="button secondary" onClick={onZip}><Download size={16} /> Descargar ZIP</button>
+        <button type="button" className="button secondary" onClick={onPdf}><FileText size={16} /> PDF público</button>
+      </div>
+      <div className="tab-toolbar-group">
+        <button type="button" className="button secondary" onClick={onOpenBallots}><ClipboardList size={16} /> Ir a las actas</button>
+        <button type="button" className="button secondary" onClick={onCompleteJudges}><Gavel size={16} /> Completar jueces</button>
+        {onSimulate && <button type="button" className="button ghost" onClick={onSimulate}><Sparkles size={16} /> Simular resultados</button>}
+      </div>
+      <details className="tab-menu">
+        <summary className="button ghost"><MoreHorizontal size={16} /> Más acciones</summary>
+        <div className="tab-menu-list" onClick={closeMenu}>
+          {round.sideMode === 'draw' && missingSides > 0 && tournament.settings.ballotMode === 'judges' && <button type="button" onClick={onDrawSides}><Dices size={15} /> Sortear las posturas que faltan</button>}
+          <button type="button" onClick={onSend}><Send size={15} /> Enviar al panel de cronómetros</button>
+          <button type="button" onClick={onAudit}><Search size={15} /> Auditar el sorteo</button>
+          {isLast && !withActas && <button type="button" onClick={onReopen}><RotateCcw size={15} /> Reabrir como borrador</button>}
+          {isLast && <><hr /><button type="button" className="danger-action" onClick={onRemove}><Trash2 size={15} /> Eliminar la ronda</button></>}
+        </div>
+      </details>
+    </div>
+    <IssueList items={check.errors} kind="error" />
+    {whatsapp}
+    <DebateTable tournament={tournament} round={round} problems={check.byDebate} look={look} outcomes={outcomes} onEdit={onEdit} />
+    {check.warnings.length > 0 && <details className="tab-changes tab-no-project"><summary>Avisos de esta ronda ({check.warnings.length})</summary><IssueList items={check.warnings} /></details>}
     {resting.length > 0 && <p className="muted">Descansan en esta jornada: {resting.map(look.teamName).join(', ')}.</p>}
+    {withActas > 0 && <p className="muted tab-no-project">Los debates con acta no se pueden cambiar desde aquí: corrige su jurado en Actas.</p>}
+  </section>;
+}
+
+/** Closes a «Más acciones» menu once one of its actions is chosen. */
+function closeMenu(event: MouseEvent<HTMLDivElement>) {
+  if ((event.target as HTMLElement).closest('button')) (event.currentTarget.parentElement as HTMLDetailsElement).open = false;
+}
+
+/** Editable table of a draft or a confirmed round: choosing a team or judge already placed elsewhere swaps them. */
+function DebateTable({ tournament, round, problems, look, outcomes, onEdit }: {
+  tournament: TabTournament;
+  round: TabRound;
+  problems: Map<string, RoundProblem[]>;
+  look: Look;
+  outcomes?: Map<string, DebateOutcome>;
+  onEdit: (edit: DraftEdit) => void;
+}) {
+  const fallen = useMemo(() => fallenTeamIds(tournament.teams, round.number), [tournament.teams, round.number]);
+  const venues = tournament.venues.filter((venue) => venue.active || round.debates.some((debate) => debate.venueId === venue.id));
+  const teams = useMemo(() => [...tournament.teams].filter((team) => team.active || round.debates.some((debate) => debate.teamIds.includes(team.id)))
+    .sort((x, y) => x.name.localeCompare(y.name, 'es')), [tournament.teams, round.debates]);
+  const judges = useMemo(() => [...tournament.judges].sort((x, y) => x.name.localeCompare(y.name, 'es')), [tournament.judges]);
+  const places = useMemo(() => {
+    const team = new Map<string, string>();
+    const judge = new Map<string, string>();
+    round.debates.forEach((debate, index) => {
+      debate.teamIds.forEach((id) => team.set(id, debateLabel(look, debate, index)));
+      debate.judgeIds.forEach((id) => judge.set(id, debateLabel(look, debate, index)));
+    });
+    return { team, judge };
+  }, [round.debates, look]);
+  const listed = tournament.judgeConflicts ?? [];
+
+  const judgeNotes = (judge: TabJudge, debate: TabDebate): string => {
+    const notes: string[] = [];
+    for (const teamId of debate.teamIds) {
+      const team = look.teams.get(teamId);
+      if (team) for (const conflict of teamConflicts(judge, team, listed)) notes.push('incomp. ' + (conflict.level === 'objective' ? 'objetiva' : 'subjetiva') + ' (' + conflict.reason + ')');
+    }
+    if (debate.judgeIds.some((id) => { const other = look.judges.get(id); return other && other.id !== judge.id ? judgesConflict(judge, other) : false; })) notes.push('incompatible con el panel');
+    const place = places.judge.get(judge.id);
+    if (place && !debate.judgeIds.includes(judge.id)) notes.push('en ' + place + ', se intercambian');
+    if (!judge.active) notes.push('no disponible');
+    return notes.length ? ' — ' + notes.join('; ') : '';
+  };
+
+  return <div className="tournament-table-wrap tab-draw">
+    <table>
+      <thead><tr><th>Sala</th><th>Equipo 1</th><th>Equipo 2</th><th>Postura</th><th>Jurado (★ principal)</th>{outcomes && <th className="tab-no-print">Acta</th>}</tr></thead>
+      <tbody>{round.debates.map((debate, index) => {
+        const debateProblems = problems.get(debate.id) ?? [];
+        const notHeld = debate.teamIds.some((id) => fallen.has(id));
+        const locked = Boolean(debate.result);
+        const lockTitle = locked ? 'Tiene acta: corrige el jurado en Actas' : undefined;
+        const status = outcomes ? STATUS_LABELS[outcomes.get(debate.id)?.status ?? 'empty'] : null;
+        return [<tr key={debate.id} className={debateProblems.some((problem) => problem.severity === 'error') ? 'tab-row-issue' : notHeld ? 'tab-row-muted' : ''}>
+          <td>{notHeld && !debate.venueId ? <span className="muted">No se disputa</span> : <>
+            <select className="tab-cell-select" aria-label="Sala" value={debate.venueId} disabled={locked} title={lockTitle} onChange={(event) => onEdit({ kind: 'venue', debateId: debate.id, venueId: event.target.value })}>
+              <option value="">Sin sala</option>{venues.map((venue) => <option key={venue.id} value={venue.id}>{venue.name}{round.debates.some((other) => other.id !== debate.id && other.venueId === venue.id) ? ' (se intercambia)' : ''}</option>)}
+            </select>
+            <span className="tab-print-only">{look.venueName(debate.venueId)}</span>
+          </>}</td>
+          {([0, 1] as const).map((slot) => <td key={slot}>
+            <select className="tab-cell-select" aria-label={'Equipo ' + (slot + 1) + ' de ' + debateLabel(look, debate, index)} value={debate.teamIds[slot]} disabled={locked} title={lockTitle ?? look.teamName(debate.teamIds[slot])} onChange={(event) => onEdit({ kind: 'team', debateId: debate.id, slot, teamId: event.target.value })}>
+              {!look.teams.has(debate.teamIds[slot]) && <option value={debate.teamIds[slot]}>{look.teamName(debate.teamIds[slot])}</option>}
+              {teams.map((team) => {
+                const place = places.team.get(team.id);
+                const note = [fallen.has(team.id) ? 'caído' : '', place && !debate.teamIds.includes(team.id) ? 'en ' + place + ', se intercambian' : '', !place ? 'sin debate' : ''].filter(Boolean).join('; ');
+                return <option key={team.id} value={team.id}>{team.name}{note ? ' — ' + note : ''}</option>;
+              })}
+            </select>
+            <span className="tab-print-only">{look.teamName(debate.teamIds[slot])}</span>
+          </td>)}
+          <td>{notHeld ? '—' : <>
+            <select className="tab-cell-select" aria-label="Equipo a favor" value={debate.favorTeamId ?? ''} disabled={locked} title={lockTitle} onChange={(event) => onEdit({ kind: 'side', debateId: debate.id, favorTeamId: event.target.value })}>
+              <option value="">{round.sideMode === 'draw' ? 'Sorteo en sala' : 'Por decidir'}</option>
+              {debate.teamIds.filter(Boolean).map((teamId) => <option key={teamId} value={teamId}>A favor: {look.teamName(teamId)}</option>)}
+            </select>
+            <span className="tab-print-only">{debate.favorTeamId ? 'A favor: ' + look.teamName(debate.favorTeamId) : 'Sorteo en sala'}</span>
+          </>}</td>
+          <td>{notHeld && !debate.judgeIds.length ? <span className="muted">Sin jurado: {debate.teamIds.filter((id) => fallen.has(id)).map(look.teamName).join(' y ')} {debate.teamIds.filter((id) => fallen.has(id)).length > 1 ? 'están caídos' : 'está caído'}</span> :
+            <div className="tab-judges">
+              {debate.judgeIds.map((judgeId, seat) => <span key={judgeId} className={'tab-judge-chip' + (judgeId === debate.chairId ? ' chair' : '')}>
+                <button type="button" className="tab-chip-star tab-no-print" disabled={locked} title="Marcar como juez principal" aria-label={'Marcar a ' + look.judgeName(judgeId) + ' como juez principal'} onClick={() => onEdit({ kind: 'chair', debateId: debate.id, judgeId })}><Star size={12} /></button>
+                {judgeId === debate.chairId && <span className="tab-print-only">★ </span>}
+                <select className="tab-chip-select" aria-label={'Sustituir a ' + look.judgeName(judgeId)} value={judgeId} disabled={locked} title={lockTitle ?? look.judgeName(judgeId)} onChange={(event) => onEdit({ kind: 'judge', debateId: debate.id, seat, judgeId: event.target.value })}>
+                  <option value={judgeId}>{look.judgeName(judgeId)}</option>
+                  {judges.filter((judge) => !debate.judgeIds.includes(judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}{judgeNotes(judge, debate)}</option>)}
+                </select>
+                <span className="tab-print-only">{look.judgeName(judgeId)}</span>
+                <button type="button" className="tab-chip-remove tab-no-print" disabled={locked} aria-label={'Quitar a ' + look.judgeName(judgeId)} onClick={() => onEdit({ kind: 'judge', debateId: debate.id, seat, judgeId: '' })}><X size={12} /></button>
+              </span>)}
+              {!locked && <select className="tab-cell-select tab-add-judge tab-no-print" aria-label={'Añadir juez en ' + debateLabel(look, debate, index)} value="" onChange={(event) => {
+                if (event.target.value) onEdit({ kind: 'judge', debateId: debate.id, seat: debate.judgeIds.length, judgeId: event.target.value });
+              }}>
+                <option value="">+ Añadir juez…</option>
+                {judges.filter((judge) => !debate.judgeIds.includes(judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}{judgeNotes(judge, debate)}</option>)}
+              </select>}
+            </div>}</td>
+          {status && <td className="tab-no-print"><span className={'state-pill ' + status.className}>{notHeld ? 'Sin acta (caído)' : status.label}</span></td>}
+        </tr>,
+        debateProblems.length > 0 && <tr key={debate.id + '-problems'} className="tab-problem-row tab-no-project tab-no-print"><td colSpan={outcomes ? 6 : 5}>
+          <ul className="tab-problems">{debateProblems.map((problem) => <li key={problem.message} className={problem.severity}>{problem.message}</li>)}</ul>
+        </td></tr>];
+      })}</tbody>
+    </table>
+  </div>;
+}
+
+/** Links for the chairs: each one opens the acta of its debate on the phone, to be sent back by WhatsApp. */
+function WhatsAppLinks({ tournament, round, notify, onSent }: { tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void }) {
+  const baseUrl = (tournament.whatsapp?.baseUrl.trim() || window.location.origin).replace(/\/+$/, '');
+  const unreachable = /^https?:\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[)/.test(baseUrl);
+  const desk = whatsAppNumber(tournament.whatsapp?.deskPhone ?? '');
+  const rows = useMemo(() => {
+    const fallen = fallenTeamIds(tournament.teams, round.number);
+    const judges = new Map(tournament.judges.map((judge) => [judge.id, judge]));
+    return round.debates.filter((debate) => !debate.teamIds.some((id) => fallen.has(id))).map((debate) => {
+      const { url, link } = buildActaLink(tournament, round, debate, baseUrl);
+      const phone = whatsAppNumber(judges.get(debate.chairId)?.phone ?? '');
+      const label = (link.venue || 'Debate') + ' (' + link.teams.map((team) => team.name).join(' – ') + ')';
+      return { debate, url, link, phone, label, href: whatsAppUrl(phone, actaLinkMessage(link, url)) };
+    });
+  }, [tournament, round, baseUrl]);
+  const groupMessage = 'Actas de ' + round.name + ' · ' + tournament.name + '. Cada juez principal abre el enlace de su sala, rellena el acta y la envía por WhatsApp a la mesa:\n\n'
+    + rows.map((row) => row.label + (row.link.jury[0] ? ' · ' + row.link.jury[0] : '') + '\n' + row.url).join('\n\n');
+  return <details className="tab-whatsapp tab-no-project">
+    <summary><MessageCircle size={16} /> Actas por WhatsApp</summary>
+    {unreachable && <Notice kind="warning">Los móviles no pueden abrir {baseUrl}: usa la tabulación publicada o escribe la dirección pública en Reglas → «Actas por WhatsApp».</Notice>}
+    <p className="muted">Envía a cada juez principal el enlace de su sala. Rellenará el acta en el móvil y la mandará por WhatsApp {desk ? 'al +' + desk : 'al chat que elija (escribe el móvil de la mesa en Reglas)'}; después pega los mensajes en Actas → «Actas recibidas por WhatsApp».</p>
+    <div className="tournament-table-wrap"><table>
+      <thead><tr><th>Sala</th><th>Debate</th><th>Juez principal</th><th>Enlace</th></tr></thead>
+      <tbody>{rows.map((row) => <tr key={row.debate.id}>
+        <td>{row.link.venue || '—'}</td>
+        <td>{row.link.teams[0].name} – {row.link.teams[1].name}</td>
+        <td>{row.link.jury[0] ?? 'sin juez'}<small className="tab-cell-sub">{row.phone ? '+' + row.phone : 'sin móvil: WhatsApp pedirá el chat'}</small></td>
+        <td className="tab-whatsapp-actions">
+          <a className="button secondary" href={row.href} target="_blank" rel="noreferrer" aria-label={'Enviar el enlace de ' + row.label}
+            onClick={() => onSent(round.name + ' · enlace del acta de ' + row.label + ' enviado por WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.')}><Send size={14} /> Enviar enlace</a>
+          <a className="text-button" href={row.url} target="_blank" rel="noreferrer" aria-label={'Abrir el acta de ' + row.label}>Abrir el acta</a>
+        </td>
+      </tr>)}</tbody>
+    </table></div>
+    <button type="button" className="button ghost" onClick={() => void copyText(groupMessage).then((copied) => notify(copied ? 'Enlaces copiados: pégalos en el grupo de WhatsApp de los jueces.' : 'No se han podido copiar: usa «Enviar enlace» en cada sala.', copied ? 'success' : 'error'))}>
+      <Copy size={16} /> Copiar todos los enlaces para el grupo de jueces
+    </button>
+  </details>;
+}
+
+/** Large view of a confirmed round to project: rooms in natural order, teams and jury, never results. */
+function RoundScreen({ tournament, round, projection, onProject, onClose }: { tournament: TabTournament; round: TabRound; projection: boolean; onProject: () => void; onClose: () => void }) {
+  const sheet = useMemo(() => roundSheet(tournament, round), [tournament, round]);
+  return <section className="panel tab-round-screen">
+    <div className="panel-title">
+      <div><h3>{round.name}</h3><p>{tournament.name}</p></div>
+      <div className="tab-actions tab-no-project">
+        {!projection && <button type="button" className="button primary" onClick={onProject}><Projector size={16} /> Proyectar</button>}
+        <button type="button" className="button secondary" onClick={onClose}><X size={16} /> Cerrar</button>
+      </div>
+    </div>
+    <div className="tab-screen-grid">{sheet.rows.map((row, index) => <article key={index} className={'tab-screen-card' + (row.note.startsWith('No se disputa') ? ' not-held' : '')}>
+      <h4>{row.venue || '—'}</h4>
+      <p className="tab-screen-teams"><b>{row.teams[0]}</b><span>frente a</span><b>{row.teams[1]}</b></p>
+      {row.side && <p className="tab-screen-side">{row.side}</p>}
+      {row.chair && <p className="tab-screen-judges">Jurado: {row.chair} (principal){row.wings.length ? ', ' + row.wings.join(', ') : ''}</p>}
+      {row.note && <p className="tab-screen-note">{row.note}</p>}
+    </article>)}</div>
   </section>;
 }

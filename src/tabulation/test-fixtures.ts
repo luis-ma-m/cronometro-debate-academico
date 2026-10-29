@@ -1,5 +1,5 @@
 import { createTabTournament } from './presets';
-import type { PresetId, TabBallot, TabDebate, TabDebateResult, TabJudge, TabRound, TabTeam, TabTournament } from './types';
+import { isFallenAt, type PresetId, type TabBallot, type TabDebate, type TabDebateResult, type TabJointActa, type TabJudge, type TabRound, type TabTeam, type TabTournament } from './types';
 
 /** Deterministic fixtures shared by the tabulation tests. */
 export function team(id: string, institution = 'Inst ' + id, extra: Partial<TabTeam> = {}): TabTeam {
@@ -41,3 +41,25 @@ export function decided(id: string, winner: string, loser: string, winnerPoints 
   return debate(id, winner, loser, ['j1'], result(ballots(winner, loser, [[winnerPoints, loserPoints]])));
 }
 
+/** ADUMA joint acta with quick totals (item detail pending), declared winner first. */
+export function jointDecided(id: string, winner: string, loser: string, winnerTotal = 40, loserTotal = 30, extra: Partial<TabJointActa> = {}): TabDebate {
+  return debate(id, winner, loser, ['j1'], result([], {
+    joint: { winnerTeamId: winner, items: {}, quickTotals: { [winner]: winnerTotal, [loser]: loserTotal }, speakers: {}, ...extra },
+  }));
+}
+
+/** Fills a joint acta in every played debate of a round that has none: the team with more points wins. */
+export function playRound(tournament: TabTournament, roundId: string, points: (teamId: string) => number): TabTournament {
+  const teams = new Map(tournament.teams.map((item) => [item.id, item]));
+  return {
+    ...tournament,
+    rounds: tournament.rounds.map((round) => (round.id !== roundId ? round : {
+      ...round,
+      debates: round.debates.map((item) => {
+        const [a, b] = item.teamIds;
+        if (item.result || isFallenAt(teams.get(a), round.number) || isFallenAt(teams.get(b), round.number)) return item;
+        return { ...item, result: result([], { joint: { winnerTeamId: points(a) > points(b) ? a : b, items: {}, quickTotals: { [a]: points(a), [b]: points(b) }, speakers: {} } }) };
+      }),
+    })),
+  };
+}

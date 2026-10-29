@@ -1,5 +1,6 @@
 import type { SpeakerRanking, TeamStanding } from './standings';
-import { makeTabId, type TabTournament } from './types';
+import { makeTabId, type ConflictLevel, type TabJudgeConflict, type TabTournament } from './types';
+import { whatsAppNumber } from './whatsapp';
 
 /** Splits pasted spreadsheet lines; the separator (tab, semicolon or comma) is detected from the first line. */
 export function parseDelimited(content: string): string[][] {
@@ -27,7 +28,7 @@ export function parseDelimited(content: string): string[][] {
 const key = (value: string) => value.trim().toLocaleLowerCase('es-ES');
 
 export interface TeamImportRow { name: string; institution: string; speakers: string[] }
-export interface JudgeImportRow { name: string; institution: string; rating?: number; canChair?: boolean }
+export interface JudgeImportRow { name: string; institution: string; rating?: number; canChair?: boolean; phone?: string }
 export interface ImportPreview<T> { rows: T[]; errors: string[] }
 
 /** "Equipo;Institución;Orador 1;Orador 2…" — a first line starting with "Equipo" is treated as a header. */
@@ -50,17 +51,18 @@ function parseYesNo(value: string | undefined): boolean | undefined {
   return undefined;
 }
 
-/** "Juez;Institución;Nivel (1-5);Preside (sí/no)" — a first line starting with "Juez" is treated as a header. */
+/** "Juez;Institución;Nivel (1-5);Preside (sí/no);Móvil" — a first line starting with "Juez" is treated as a header. */
 export function parseJudgeLines(content: string): ImportPreview<JudgeImportRow> {
   const rows: JudgeImportRow[] = [];
   const errors: string[] = [];
   parseDelimited(content).forEach((cells, index) => {
     if (index === 0 && /^jue[zc]/i.test(cells[0] ?? '')) return;
-    const [name = '', institution = '', ratingText, chairText] = cells;
+    const [name = '', institution = '', ratingText, chairText, phoneText] = cells;
     if (!name) { errors.push('Línea ' + (index + 1) + ': falta el nombre del juez.'); return; }
     const rating = ratingText ? Number(ratingText.replace(',', '.')) : undefined;
     if (rating !== undefined && (!Number.isInteger(rating) || rating < 1 || rating > 5)) errors.push('Línea ' + (index + 1) + ': el nivel debe ser un entero de 1 a 5.');
-    rows.push({ name, institution, rating: rating !== undefined && rating >= 1 && rating <= 5 ? Math.round(rating) : undefined, canChair: parseYesNo(chairText) });
+    const phone = whatsAppNumber(phoneText ?? '');
+    rows.push({ name, institution, rating: rating !== undefined && rating >= 1 && rating <= 5 ? Math.round(rating) : undefined, canChair: parseYesNo(chairText), ...(phone ? { phone } : {}) });
   });
   return { rows, errors };
 }
@@ -107,7 +109,7 @@ export function applyJudgeImport(tournament: TabTournament, rows: JudgeImportRow
     if (index < 0) {
       judges.push({
         id: makeTabId('juez'), name: row.name.trim(), institution: row.institution.trim(), active: true, rating: row.rating ?? 3,
-        canChair: row.canChair ?? true, incompatibleJudgeIds: [], unavailableRoundIds: [],
+        canChair: row.canChair ?? true, incompatibleJudgeIds: [], unavailableRoundIds: [], ...(row.phone ? { phone: row.phone } : {}),
       });
       added++;
       continue;
@@ -118,6 +120,7 @@ export function applyJudgeImport(tournament: TabTournament, rows: JudgeImportRow
       institution: row.institution.trim() || current.institution,
       rating: row.rating ?? current.rating,
       canChair: row.canChair ?? current.canChair,
+      ...(row.phone ? { phone: row.phone } : {}),
     };
     if (JSON.stringify(next) !== JSON.stringify(current)) { judges[index] = next; updated++; }
   }
@@ -135,13 +138,66 @@ export function applyVenueImport(tournament: TabTournament, names: string[]): Im
   return { tournament: { ...tournament, venues }, added, updated: 0 };
 }
 
+/** Names as people type them: case, accents and repeated spaces do not matter. */
+const looseKey = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-ES').replace(/\s+/g, ' ').trim();
+
+export interface ConflictImportRow { judgeId: string; teamId?: string; institution?: string; level: ConflictLevel; note: string }
+
+/**
+ * "Juez;Equipo o institución;objetiva|subjetiva;nota". The second column is matched first against team names and
+ * then against the institutions of the teams; unknown names are reported line by line.
+ */
+export function parseConflictLines(content: string, tournament: Pick<TabTournament, 'judges' | 'teams'>): ImportPreview<ConflictImportRow> {
+  const rows: ConflictImportRow[] = [];
+  const errors: string[] = [];
+  const judges = new Map(tournament.judges.map((judge) => [looseKey(judge.name), judge.id]));
+  const teams = new Map(tournament.teams.map((team) => [looseKey(team.name), team.id]));
+  const institutions = new Map<string, string>();
+  for (const team of tournament.teams) if (team.institution.trim() && !institutions.has(looseKey(team.institution))) institutions.set(looseKey(team.institution), team.institution.trim());
+  parseDelimited(content).forEach((cells, index) => {
+    // A header row names the columns; a first row with a real judge is data.
+    if (index === 0 && /^jue[zc]/i.test(cells[0] ?? '') && !judges.has(looseKey(cells[0] ?? ''))) return;
+    const line = 'Línea ' + (index + 1) + ': ';
+    const [judgeName = '', target = '', levelText = '', note = ''] = cells;
+    const judgeId = judges.get(looseKey(judgeName));
+    if (!judgeId) { errors.push(line + 'no se encuentra el juez «' + judgeName + '».'); return; }
+    const teamId = teams.get(looseKey(target));
+    const institution = teamId ? undefined : institutions.get(looseKey(target));
+    if (!teamId && !institution) { errors.push(line + '«' + target + '» no es ningún equipo ni institución.'); return; }
+    const level: ConflictLevel | null = /^o(bj|$)/i.test(levelText.trim()) ? 'objective' : /^s(ubj|$)/i.test(levelText.trim()) ? 'subjective' : null;
+    if (!level) { errors.push(line + 'el tipo debe ser «objetiva» o «subjetiva».'); return; }
+    rows.push({ judgeId, ...(teamId ? { teamId } : { institution }), level, note: note.trim() });
+  });
+  return { rows, errors };
+}
+
+/** Adds the new incompatibilities; the same judge and team (or institution) only updates its type and note. */
+export function applyConflictImport(tournament: TabTournament, rows: ConflictImportRow[]): ImportSummary {
+  let added = 0;
+  let updated = 0;
+  const conflicts: TabJudgeConflict[] = [...(tournament.judgeConflicts ?? [])];
+  const sameTarget = (conflict: TabJudgeConflict, row: ConflictImportRow) => conflict.judgeId === row.judgeId
+    && (row.teamId ? conflict.teamId === row.teamId : !conflict.teamId && looseKey(conflict.institution ?? '') === looseKey(row.institution ?? ''));
+  for (const row of rows) {
+    const index = conflicts.findIndex((conflict) => sameTarget(conflict, row));
+    if (index < 0) {
+      conflicts.push({ id: makeTabId('incompatibilidad'), ...row });
+      added++;
+    } else if (conflicts[index].level !== row.level || conflicts[index].note !== row.note) {
+      conflicts[index] = { ...conflicts[index], level: row.level, note: row.note };
+      updated++;
+    }
+  }
+  return { tournament: { ...tournament, judgeConflicts: conflicts }, added, updated };
+}
+
 /** Semicolon CSV with a BOM so spreadsheet programs configured for Spanish open it correctly. */
 export function toCsv(rows: Array<Array<string | number>>): string {
   const cell = (value: string | number) => {
     const raw = typeof value === 'number' ? String(Number(value.toFixed(2))).replace('.', ',') : value;
     return /[;"\n]/.test(raw) ? '"' + raw.replace(/"/g, '""') + '"' : raw;
   };
-  return '﻿' + rows.map((row) => row.map(cell).join(';')).join('\r\n');
+  return '\ufeff' + rows.map((row) => row.map(cell).join(';')).join('\r\n');
 }
 
 export function standingsCsv(sections: Array<{ title: string; rows: TeamStanding[] }>, speakerRankings: SpeakerRanking[]): string {

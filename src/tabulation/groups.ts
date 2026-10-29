@@ -1,6 +1,6 @@
 import { assignVenues, balanceSides } from './pairing';
 import { createRng, hashSeed, shuffle } from './random';
-import { makeTabId, normalizeInstitution, qualifyingRounds, type TabGroup, type TabRound, type TabTeam, type TabTournament } from './types';
+import { makeTabId, nextRoundNumber, normalizeInstitution, qualifyingRounds, type TabGroup, type TabRound, type TabTeam, type TabTournament } from './types';
 
 export function groupName(index: number): string {
   return 'Grupo ' + String.fromCharCode(65 + (index % 26)) + (index >= 26 ? String(Math.floor(index / 26)) : '');
@@ -81,7 +81,7 @@ export function generateGroupStage(tournament: TabTournament, seed: number, now 
   const roundCount = Math.max(...schedules.map((schedule) => schedule.length));
   const history = new Map<string, { favor: number; contra: number }>();
   const rng = createRng(hashSeed(seed, 'sides'));
-  const firstNumber = Math.max(0, ...tournament.rounds.map((round) => round.number)) + 1;
+  const firstNumber = nextRoundNumber(tournament);
   const sideMode = tournament.settings.qualifyingSideMode;
   const rounds: TabRound[] = [];
   for (let index = 0; index < roundCount; index++) {

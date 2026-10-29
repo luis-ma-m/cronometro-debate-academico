@@ -128,3 +128,38 @@ describe('tabulation → panel', () => {
     expect(buildOutbox(tab, 'r1', now).issues[0]).toContain('sin sala');
   });
 });
+
+describe('ADUMA rounds sent to the panel', () => {
+  it('skips debates against a fallen team, which are not held', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'aduma', now, 1));
+    tab.teams.find((team) => team.id === 't4')!.fallenFromRound = 1;
+    tab.rounds[0].debates[1] = { ...tab.rounds[0].debates[1], venueId: '', judgeIds: [], chairId: '' };
+    const { outbox, issues, warnings } = buildOutbox(tab, 'r1', now);
+    expect(issues).toEqual([]);
+    expect(outbox!.debates.map((debate) => debate.physicalRoomId)).toEqual(['physical-a1']);
+    expect(warnings.join(' ')).toContain('caído');
+    expect(applyOutboxToPanel(source, 'r2', outbox!, { makeId, now }).issues).toEqual([]);
+  });
+
+  it('leaves out, with a warning, judges seated as a last resort that the panel would reject', () => {
+    const source = panel();
+    source.judges[1].institution = 'Universidad A';
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'aduma', now, 1));
+    // j2 shares institution with Equipo A; j1 and j3 are incompatible with each other.
+    tab.rounds[0].debates[0] = { ...tab.rounds[0].debates[0], judgeIds: ['j2'], chairId: 'j2' };
+    tab.rounds[0].debates[1] = { ...tab.rounds[0].debates[1], judgeIds: ['j3', 'j1'], chairId: 'j3' };
+    const { outbox, warnings } = buildOutbox(tab, 'r1', now);
+    expect(outbox!.debates.map((debate) => [debate.judgeIds, debate.chairId])).toEqual([[[], ''], [['j3'], 'j3']]);
+    expect(warnings.join(' ')).toContain('Juez 2');
+    expect(warnings.join(' ')).toContain('Juez 1');
+    expect(applyOutboxToPanel(source, 'r2', outbox!, { makeId, now }).issues).toEqual([]);
+  });
+
+  it('keeps sending conflicts as they are under the hard policy, so the panel refuses them', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.rounds[0].debates[0].judgeIds = ['j1', 'j3'];
+    expect(buildOutbox(tab, 'r1', now).outbox!.debates[0].judgeIds).toEqual(['j1', 'j3']);
+  });
+});

@@ -1,9 +1,10 @@
-import { useMemo, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { Save, SkipForward, Star, Trash2 } from 'lucide-react';
 import { SPEAKER_POSITIONS } from '../../scoring';
 import { computeDebateOutcome, effectivePenalties, outcomeContext } from '../results';
 import { SPEAKER_ROLES, type SpeakerRole, type TabDebate, type TabDebateResult, type TabRound, type TabTournament } from '../types';
-import { Empty, formatNumber, IssueList, lookups, parseDecimal, STATUS_LABELS, type ViewProps } from '../ui';
+import { Empty, formatNumber, IssueList, lookups, markUnsaved, parseDecimal, STATUS_LABELS, type ViewProps } from '../ui';
+import { JointBallotsView } from './JointBallotsView';
 
 interface RowDraft { judgeId: string; totals: Record<string, string>; speeches: Record<string, Partial<Record<SpeakerRole, string>>>; winnerTeamId: string }
 interface PenaltyDraft { warnings: string; minors: string; majors: string; disqualified: boolean }
@@ -97,7 +98,12 @@ function applyDraft(debate: TabDebate, draft: Draft): TabDebate {
   };
 }
 
-export function BallotsView({ tournament, outcomes, update, notify }: ViewProps) {
+/** Joint acta (ADUMA) or one acta per judge (LEDU, UC3M), as the rules say. */
+export function BallotsView(props: ViewProps) {
+  return props.tournament.settings.ballotMode === 'joint' ? <JointBallotsView {...props} /> : <JudgeBallotsView {...props} />;
+}
+
+function JudgeBallotsView({ tournament, outcomes, update, notify }: ViewProps) {
   const look = useMemo(() => lookups(tournament), [tournament]);
   const context = useMemo(() => outcomeContext(tournament), [tournament]);
   const [roundId, setRoundId] = useState(() => (tournament.rounds.find((round) => round.debates.some((debate) => outcomes.get(debate.id)?.status !== 'complete')) ?? tournament.rounds.at(-1))?.id ?? '');
@@ -106,6 +112,10 @@ export function BallotsView({ tournament, outcomes, update, notify }: ViewProps)
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dirty, setDirty] = useState(false);
   const debate = round?.debates.find((item) => item.id === debateId) ?? null;
+  useEffect(() => {
+    markUnsaved('acta', dirty);
+    return () => markUnsaved('acta', false);
+  }, [dirty]);
 
   const edit = (mutate: (current: Draft) => Draft) => { setDraft((current) => (current ? mutate(current) : current)); setDirty(true); };
   const open = (target: TabDebate | null, force = false) => {
@@ -130,9 +140,15 @@ export function BallotsView({ tournament, outcomes, update, notify }: ViewProps)
   const save = (goNext: boolean) => {
     if (!debate || !draft) return;
     const next = applyDraft(debate, draft);
-    update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === round.id ? { ...item, debates: item.debates.map((entry) => (entry.id === debate.id ? next : entry)) } : item)) }));
-    setDirty(false);
     const status = preview?.status ?? 'empty';
+    const label = look.venueName(debate.venueId) + ' (' + look.teamName(debate.teamIds[0]) + ' – ' + look.teamName(debate.teamIds[1]) + ')';
+    const saved = update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === round.id ? { ...item, debates: item.debates.map((entry) => (entry.id === debate.id ? next : entry)) } : item)) }), {
+      type: 'acta.save',
+      message: round.name + ' · acta de ' + label + ': ' + (status === 'complete' ? 'gana ' + look.teamName(preview?.winnerTeamId ?? '') : 'guardada como ' + STATUS_LABELS[status].label.toLowerCase()) + '.',
+      details: { debateId: debate.id, ballots: next.result?.ballots, penalties: next.result?.penalties, override: next.result?.override },
+    });
+    if (!saved) return;
+    setDirty(false);
     notify(status === 'complete' ? 'Acta guardada: gana ' + look.teamName(preview?.winnerTeamId ?? '') + '.' : 'Acta guardada como ' + STATUS_LABELS[status].label.toLowerCase() + '.', status === 'complete' ? 'success' : 'warning');
     if (goNext) {
       const index = round.debates.findIndex((item) => item.id === debate.id);
@@ -284,8 +300,9 @@ export function BallotsView({ tournament, outcomes, update, notify }: ViewProps)
             <button type="button" className="button secondary" onClick={() => save(false)}><Save size={16} /> Guardar</button>
             <button type="button" className="text-button" disabled={!dirty} onClick={() => open(debate, true)}>Descartar cambios</button>
             {debate.result && <button type="button" className="text-button danger-action" onClick={() => {
-              if (!window.confirm('¿Borrar el acta de este debate?')) return;
-              update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === round.id ? { ...item, debates: item.debates.map((entry) => (entry.id === debate.id ? { ...entry, result: undefined } : entry)) } : item)) }));
+              if (!window.confirm('¿Borrar el acta de este debate? Quedará anotado en el registro.')) return;
+              if (!update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === round.id ? { ...item, debates: item.debates.map((entry) => (entry.id === debate.id ? { ...entry, result: undefined } : entry)) } : item)) }),
+                { type: 'acta.delete', message: round.name + ' · acta de ' + look.venueName(debate.venueId) + ' (' + look.teamName(a) + ' – ' + look.teamName(b) + ') borrada.' })) return;
               setDraft(draftFor(tournament, round, { ...debate, result: undefined }));
               setDirty(false);
             }}><Trash2 size={14} /> Borrar acta</button>}

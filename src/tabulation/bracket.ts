@@ -1,7 +1,7 @@
 import { assignVenues } from './pairing';
 import { computeTournamentOutcomes, roundIsComplete, type DebateOutcome } from './results';
 import { buildGroupStandings, buildTeamStandings, type TeamStanding } from './standings';
-import { eliminationRounds, makeTabId, qualifyingRounds, type TabRound, type TabTournament } from './types';
+import { eliminationRounds, isFallenAt, makeTabId, nextRoundNumber, qualifyingRounds, type TabRound, type TabTournament } from './types';
 
 export function eliminationRoundName(debateCount: number): string {
   if (debateCount === 1) return 'Final';
@@ -42,7 +42,12 @@ export function computeBreak(tournament: TabTournament, outcomes = computeTourna
   if (!rounds.length || rounds.some((round) => !roundIsComplete(round, outcomes))) issues.push('La fase clasificatoria no ha terminado: faltan rondas o actas.');
   else if (settings.stage === 'swiss' && rounds.length < settings.swissRounds) issues.push('Solo se han disputado ' + rounds.length + ' de ' + settings.swissRounds + ' rondas suizas.');
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
-  const eligible = (row: TeamStanding) => Boolean(teams.get(row.teamId)?.active && teams.get(row.teamId)?.breakEligible);
+  const breakRound = nextRoundNumber(tournament);
+  // A fallen team never breaks: the next team in the standings takes its place.
+  const eligible = (row: TeamStanding) => {
+    const team = teams.get(row.teamId);
+    return Boolean(team?.active && team.breakEligible && !isFallenAt(team, breakRound));
+  };
   const qualifiers: Qualifier[] = [];
 
   if (settings.stage === 'swiss') {
@@ -80,10 +85,16 @@ export function computeBreak(tournament: TabTournament, outcomes = computeTourna
   return { qualifiers, issues, warnings };
 }
 
+/** A custom bracket order counts only when it is a permutation of 1…size. */
+function isSeedOrder(order: number[] | undefined, size: number): order is number[] {
+  return Boolean(order && order.length === size && [...order].sort((x, y) => x - y).every((seed, index) => seed === index + 1));
+}
+
 /**
  * First elimination pairs in bracket order. Two teams per group with an even number of groups use the cross
  * template 1ºA–2ºB, 1ºC–2ºD | 1ºB–2ºA, 1ºD–2ºC, which keeps group mates in opposite halves; otherwise seeds
- * follow the standard order (1v8, 4v5, 2v7, 3v6).
+ * follow `bracketSeedOrder` when it fits the break (ADUMA art. 31: 1–8, 3–6, 2–7, 4–5) or the standard order
+ * (1v8, 4v5, 2v7, 3v6).
  */
 export function firstEliminationPairs(tournament: TabTournament, qualifiers: Qualifier[]): Array<[string, string]> {
   const { settings } = tournament;
@@ -103,16 +114,17 @@ export function firstEliminationPairs(tournament: TabTournament, qualifiers: Qua
     if (top.length * 4 === qualifiers.length) return [...top, ...bottom];
   }
   const seeds = [...qualifiers].sort((x, y) => x.seed - y.seed).map((item) => item.teamId);
-  const order = standardSeedOrder(seeds.length);
+  const order = isSeedOrder(settings.bracketSeedOrder, seeds.length) ? settings.bracketSeedOrder : standardSeedOrder(seeds.length);
   const pairs: Array<[string, string]> = [];
   for (let i = 0; i < order.length; i += 2) pairs.push([seeds[order[i] - 1], seeds[order[i + 1] - 1]]);
   return pairs;
 }
 
 export function buildEliminationRound(tournament: TabTournament, pairs: Array<[string, string]>, seed: number, now = Date.now()): TabRound {
+  const number = nextRoundNumber(tournament);
   return {
     id: makeTabId('ronda'),
-    number: Math.max(0, ...tournament.rounds.map((round) => round.number)) + 1,
+    number,
     name: eliminationRoundName(pairs.length),
     kind: 'elimination',
     sideMode: 'draw',
@@ -121,7 +133,7 @@ export function buildEliminationRound(tournament: TabTournament, pairs: Array<[s
     silent: false,
     debates: assignVenues(tournament, pairs.map(([a, b], index) => ({
       id: makeTabId('debate'), venueId: '', teamIds: [a, b] as [string, string], judgeIds: [], chairId: '', bracketSlot: index,
-    }))),
+    })), number),
     createdAt: now,
   };
 }

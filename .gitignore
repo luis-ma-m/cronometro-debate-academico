@@ -12,3 +12,7 @@ coverage/
 *credentials*.json
 *.pem
 *.key
+
+# Playwright
+test-results/
+playwright-report/
