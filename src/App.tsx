@@ -1226,7 +1226,7 @@ export default function App() {
     const round = data.rounds.find((item) => item.id === activeRound);
     if (!round) { setServerError('Selecciona antes una ronda.'); return; }
     const outbox = readOutbox(localStorage);
-    if (!outbox) { setServerError('No hay ninguna ronda enviada desde la tabulación. En /tabulacion, abre la ronda y pulsa «Enviar al panel».'); return; }
+    if (!outbox) { setServerError('No hay ninguna ronda enviada desde la tabulación. En /tabulacion, abre la ronda y pulsa «Más acciones» → «Enviar al panel de cronómetros».'); return; }
     const result = applyOutboxToPanel(data, round.id, outbox, { makeId });
     if (!result.rooms) { setServerError('No se puede cargar «' + outbox.roundName + '» en ' + round.name + ': ' + result.issues.join(' ')); return; }
     if (!result.changed) { setTabulationNotice(round.name + ' ya coincide con «' + outbox.roundName + '» de la tabulación.'); return; }
