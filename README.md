@@ -15,6 +15,7 @@ Aplicación web para coordinar torneos de debate académico LEDU desde un panel 
 - Cronómetros con inicio, pausa, reanudación, reinicio, avance, retroceso y finalización.
 - URLs públicas de sala; solo una clave vigente de control permite modificar el cronómetro.
 - Detección de revisiones obsoletas y reintentos idempotentes para evitar duplicar operaciones confirmadas.
+- **Tabulación local** en `/tabulacion`, que funciona solo en el navegador, sin API: liguilla de grupos (LEDU), sistema suizo (UC3M) o el V Torneo Nacional ADUMA (acta conjunta, rondas a ciegas, equipos caídos, incompatibilidades objetivas y subjetivas). Incluye emparejamientos sin revanchas, borradores de ronda editables con ZIP de cada ronda, asignación de jueces, actas enviadas por los jueces desde el móvil por WhatsApp (sin servidor), desempates reglamentarios, premios de oradores, eliminatorias y un registro auditable. Intercambia participantes y rondas con el panel. Consulta [docs/TABULACION.md](docs/TABULACION.md) y, para ADUMA, [docs/ADUMA-OPERACION.md](docs/ADUMA-OPERACION.md).
 
 El preset LEDU es una referencia editable. Comprueba el reglamento de la edición concreta antes del torneo.
 
@@ -34,7 +35,7 @@ npm install
 npm run dev
 ```
 
-Si no se configura `VITE_API_URL`, el entorno local utiliza el modo de demostración en el navegador. La contraseña de muestra no es una credencial de producción.
+Si no se configura `VITE_API_URL`, el entorno local utiliza el modo de demostración en el navegador. La contraseña de muestra es `gestor123`; solo sirve en este modo y no es una credencial de producción.
 
 ## Pruebas y compilación
 
@@ -48,7 +49,7 @@ Las pruebas de integración reales contra PostgreSQL solo se ejecutan si se prop
 
 ## Despliegue y migración
 
-Consulta [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) y [docs/NEON_MIGRATION.md](docs/NEON_MIGRATION.md).
+Consulta [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) y [docs/NEON_MIGRATION.md](docs/NEON_MIGRATION.md). La tabulación local no necesita configuración de servidor: está documentada en [docs/TABULACION.md](docs/TABULACION.md).
 
 Variables privadas necesarias en Vercel:
 

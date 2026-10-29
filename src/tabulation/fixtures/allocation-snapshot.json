@@ -1,0 +1,375 @@
+{
+ "ledu-1": {
+  "panels": [
+   [
+    [
+     "sample-judge-03"
+    ],
+    "sample-judge-03"
+   ],
+   [
+    [
+     "sample-judge-02"
+    ],
+    "sample-judge-02"
+   ],
+   [
+    [
+     "sample-judge-01"
+    ],
+    "sample-judge-01"
+   ],
+   [
+    [
+     "sample-judge-11"
+    ],
+    "sample-judge-11"
+   ],
+   [
+    [
+     "sample-judge-05"
+    ],
+    "sample-judge-05"
+   ],
+   [
+    [
+     "sample-judge-10"
+    ],
+    "sample-judge-10"
+   ],
+   [
+    [
+     "sample-judge-09",
+     "sample-judge-08",
+     "sample-judge-07"
+    ],
+    "sample-judge-09"
+   ],
+   [
+    [
+     "sample-judge-04",
+     "sample-judge-12",
+     "sample-judge-06"
+    ],
+    "sample-judge-04"
+   ]
+  ],
+  "warnings": [
+   "No hay jueces suficientes: algunos debates tendrán un panel menor.",
+   "Aula 4: el juez principal no está marcado como apto para presidir.",
+   "Aula 6: el juez principal no está marcado como apto para presidir.",
+   "Aula 7: el juez principal no está marcado como apto para presidir."
+  ]
+ },
+ "ledu-2": {
+  "panels": [
+   [
+    [
+     "sample-judge-11"
+    ],
+    "sample-judge-11"
+   ],
+   [
+    [
+     "sample-judge-10"
+    ],
+    "sample-judge-10"
+   ],
+   [
+    [
+     "sample-judge-03"
+    ],
+    "sample-judge-03"
+   ],
+   [
+    [
+     "sample-judge-07"
+    ],
+    "sample-judge-07"
+   ],
+   [
+    [
+     "sample-judge-02"
+    ],
+    "sample-judge-02"
+   ],
+   [
+    [
+     "sample-judge-04"
+    ],
+    "sample-judge-04"
+   ],
+   [
+    [
+     "sample-judge-01",
+     "sample-judge-06",
+     "sample-judge-09"
+    ],
+    "sample-judge-09"
+   ],
+   [
+    [
+     "sample-judge-05",
+     "sample-judge-12",
+     "sample-judge-08"
+    ],
+    "sample-judge-05"
+   ]
+  ],
+  "warnings": [
+   "No hay jueces suficientes: algunos debates tendrán un panel menor.",
+   "Aula 1: el juez principal no está marcado como apto para presidir.",
+   "Aula 2: el juez principal no está marcado como apto para presidir.",
+   "Aula 4: el juez principal no está marcado como apto para presidir.",
+   "Aula 7: el juez principal no está marcado como apto para presidir."
+  ]
+ },
+ "ledu-3": {
+  "panels": [
+   [
+    [
+     "sample-judge-03"
+    ],
+    "sample-judge-03"
+   ],
+   [
+    [
+     "sample-judge-04"
+    ],
+    "sample-judge-04"
+   ],
+   [
+    [
+     "sample-judge-02"
+    ],
+    "sample-judge-02"
+   ],
+   [
+    [
+     "sample-judge-01"
+    ],
+    "sample-judge-01"
+   ],
+   [
+    [
+     "sample-judge-06"
+    ],
+    "sample-judge-06"
+   ],
+   [
+    [
+     "sample-judge-10"
+    ],
+    "sample-judge-10"
+   ],
+   [
+    [
+     "sample-judge-11",
+     "sample-judge-09",
+     "sample-judge-12"
+    ],
+    "sample-judge-09"
+   ],
+   [
+    [
+     "sample-judge-05",
+     "sample-judge-08",
+     "sample-judge-07"
+    ],
+    "sample-judge-05"
+   ]
+  ],
+  "warnings": [
+   "No hay jueces suficientes: algunos debates tendrán un panel menor.",
+   "Aula 5: el juez principal no está marcado como apto para presidir.",
+   "Aula 6: el juez principal no está marcado como apto para presidir.",
+   "Aula 7: el juez principal no está marcado como apto para presidir."
+  ]
+ },
+ "uc3m-1": {
+  "panels": [
+   [
+    [
+     "sample-judge-03"
+    ],
+    "sample-judge-03"
+   ],
+   [
+    [
+     "sample-judge-05"
+    ],
+    "sample-judge-05"
+   ],
+   [
+    [
+     "sample-judge-01"
+    ],
+    "sample-judge-01"
+   ],
+   [
+    [
+     "sample-judge-12"
+    ],
+    "sample-judge-12"
+   ],
+   [
+    [
+     "sample-judge-04"
+    ],
+    "sample-judge-04"
+   ],
+   [
+    [
+     "sample-judge-11"
+    ],
+    "sample-judge-11"
+   ],
+   [
+    [
+     "sample-judge-10",
+     "sample-judge-08",
+     "sample-judge-07"
+    ],
+    "sample-judge-07"
+   ],
+   [
+    [
+     "sample-judge-02",
+     "sample-judge-09",
+     "sample-judge-06"
+    ],
+    "sample-judge-02"
+   ]
+  ],
+  "warnings": [
+   "No hay jueces suficientes: algunos debates tendrán un panel menor.",
+   "Aula 4: el juez principal no está marcado como apto para presidir.",
+   "Aula 6: el juez principal no está marcado como apto para presidir.",
+   "Aula 7: el juez principal no está marcado como apto para presidir."
+  ]
+ },
+ "uc3m-2": {
+  "panels": [
+   [
+    [
+     "sample-judge-11"
+    ],
+    "sample-judge-11"
+   ],
+   [
+    [
+     "sample-judge-01"
+    ],
+    "sample-judge-01"
+   ],
+   [
+    [
+     "sample-judge-03"
+    ],
+    "sample-judge-03"
+   ],
+   [
+    [
+     "sample-judge-10"
+    ],
+    "sample-judge-10"
+   ],
+   [
+    [
+     "sample-judge-04"
+    ],
+    "sample-judge-04"
+   ],
+   [
+    [
+     "sample-judge-05"
+    ],
+    "sample-judge-05"
+   ],
+   [
+    [
+     "sample-judge-02",
+     "sample-judge-06",
+     "sample-judge-09"
+    ],
+    "sample-judge-02"
+   ],
+   [
+    [
+     "sample-judge-08",
+     "sample-judge-12",
+     "sample-judge-07"
+    ],
+    "sample-judge-07"
+   ]
+  ],
+  "warnings": [
+   "No hay jueces suficientes: algunos debates tendrán un panel menor.",
+   "Aula 1: el juez principal no está marcado como apto para presidir.",
+   "Aula 4: el juez principal no está marcado como apto para presidir.",
+   "Aula 8: el juez principal no está marcado como apto para presidir."
+  ]
+ },
+ "uc3m-3": {
+  "panels": [
+   [
+    [
+     "sample-judge-04"
+    ],
+    "sample-judge-04"
+   ],
+   [
+    [
+     "sample-judge-01"
+    ],
+    "sample-judge-01"
+   ],
+   [
+    [
+     "sample-judge-03"
+    ],
+    "sample-judge-03"
+   ],
+   [
+    [
+     "sample-judge-02"
+    ],
+    "sample-judge-02"
+   ],
+   [
+    [
+     "sample-judge-06"
+    ],
+    "sample-judge-06"
+   ],
+   [
+    [
+     "sample-judge-11"
+    ],
+    "sample-judge-11"
+   ],
+   [
+    [
+     "sample-judge-12",
+     "sample-judge-09",
+     "sample-judge-10"
+    ],
+    "sample-judge-09"
+   ],
+   [
+    [
+     "sample-judge-05",
+     "sample-judge-08",
+     "sample-judge-07"
+    ],
+    "sample-judge-05"
+   ]
+  ],
+  "warnings": [
+   "No hay jueces suficientes: algunos debates tendrán un panel menor.",
+   "Aula 5: el juez principal no está marcado como apto para presidir.",
+   "Aula 6: el juez principal no está marcado como apto para presidir.",
+   "Aula 7: el juez principal no está marcado como apto para presidir."
+  ]
+ }
+}

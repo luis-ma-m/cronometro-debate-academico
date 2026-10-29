@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
 import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
@@ -12,8 +12,12 @@ import type { TimerAction } from './timer';
 import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundScorecard, type ScoreCategory, type SpeakerScore, type TeamScore } from './scoring';
 import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
+import { SearchableEntityPicker } from './components/SearchableEntityPicker';
+import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
 
 const SESSION_KEY = 'ledu-admin-session';
+/** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
+const DEMO_PASSWORD = 'gestor123';
 type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
 
 type ScoreInputDraft = { teamScores: Record<string, string>; speakerScores: Record<number, string> };
@@ -77,35 +81,6 @@ function conflictingTeamForJudge(data: Tournament, room: Room, judge: Judge): Te
     .find((team): team is Team => Boolean(team && sameInstitution(judge.institution, team.institution)));
 }
 
-function normalizeSearchText(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-ES').trim();
-}
-type PickerOption = { id: string; name: string; active?: boolean; disabledReason?: string };
-function SearchableEntityPicker({ label, options, value, onChange, multiple = false }: {
-  label: string; options: PickerOption[]; value: string | string[]; onChange: (value: string | string[]) => void; multiple?: boolean;
-}) {
-  const [query, setQuery] = useState('');
-  const [expanded, setExpanded] = useState(false);
-  const selectedIds = multiple ? value as string[] : [value as string].filter(Boolean);
-  const normalized = normalizeSearchText(query);
-  const filtered = options.filter((option) => (selectedIds.includes(option.id) || option.active !== false) && (!normalized || normalizeSearchText(option.name).includes(normalized)));
-  const visible = expanded || normalized ? filtered : filtered.slice(0, 5);
-  const toggle = (option: PickerOption) => {
-    const selected = selectedIds.includes(option.id);
-    if (option.disabledReason && !selected) return;
-    if (multiple) onChange(selected ? selectedIds.filter((id) => id !== option.id) : [...selectedIds, option.id]);
-    else { onChange(selected ? '' : option.id); setQuery(''); setExpanded(false); }
-  };
-  return <div className={'entity-picker' + (multiple ? ' multiple' : '')}>
-    <label className="entity-picker-label">{label}</label>
-    <input type="search" aria-label={'Buscar ' + label} placeholder="Buscar por nombre…" value={query} onChange={(event) => { setQuery(event.target.value); setExpanded(false); }} />
-    {multiple && selectedIds.length > 0 && <div className="entity-picker-selected">{selectedIds.map((id) => { const option = options.find((item) => item.id === id); return <button type="button" key={id} className="incompatibility-chip" title={'Quitar ' + (option?.name ?? id)} onClick={() => toggle(option ?? { id, name: id })}>{option?.name ?? id}<span aria-hidden="true"> ×</span></button>; })}</div>}
-    {selectedIds.length > 0 && !multiple && <div className="entity-picker-selected"><span className="entity-picker-single-selected">{options.find((option) => option.id === selectedIds[0])?.name ?? selectedIds[0]}</span><button type="button" className="picker-clear" onClick={() => onChange('')} aria-label={'Quitar selección de ' + label}>Cambiar</button></div>}
-    <div className="entity-picker-options">{visible.map((option) => { const selected = selectedIds.includes(option.id); return <label key={option.id} className={'entity-picker-option' + (selected ? ' selected' : '')} title={option.disabledReason || undefined}><input type={multiple ? 'checkbox' : 'radio'} name={multiple ? undefined : label} checked={selected} disabled={Boolean(option.disabledReason && !selected)} onChange={() => toggle(option)} /><span>{option.name}{option.active === false ? ' · Inactivo' : ''}{option.disabledReason && !selected ? ' · ' + option.disabledReason : ''}</span></label>; })}{!visible.length && <small className="muted">No hay coincidencias.</small>}</div>
-    {!normalized && filtered.length > 5 && <button type="button" className="picker-expand" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>{expanded ? 'Mostrar menos' : 'Mostrar todos (' + filtered.length + ')'}</button>}
-  </div>;
-}
-
 function IncompatibilityPicker({ label, options, value, onChange }: { label: string; options: { id: string; name: string; active: boolean }[]; value: string[]; onChange: (ids: string[]) => void }) {
   return <SearchableEntityPicker label={label} options={options} value={value} multiple onChange={(next) => onChange(next as string[])} />;
 }
@@ -127,6 +102,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [preparingRoomId, setPreparingRoomId] = useState<string | null>(null);
   const [preparedRoomLink, setPreparedRoomLink] = useState<{ roomName: string; href: string } | null>(null);
+  const [tabulationNotice, setTabulationNotice] = useState('');
   // Reuse already fetched room-control links for the lifetime of this admin session.
   const preparedRoomLinksRef = useRef<Record<string, { roomName: string; href: string }>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -199,7 +175,8 @@ export default function App() {
         setAdminLoading(false);
       }
     } else if (!apiConfigured) {
-      setData(readDemo());
+      // Demo storage has no merge step: keep in-memory edits until they are saved.
+      if (!hasUnsavedRef.current) setData(readDemo());
       setAdminLoading(false);
     }
   }, [session, demoMode]);
@@ -429,7 +406,7 @@ export default function App() {
     event.preventDefault();
     setLoginError('');
     try {
-      const result = apiConfigured ? await login(password) : password === 'contraseña' ? { token: 'demo-session', expiresAt: Date.now() + 8 * 60 * 60 * 1000 } : null;
+      const result = apiConfigured ? await login(password) : password === DEMO_PASSWORD ? { token: 'demo-session', expiresAt: Date.now() + 8 * 60 * 60 * 1000 } : null;
       if (!result) throw new Error('Contraseña incorrecta.');
       localStorage.setItem(SESSION_KEY, JSON.stringify(result));
       setDemoMode(false);
@@ -583,7 +560,7 @@ export default function App() {
   if (!session) {
     return <div className="login-shell">
       <aside className="login-hero"><div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div><p className="eyebrow">OPERACIONES DEL TORNEO</p><h1>Un torneo.<br />Todas las salas.<br /><em>Una sola visión.</em></h1><p className="hero-copy">Organiza equipos, coordina al panel de jueces y sigue el estado de cada debate desde un único lugar.</p><div className="hero-tags"><span><ShieldCheck size={15} /> Gestión privada</span><span><Activity size={15} /> Actualización automática</span></div></aside>
-      <main className="login-side"><form className="login-card" onSubmit={submitLogin}><span className="eyebrow">PANEL DE ORGANIZACIÓN</span><h2>Acceso al torneo</h2><p>Introduce la contraseña para gestionar rondas, equipos, jueces y salas.</p><label htmlFor="password">Contraseña</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Introduce la contraseña" required /><button className="button primary full" type="submit">Entrar al panel <ArrowRight size={17} /></button>{loginError && <p className="error">{loginError}</p>}<p className="security-note"><ShieldCheck size={15} /> {apiConfigured ? 'Autenticación validada por el backend.' : 'Modo de demostración: contraseña' + ' contraseña'}.</p><p className="subtle">Los cronómetros de sala se abren por enlace y no requieren iniciar sesión.</p></form></main>
+      <main className="login-side"><form className="login-card" onSubmit={submitLogin}><span className="eyebrow">PANEL DE ORGANIZACIÓN</span><h2>Acceso al torneo</h2><p>Introduce la contraseña para gestionar rondas, equipos, jueces y salas.</p><label htmlFor="password">Contraseña</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Introduce la contraseña" required /><button className="button primary full" type="submit">Entrar al panel <ArrowRight size={17} /></button>{loginError && <p className="error">{loginError}</p>}<p className="security-note"><ShieldCheck size={15} /> {apiConfigured ? 'Autenticación validada por el backend.' : 'Modo de demostración: contraseña ' + DEMO_PASSWORD}.</p><p className="subtle">Los cronómetros de sala se abren por enlace y no requieren iniciar sesión.</p></form></main>
     </div>;
   }
 
@@ -1234,6 +1211,34 @@ export default function App() {
       rounds: current.rounds.map((item) => item.id === round.id ? { ...item, name: name.trim() } : item),
     }));
   };
+  // The local tabulation lives in this same browser: both directions go through versioned localStorage hand-offs.
+  const sendToTabulation = () => {
+    try {
+      writeHandoff(localStorage, buildPanelHandoff(data));
+    } catch {
+      setServerError('No hay espacio en el almacenamiento del navegador para enviar los datos a la tabulación.');
+      return;
+    }
+    window.open('/tabulacion#inicio', '_blank', 'noopener');
+    setTabulationNotice('Equipos, oradores, jueces y salas enviados a la tabulación local de este navegador. Si no se ha abierto, entra en /tabulacion.');
+  };
+  const loadFromTabulation = () => {
+    const round = data.rounds.find((item) => item.id === activeRound);
+    if (!round) { setServerError('Selecciona antes una ronda.'); return; }
+    const outbox = readOutbox(localStorage);
+    if (!outbox) { setServerError('No hay ninguna ronda enviada desde la tabulación. En /tabulacion, abre la ronda y pulsa «Más acciones» → «Enviar al panel de cronómetros».'); return; }
+    const result = applyOutboxToPanel(data, round.id, outbox, { makeId });
+    if (!result.rooms) { setServerError('No se puede cargar «' + outbox.roundName + '» en ' + round.name + ': ' + result.issues.join(' ')); return; }
+    if (!result.changed) { setTabulationNotice(round.name + ' ya coincide con «' + outbox.roundName + '» de la tabulación.'); return; }
+    const otherTournament = outbox.panelTournamentName && outbox.panelTournamentName !== data.tournamentName
+      ? '\n\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».' : '';
+    if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament
+      + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
+    const rooms = result.rooms;
+    updateData((current) => ({ ...current, rooms }));
+    setServerError('');
+    setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
+  };
 
   const assignmentWarnings = validateAssignments(data);
   const incompatibilityIncidents = findAssignmentConflicts(data);
@@ -1250,11 +1255,13 @@ export default function App() {
       <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
       <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
       <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
+      <a className="nav-button" href="/tabulacion" target="_blank" rel="noopener"><ClipboardList size={18} /><span>Tabulación local</span><ExternalLink size={15} /></a>
     </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
       {preparingRoomId && <div className="notice warning-notice"><RefreshCw size={17} /><span>Guardando los cambios y preparando el enlace de la sala…</span></div>}
       {preparedRoomLink && <div className="notice warning-notice room-link-ready"><Check size={17} /><span>Enlace listo para <b>{preparedRoomLink.roomName}</b>. Puedes abrir el cronómetro desde aquí; el enlace se reutilizará en las próximas aperturas de esta sesión.</span><a className="button primary" href={preparedRoomLink.href} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} /> Abrir cronómetro</a><button className="text-button" onClick={() => setPreparedRoomLink(null)} aria-label="Cerrar enlace preparado"><X size={16} /></button></div>}
+      {tabulationNotice && <div className="success-notice"><Check size={17} /><span>{tabulationNotice}</span><button className="text-button" onClick={() => setTabulationNotice('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
       {hasUnsavedChanges && <div className="notice warning-notice"><CircleHelp size={17} /><span>Tienes cambios locales sin guardar. El panel seguirá actualizando los cronómetros sin descartar estas ediciones.</span><button className="text-button" onClick={() => { if (window.confirm('¿Descartar todos los cambios locales y volver a cargar los datos guardados?')) { hasUnsavedRef.current = false; setHasUnsavedChanges(false); setFormatDirty(false); void reloadAdmin(); } }}>Descartar y recargar</button></div>}
       {(assignmentWarnings.length > 0 || incompatibilityIncidents.length > 0) && view !== 'settings' && <div className="notice warning-notice"><CircleHelp size={17} /><span>Hay incidencias en las asignaciones: {[...assignmentWarnings, ...incompatibilityIncidents.map((issue) => issue.roomName + ': ' + issue.message)].slice(0,3).join(' ')}{assignmentWarnings.length + incompatibilityIncidents.length > 3 ? ' +' + (assignmentWarnings.length + incompatibilityIncidents.length - 3) + ' más.' : ''}</span></div>}
       {activationPreview && <div className="activation-backdrop" role="presentation">
@@ -1281,7 +1288,7 @@ export default function App() {
       {(data.rounds.find((round) => round.id === activeTournamentRoundId)?.scoreType ?? 'qualifying') === 'qualifying' && overviewPendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{overviewPendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
       <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{overviewRooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} connectionStatus={roomConnectionStatuses[room.physicalRoomId]} onOpen={() => void openRoom(room.id)} />)}</div>{!activeTournamentRoundId ? <Empty text="No hay una ronda activa." /> : overviewRooms.length === 0 && <Empty text="No hay salas creadas para la ronda activa." />}</section></>}
 
-      {view === 'tournament' && <TournamentView data={data} />}
+      {view === 'tournament' && <TournamentView data={data} onSendToTabulation={sendToTabulation} />}
 
       {view === 'scoring' && <ScoringView
         data={data}
@@ -1299,7 +1306,7 @@ export default function App() {
         saving={savingScores}
       />}
 
-      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
+      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
         const expanded = expandedRoomIds.includes(room.id);
         return <section className={'panel room-editor room-card' + (expanded ? ' expanded' : '')} key={room.id}>
           <div className="room-card-header">
@@ -1318,7 +1325,7 @@ export default function App() {
             <div className="room-card-disclosure-inner">
               <div className="room-editor-heading"><label>Nombre de la sala<input className="table-input room-name-input" aria-label="Nombre de la sala" value={room.name} onChange={(event) => updateRoom(room.id, { name: event.target.value })} /></label><p className="muted">Enlace permanente: /sala/{data.physicalRooms.find((physical) => physical.id === room.physicalRoomId)?.slug ?? room.physicalRoomId}</p></div>
               <div className="assign-grid"><label className="room-format-select">Formato de esta sala<select value={room.formatId} onChange={(event) => updateRoom(room.id, { formatId: event.target.value })}><option value="">Heredar formato de la ronda</option>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select><small>Se aplicará al activar la ronda.</small></label><SearchableEntityPicker label="Equipo a favor" options={data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => ({ id: team.id, name: team.name, active: team.active, disabledReason: team.id === room.teamContraId ? "Ya asignado como equipo en contra" : teamAssignmentReason(team.id, room, "favor") }))} value={room.teamFavorId} onChange={(value) => updateRoom(room.id, { teamFavorId: value as string })} /><SearchableEntityPicker label="Equipo en contra" options={data.teams.filter((team) => team.active || team.id === room.teamFavorId || team.id === room.teamContraId).map((team) => ({ id: team.id, name: team.name, active: team.active, disabledReason: team.id === room.teamFavorId ? "Ya asignado como equipo a favor" : teamAssignmentReason(team.id, room, "contra") }))} value={room.teamContraId} onChange={(value) => updateRoom(room.id, { teamContraId: value as string })} /></div>
-              <div className="judges-select"><SearchableEntityPicker label="Jueces asignados" multiple options={data.judges.map((judge) => {
+              <div className="room-swap-row"><button type="button" className="button secondary" title="Intercambia A favor y En contra, por ejemplo tras el sorteo de posturas" disabled={!room.teamFavorId || !room.teamContraId || room.timer.status !== 'idle' || (data.scoring?.scorecards ?? []).some((card) => card.roomId === room.id)} onClick={() => updateRoom(room.id, { teamFavorId: room.teamContraId, teamContraId: room.teamFavorId })}><RotateCcw size={15} /> Intercambiar posturas</button></div><div className="judges-select"><SearchableEntityPicker label="Jueces asignados" multiple options={data.judges.map((judge) => {
                 const conflict = conflictingTeamForJudge(data, room, judge);
                 const teamConflict = [room.teamFavorId, room.teamContraId].map((id) => data.teams.find((team) => team.id === id)).find((team) => team?.incompatibleJudgeIds?.includes(judge.id));
                 const judgeConflict = room.judgeIds.filter((id) => id !== judge.id).map((id) => data.judges.find((item) => item.id === id)).find((other) => other?.incompatibleJudgeIds?.includes(judge.id) || judge.incompatibleJudgeIds?.includes(other?.id ?? ''));
@@ -1414,13 +1421,13 @@ function RankingExpandButton({ total, expanded, onToggle }: { total: number; exp
  return <div className="ranking-expand-actions"><button type="button" className="text-button ranking-expand-button" aria-expanded={expanded} onClick={onToggle}>{expanded ? "Ver menos" : "Ver más (" + (total - 5) + " restantes)"}</button></div>;
 }
 
-function TournamentView({data}:{data:Tournament}) {
+function TournamentView({data, onSendToTabulation}:{data:Tournament; onSendToTabulation:()=>void}) {
  const cards=data.scoring?.scorecards??[], teams=buildTeamRanking(data.teams,data.rounds,cards), rankings=buildSpeakerRankings(data.teams,data.speakers??[],data.rounds,cards);
  const hasScores=cards.some(card=>data.rounds.some(round=>round.id===card.roundId&&(round.scoreType??"qualifying")==="qualifying"));
  const [expandedRankings, setExpandedRankings] = useState<Record<string, boolean>>({});
  const teamsExpanded = Boolean(expandedRankings.teams);
  const visibleTeams = teamsExpanded ? teams : teams.slice(0, 5);
- return <><div className="page-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Torneo</h2><p className="muted">Clasificación de equipos y rankings de oradores de las rondas clasificatorias.</p></div></div>
+ return <><div className="page-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Torneo</h2><p className="muted">Clasificación de equipos y rankings de oradores de las rondas clasificatorias.</p></div><div className="top-actions"><button className="button secondary" onClick={onSendToTabulation} title="Copia equipos, oradores, jueces, incompatibilidades y salas a la tabulación local de este navegador"><ClipboardList size={16} /> Enviar a tabulación</button></div></div>
  {!hasScores&&<div className="notice"><BookOpen size={17}/><span>Aún no hay actas clasificatorias. Los rankings aparecerán cuando se registren puntuaciones.</span></div>}
  <section className="panel tournament-ranking-panel"><div className="panel-title"><div><h3>Clasificación por equipos</h3><p>Orden: victorias y, a continuación, suma de ítems. Los empates comparten posición.</p></div></div><div className="tournament-table-wrap"><table><thead><tr><th>Pos.</th><th>Equipo</th><th>Victorias</th><th>Derrotas</th><th>Puntuación de ítems</th><th>Debates</th></tr></thead><tbody>{visibleTeams.map(row=><tr key={row.teamId}><td><strong>{row.rank}</strong></td><td>{row.teamName}</td><td>{row.wins}</td><td>{row.losses}</td><td>{row.itemTotal}</td><td>{row.debates}</td></tr>)}</tbody></table>{!teams.length&&<Empty text="No hay equipos activos para clasificar."/>}</div><RankingExpandButton total={teams.length} expanded={teamsExpanded} onToggle={()=>setExpandedRankings(current=>({...current,teams:!current.teams}))}/></section>
  <div className="speaker-ranking-grid">{rankings.map(category=>{const expanded=Boolean(expandedRankings[category.key]);const visibleRows=expanded?category.rows:category.rows.slice(0,5);return <section className="panel speaker-ranking-panel" key={category.key}><div className="panel-title"><div><h3>{category.title}</h3><p>Sumatorio de puntuaciones · {category.rows.length?"ranking disponible":"sin evaluaciones"}</p></div></div>{category.rows.length?<><div className="tournament-table-wrap"><table><thead><tr><th>Pos.</th><th>Orador</th><th>Equipo</th><th>Ítems</th><th>Notas</th></tr></thead><tbody>{visibleRows.map(row=><tr key={row.speakerId}><td><strong>{row.rank}</strong></td><td>{row.speakerName}</td><td>{row.teamName}</td><td>{row.itemTotal}</td><td>{row.evaluations}</td></tr>)}</tbody></table></div><RankingExpandButton total={category.rows.length} expanded={expanded} onToggle={()=>setExpandedRankings(current=>({...current,[category.key]:!current[category.key]}))}/></>:<p className="muted tournament-empty">Todavía no hay puntuaciones aplicables a este ranking.</p>}</section>})}</div></>;

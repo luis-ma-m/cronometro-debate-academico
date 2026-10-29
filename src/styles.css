@@ -458,3 +458,426 @@ details[open]::details-content{block-size:auto;opacity:1;}
 .judge-card-section>b{font-size:11px;color:#59667b}
 @media(max-width:1100px){.judge-card-list{grid-template-columns:1fr}}
 @media(max-width:760px){.judge-card-header{align-items:flex-start;flex-wrap:wrap}.judge-card-toggle{flex-basis:100%;flex-wrap:wrap;gap:8px}.judge-card-name{flex-basis:100%}.judge-card-institution{max-width:calc(100% - 100px)}.judge-card-actions{width:100%;justify-content:flex-end}.judge-card-actions .state-pill{margin-right:auto}.judge-edit-grid{grid-template-columns:1fr}}
+
+/* Tabulación local (/tabulacion) */
+.tab-loading{min-height:100vh;display:grid;place-items:center;color:#748196;font-size:13px}
+.tab-load-failed{align-content:center;gap:14px;padding:16px;text-align:center}
+.tab-load-failed p{max-width:420px;margin:0;line-height:1.5}
+.tab-shell .sidebar-bottom a.sidebar-logout{text-decoration:none}
+.tab-shell .nav-button:disabled{opacity:.45;cursor:not-allowed}
+.tab-shell .nav-button:disabled:hover{background:transparent;color:#aeb8c9}
+.tab-dot-error{background:#d4574b}
+.tab-info-notice{background:#eef6ff;color:#24527a;border:1px solid #d3e5f8}
+.tab-conflict{flex-wrap:wrap}
+.tab-conflict .button{padding:7px 11px}
+.tab-field{display:grid;gap:6px;font-size:11px;color:#647188;font-weight:650;min-width:0;align-content:start}
+.tab-field>small{font-weight:500;color:#8a95a7;line-height:1.4}
+.tab-field.compact{gap:3px;font-size:10px}
+.tab-shell .tab-field input,.tab-shell .tab-field select,.tab-shell .tab-field textarea,.tab-shell .tab-bulk textarea,.tab-shell .check-item select,.tab-cell-select,.tab-score-input{border:1px solid #dce3ec;background:#fff;border-radius:8px;padding:9px 10px;font:inherit;font-size:12px;font-weight:500;color:#28364b;min-width:0;max-width:100%}
+.tab-shell .tab-field textarea,.tab-shell .tab-bulk textarea{width:100%;box-sizing:border-box;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+.tab-shell .check-item select{padding:5px 7px;margin-left:4px}
+.tab-form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-bottom:12px}
+.tab-actions{display:flex;flex-wrap:wrap;align-items:flex-end;gap:9px;margin:10px 0}
+.tab-inline-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}
+.tab-inline-form .tab-field{flex:1 1 200px}
+.tab-two-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.tab-two-columns>.panel{margin-bottom:18px}
+.tab-subtitle{font-size:12px;margin:16px 0 8px;color:#29364a}
+.tab-toggle{margin:8px 0}
+.tab-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.tab-list li{display:flex;align-items:center;gap:10px;border:1px solid #e7ebf1;border-radius:9px;padding:10px 12px}
+.tab-list li.current{border-color:#9fd5c6;background:#f4fbf8}
+.tab-list li>div{flex:1;display:grid;gap:2px;min-width:0}
+.tab-list small{color:#8a95a7;font-size:10px}
+.tab-handoff{border-color:#9fd5c6;background:#f6fcfa}
+.tab-issues{margin:8px 0;padding-left:18px;font-size:11px;line-height:1.5}
+.tab-issues.warning{color:#885b13}
+.tab-issues.error{color:#a33a30}
+.tab-tiebreaks{margin:0 0 12px;padding-left:22px;display:grid;gap:6px;font-size:12px}
+.tab-tiebreaks li span{display:inline-block;min-width:260px;margin-right:6px}
+.tab-tiebreaks .icon-button{padding:5px;margin-right:4px}
+.tab-bulk{margin-top:14px;font-size:12px}
+.tab-bulk summary{cursor:pointer;color:#177e6b;font-weight:700;font-size:11px}
+.tab-bulk textarea{margin:8px 0}
+.tab-entity{padding:12px 16px;margin-bottom:10px}
+.tab-entity.inactive{opacity:.65}
+.tab-entity-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.tab-entity-row .table-input{flex:1 1 170px;min-width:120px;width:auto}
+.tab-entity-row .tab-name-input{font-weight:700;flex-basis:220px}
+.tab-entity-details{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-top:12px;border-top:1px solid #edf0f5;padding-top:12px}
+.tab-rotated{transform:rotate(90deg)}
+.tab-speaker-row{display:flex;gap:6px;align-items:center;margin-bottom:5px}
+.tab-groups{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.tab-group{border:1px solid #e7ebf1;border-radius:10px;padding:12px}
+.tab-group h4{margin:0 0 8px;font-size:13px}
+.tab-group ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.tab-group li{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px}
+.tab-group li span{display:grid}
+.tab-group small,.tab-cell-sub{display:block;color:#8a95a7;font-size:10px;font-weight:500}
+.tab-group select{font-size:10px;padding:4px;border:1px solid #dce3ec;border-radius:6px;background:#fff}
+.tab-seeds{columns:2;font-size:12px;margin:6px 0 12px;list-style:none;padding-left:0}
+.tab-bracket{display:flex;gap:18px;overflow-x:auto;padding-bottom:6px}
+.tab-bracket-round{min-width:180px;display:flex;flex-direction:column;justify-content:space-around;gap:10px}
+.tab-bracket-round h4{margin:0;font-size:11px;color:#748196;text-transform:uppercase;letter-spacing:.6px}
+.tab-bracket-match{border:1px solid #e1e6ee;border-radius:8px;overflow:hidden;font-size:12px}
+.tab-bracket-match span{display:block;padding:7px 10px}
+.tab-bracket-match span+span{border-top:1px solid #eef1f5}
+.tab-bracket-match .winner{background:#e4f5ed;color:#16805f;font-weight:700}
+.tab-bracket-match .loser{color:#9aa4b3}
+.tab-champion{font-size:14px}
+.tab-issue-count{color:#885b13;font-size:11px;margin:4px 0 10px}
+.tab-draw td{vertical-align:top}
+.tab-draw tr.tab-row-issue td{background:#fffaf0}
+.tab-cell-select{padding:6px 8px;font-size:11px;max-width:220px}
+.tab-judges{display:flex;flex-wrap:wrap;gap:5px;align-items:center;max-width:420px}
+.tab-judge-chip{display:inline-flex;align-items:center;gap:3px;border:1px solid #dfe5ee;border-radius:14px;padding:3px 6px;font-size:11px;background:#fff}
+.tab-judge-chip.chair{border-color:#9fd5c6;background:#f0faf6;font-weight:700}
+.tab-chip-star,.tab-chip-remove{border:0;background:transparent;color:#9aa4b3;padding:1px;display:inline-grid;place-items:center}
+.tab-judge-chip.chair .tab-chip-star,.tab-chip-star.active{color:#d29b14}
+.tab-add-judge{max-width:170px}
+.tab-debate-issues{font-size:11px;margin-top:8px}
+.tab-print-only{display:none}
+.state-pill.tab-invalid{background:#fff0ee;color:#a33a30}
+.tab-ballots{display:grid;grid-template-columns:minmax(220px,300px) minmax(0,1fr);gap:18px;align-items:start}
+.tab-ballot-list{padding:14px}
+.tab-ballot-list ul{list-style:none;margin:0;padding:0;display:grid;gap:5px}
+.tab-ballot-list button{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid #e7ebf1;background:#fff;border-radius:8px;padding:9px;text-align:left}
+.tab-ballot-list button span:first-child{display:grid;gap:2px;font-size:12px;min-width:0}
+.tab-ballot-list button small{color:#8a95a7;font-size:10px;overflow:hidden;text-overflow:ellipsis}
+.tab-ballot-list button.selected{border-color:#177e6b;box-shadow:inset 3px 0 #177e6b}
+.tab-fieldset{border:1px solid #e7ebf1;border-radius:10px;padding:12px 14px;margin:0 0 14px;min-width:0}
+.tab-fieldset legend{font-size:11px;font-weight:750;color:#4b5970;padding:0 6px}
+.tab-radio-row{display:flex;flex-wrap:wrap;gap:14px}
+.tab-lineup,.tab-penalties{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.tab-lineup>div,.tab-penalties>div{display:grid;gap:7px;align-content:start}
+.tab-penalty-inputs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.tab-penalty-inputs input{width:100%;box-sizing:border-box}
+.tab-ballot-table td,.tab-ballot-table th{padding:7px 8px!important}
+.tab-judge-cell{display:flex;align-items:center;gap:4px}
+.tab-judge-cell select{border:1px solid #dce3ec;border-radius:7px;padding:7px;font-size:12px;background:#fff;max-width:220px}
+.tab-score-input{width:78px;text-align:center;font-variant-numeric:tabular-nums;font-size:14px!important;font-weight:700!important}
+.tab-score-input.small{width:52px;font-size:12px!important;padding:7px 4px}
+.tab-vote{font-size:11px;font-weight:700;color:#16805f;white-space:nowrap}
+.tab-vote.tie{color:#a33a30}
+.tab-outcome{display:flex;flex-wrap:wrap;align-items:center;gap:10px;border-radius:10px;padding:12px 14px;background:#f8fafc;font-size:12px;margin-bottom:6px}
+.tab-outcome.complete{background:#effaf3}
+.tab-outcome.invalid{background:#fff4f2}
+.tab-outcome .tab-issues{flex-basis:100%;margin:0}
+.tab-standings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,640px),1fr));gap:18px}
+.tab-standings-grid>.panel{margin-bottom:0}
+.tab-standings td,.tab-standings th{white-space:nowrap}
+.tab-standings tr.tab-qualified td:first-child{box-shadow:inset 3px 0 #2db78f}
+.tab-tie{display:inline-block;margin-left:4px;font-size:9px;font-weight:800;color:#885b13;background:#fff1d9;border-radius:4px;padding:1px 4px;vertical-align:middle}
+.tab-ties{display:grid;gap:8px;margin-top:12px}
+.tab-tie-block{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:11px;background:#fffaf0;border:1px solid #f3dfb8;border-radius:8px;padding:8px 10px}
+.tab-tie-block .button{padding:6px 10px;font-size:11px}
+.tab-manual-item{display:inline-flex;align-items:center;gap:3px;border:1px solid #f3dfb8;background:#fff;border-radius:7px;padding:2px 4px 2px 8px}
+.tab-manual-item .icon-button{padding:3px}
+.tab-exit-projection{position:fixed;top:14px;right:14px;z-index:20}
+.tab-projection .sidebar,.tab-projection .tab-no-project{display:none!important}
+.tab-projection .main-area{margin-left:0;max-width:none;padding:0 48px 40px}
+.tab-projection .topbar h1{font-size:30px}
+.tab-projection .page-heading h2{font-size:34px}
+.tab-projection .tournament-table-wrap th{font-size:14px!important}
+.tab-projection .tournament-table-wrap td{font-size:20px!important;padding:14px 12px!important}
+.tab-projection .tab-cell-select,.tab-projection .tab-chip-star,.tab-projection .tab-chip-remove{display:none!important}
+.tab-projection .tab-print-only{display:inline}
+.tab-projection .tab-judge-chip{font-size:16px}
+@media(max-width:1000px){.tab-two-columns,.tab-standings-grid,.tab-ballots{grid-template-columns:1fr}}
+@media(max-width:620px){.tab-lineup,.tab-penalties{grid-template-columns:1fr}.tab-seeds{columns:1}.tab-tiebreaks li span{min-width:0;display:block}}
+@media print{
+  .tab-shell .sidebar,.tab-shell .footer,.tab-no-print,.tab-no-project,.tab-exit-projection,.tab-shell .notice,.tab-shell .success-notice:not(.tab-champion),.tab-shell .round-tabs,.tab-cell-select,.tab-chip-star,.tab-chip-remove{display:none!important}
+  .tab-shell .main-area{margin:0;padding:0;max-width:none}
+  .tab-shell .topbar{min-height:0;padding-bottom:10px}
+  .tab-shell .panel{border:0;padding:0;break-inside:avoid}
+  .tab-print-only{display:inline!important}
+  .tab-shell .tournament-table-wrap{overflow:visible}
+}
+a.nav-button{text-decoration:none}
+.room-swap-row{display:flex;justify-content:flex-end;margin-top:10px}
+/* Tabulation · ADUMA: drafts, round screen, joint acta, log */
+.tab-aduma{border-color:#9fd5c6;background:linear-gradient(135deg,#f0faf6,#fff 60%)}
+.tab-aduma h3{display:flex;align-items:center;gap:8px;font-size:16px}
+.tab-big-button{padding:13px 20px;font-size:14px}
+.stat-card.tab-stat-warning{border-color:#f3dfb8;background:#fffaf0}
+.tab-operator{grid-column:1/3;color:#cbd5e1}
+.tab-readonly{flex-wrap:wrap}
+.tab-crash{border-color:#f1c6c0}
+.tab-crash h3{display:flex;align-items:center;gap:8px;color:#a33a30}
+.tab-crash-page{max-width:760px;margin:60px auto;padding:0 16px}
+.tab-crash-detail{white-space:pre-wrap;font-size:11px;background:#fff4f2;border-radius:8px;padding:10px;max-height:160px;overflow:auto}
+.tab-log td{vertical-align:top;font-size:12px}
+.tab-nowrap{white-space:nowrap}
+.tab-hash{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;color:#59677c}
+.tab-log-details summary{cursor:pointer;color:#177e6b;font-size:11px;font-weight:700}
+.tab-log-details pre{white-space:pre-wrap;font-size:10px;max-height:260px;overflow:auto;background:#f8fafc;border-radius:6px;padding:8px}
+.tab-draft{border-color:#9fd5c6;box-shadow:0 0 0 3px #e7f4f0}
+.round-tabs button.tab-draft-tab{border-style:dashed}
+.tab-changes{margin:10px 0;font-size:12px}
+.tab-changes summary{cursor:pointer;font-weight:700;color:#4b5970}
+.tab-changes ul{margin:6px 0;padding-left:18px;display:grid;gap:3px}
+.tab-confirm{display:grid;gap:10px;justify-items:start;border-top:1px solid #edf0f5;margin-top:14px;padding-top:14px}
+.tab-acknowledge{font-size:12px;font-weight:700;color:#885b13}
+.tab-draw tr.tab-row-muted td,.tab-standings tr.tab-row-muted td{color:#8a95a7;background:#fafbfd}
+.tab-chip-select{border:0;background:transparent;font:inherit;font-size:11px;max-width:170px;padding:0;color:inherit}
+.tab-problem-row td{padding-top:0!important;border-top:0!important}
+.tab-problems{list-style:none;margin:0 0 4px;padding:0;display:grid;gap:2px;font-size:11px}
+.tab-problems li{padding-left:14px;position:relative}
+.tab-problems li:before{content:"";position:absolute;left:2px;top:5px;width:6px;height:6px;border-radius:50%;background:#d49b36}
+.tab-problems li.error{color:#a33a30;font-weight:700}
+.tab-problems li.error:before{background:#c4493c}
+.tab-problems li.warning{color:#885b13}
+.tab-round-screen{border-color:#9fd5c6}
+.tab-screen-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.tab-screen-card{border:1px solid #e1e6ee;border-radius:12px;padding:14px 16px;background:#fff}
+.tab-screen-card h4{margin:0 0 8px;font-size:18px;color:#177e6b}
+.tab-screen-card.not-held{opacity:.6;background:#fafbfd}
+.tab-screen-teams{display:grid;gap:2px;margin:0 0 8px;font-size:15px}
+.tab-screen-teams span{font-size:11px;color:#8a95a7}
+.tab-screen-side,.tab-screen-judges,.tab-screen-note{margin:4px 0 0;font-size:12px;color:#56647a}
+.tab-projection .tab-screen-grid{grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
+.tab-projection .tab-screen-card h4{font-size:26px}
+.tab-projection .tab-screen-teams{font-size:22px}
+.tab-projection .tab-screen-judges,.tab-projection .tab-screen-side,.tab-projection .tab-screen-note{font-size:16px}
+.tab-items-table{width:auto;min-width:min(100%,460px)}
+.tab-items-table td:first-child{font-size:12px;min-width:210px}
+.tab-items-table th:not(:first-child),.tab-items-table td:not(:first-child){text-align:center;min-width:110px}
+.tab-items-table th small{display:block;font-size:9px;color:#8a95a7;text-transform:uppercase;letter-spacing:.5px}
+.tab-section-row th{background:#f4f6fa!important;text-align:left;font-size:10px!important;letter-spacing:.6px;text-transform:uppercase;color:#4b5970!important}
+input.tab-input-error,.tab-input-error{border-color:#c4493c!important;background:#fff4f2!important}
+input.tab-input-warning{border-color:#d49b36!important;background:#fffaf0!important}
+.tab-net{margin:4px 0;font-size:12px}
+.tab-winner-option{font-size:14px;font-weight:700;color:#263348;border:1px solid #dfe5ee;border-radius:8px;padding:8px 12px}
+.tab-speaker-blocks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px}
+.tab-speaker-blocks td{text-align:center}
+.tab-speaker-blocks td:first-child{text-align:left;font-size:12px}
+.tab-entity.tab-fallen{border-color:#f3dfb8;background:#fffaf0}
+.tab-fallen-pill{margin-left:6px}
+.tab-conflict-row{align-items:flex-start!important}
+.tab-conflict-list{list-style:none;margin:0;padding:0;display:grid;gap:6px;flex:1;font-size:12px}
+.tab-conflict-list li{display:flex;align-items:center;gap:8px}
+.tab-institutions td:first-child{min-width:280px}
+.tab-institutions td:not(:first-child),.tab-institutions th:not(:first-child){width:120px}
+.tab-rubric{display:grid;gap:4px;font-size:12px;color:#4b5970;margin:8px 0 0;padding-left:20px}
+.tab-blind{text-align:center;padding:60px 20px}
+.tab-blind h3{font-size:30px;margin:0 0 10px}
+.tab-blind p{font-size:18px;color:#56647a}
+.tab-projection .tab-chip-select{display:none!important}
+@media print{.tab-chip-select{display:none!important}.tab-round-screen .tab-actions{display:none!important}}
+/* Actas por WhatsApp: links at the desk, inbox and the judges' page on the phone */
+.tab-whatsapp{border:1px solid #cdeedd;background:#f4fbf7;border-radius:10px;padding:10px 14px;margin:10px 0 14px}
+.tab-whatsapp summary,.tab-whatsapp-inbox summary{cursor:pointer;font-weight:750;display:flex;align-items:center;gap:8px;color:#14785f}
+.tab-whatsapp table td{vertical-align:middle;font-size:12px}
+.tab-whatsapp table td:first-child{white-space:nowrap}
+.tab-whatsapp-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tab-whatsapp-actions .button{padding:7px 10px;text-decoration:none}
+.tab-whatsapp-inbox textarea{width:100%;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;border:1px solid #dce3ec;border-radius:8px;padding:8px;margin:6px 0 10px}
+.tab-inbox{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:8px}
+.tab-inbox li{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid #e1e6ee;border-radius:9px;padding:9px 12px;font-size:12px}
+.tab-inbox li>div{flex:1;display:grid;gap:3px;min-width:220px}
+.tab-inbox li.error{border-color:#f1c6c0;background:#fff4f2}
+.tab-inbox-error{color:#a33a30;flex:1}
+.tab-phone-input{max-width:170px}
+.acta-shell{max-width:640px;margin:0 auto;padding:16px 14px 40px;color:#172033}
+.acta-header{padding:6px 2px 12px}
+.acta-header h1{font-size:22px;margin:4px 0 6px;letter-spacing:-.5px}
+.acta-teams{font-size:17px;font-weight:750;margin:0 0 6px}
+.acta-teams span{font-weight:400;color:#748196;font-size:13px;margin:0 4px}
+.acta-card{background:#fff;border:1px solid #e1e6ee;border-radius:12px;padding:14px;margin-bottom:12px}
+.acta-card h2{font-size:15px;margin:0 0 10px}
+.acta-card input,.acta-card textarea{font-size:16px;border:1px solid #d3dbe6;border-radius:8px;padding:9px;background:#fff;color:#172033;min-width:0}
+.acta-card textarea{width:100%;box-sizing:border-box}
+.acta-options{display:grid;gap:8px}
+.acta-option{display:flex;align-items:center;gap:10px;font-size:15px;border:1px solid #dfe5ee;border-radius:10px;padding:11px 12px}
+.acta-option input{width:20px;height:20px;accent-color:#177e6b}
+.acta-options.big .acta-option{font-size:17px;font-weight:750;padding:14px}
+.acta-items{display:grid;grid-template-columns:minmax(0,1fr) 64px 64px;gap:6px 8px;align-items:center}
+.acta-items>b{font-size:12px;text-align:center;color:#4b5970}
+.acta-items h3{grid-column:1/-1;margin:8px 0 0;font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#748196}
+.acta-items>span{font-size:14px;display:grid}
+.acta-items>span small{font-size:11px;color:#8a95a7}
+.acta-items input{width:64px;text-align:center;padding:9px 4px}
+.acta-pairs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.acta-pairs.three{grid-template-columns:repeat(3,minmax(0,1fr))}
+.acta-pairs label,.acta-inline{display:grid;gap:4px;font-size:12px;color:#56647a}
+.acta-pairs input{width:100%;box-sizing:border-box}
+.acta-inline{margin-top:8px}
+.acta-penalties{display:grid;gap:6px;padding:8px 0;border-top:1px solid #edf0f5}
+.acta-penalties:first-of-type{border-top:0}
+.acta-speakers{display:grid;gap:8px;margin-bottom:12px}
+.acta-speaker{border:1px solid #edf0f5;border-radius:10px;padding:8px 10px}
+.acta-speaker .acta-inline{grid-template-columns:1fr 76px;align-items:center;margin:0}
+.acta-speaker .acta-inline span{font-size:14px;color:#172033}
+.acta-roles{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:6px}
+.acta-roles label{display:flex;align-items:center;gap:6px;font-size:13px}
+.acta-roles input{width:18px;height:18px}
+.acta-send{padding:4px 0 12px;display:grid;gap:8px}
+.acta-send-button{font-size:16px;padding:15px;text-decoration:none;background:#1f9d55!important}
+.acta-send-button:disabled{opacity:.45}
+.acta-sent{display:flex;align-items:center;gap:6px;color:#16805f;font-size:13px;margin:0}
+.acta-error{text-align:center;display:grid;justify-items:center;gap:8px;margin-top:40px;color:#a33a30}
+/* Round tables fit a 1366 px laptop: narrower selects, judge names truncated with an ellipsis. */
+.tab-draw td{padding:10px 6px}
+.tab-draw .tab-cell-select{max-width:180px;width:100%}
+.tab-draw td:first-child{width:auto}
+.tab-draw td:first-child .tab-cell-select{max-width:120px;min-width:96px}
+.tab-draw td:nth-child(2) .tab-cell-select,.tab-draw td:nth-child(3) .tab-cell-select{min-width:150px}
+.tab-draw td:nth-child(4) .tab-cell-select{min-width:125px}
+.tab-draw .tab-judges{max-width:none;min-width:180px}
+.tab-draw .tab-chip-select{max-width:140px;text-overflow:ellipsis}
+/* Tabulation UI v2: one blue accent for what can be clicked, green only for what is done, amber for warnings, red for errors */
+.tab-shell,.acta-shell{--tab-accent:#1474BD;--tab-accent-strong:#0f5f9d;--tab-accent-soft:#e8f2fb;--tab-accent-line:#b9d6ef;--tab-ok:#16805f;--tab-ok-soft:#e4f5ed;--tab-ok-line:#a7dcc5;--tab-warn:#885b13;--tab-warn-soft:#fff7e7;--tab-warn-line:#f3dfb8;--tab-danger:#a33a30;--tab-danger-soft:#fff0ee;--tab-danger-line:#f1c6c0;--tab-ink:#172033;--tab-muted:#667388;--tab-line:#e1e6ee;--tab-shadow:0 1px 2px rgba(16,24,40,.04),0 1px 3px rgba(16,24,40,.06);--tab-shadow-lg:0 12px 32px -12px rgba(16,24,40,.28)}
+.tab-shell{background:#f4f6fa}
+.tab-shell .panel,.tab-shell .stat-card{border-color:var(--tab-line);box-shadow:var(--tab-shadow)}
+.tab-shell .panel-title h3{font-size:15px}
+.tab-shell .panel-title p{font-size:12px;line-height:1.5}
+.tab-shell .button{min-height:36px;transition:background-color .15s,border-color .15s,color .15s,box-shadow .15s}
+.tab-shell .button.secondary:hover:not(:disabled){border-color:#c3cedc;background:#f8fafc;color:var(--tab-ink)}
+.tab-shell .button.ghost:hover:not(:disabled){background:#eef2f7;color:var(--tab-ink)}
+.tab-shell .button.primary:hover:not(:disabled){background:var(--tab-accent-strong)}
+.tab-shell .text-button:hover:not(:disabled){text-decoration:underline}
+.tab-shell :is(button,a,summary):focus-visible,.acta-shell :is(button,a,summary):focus-visible{outline:2px solid var(--tab-accent);outline-offset:2px}
+.tab-shell .sidebar :focus-visible{outline-color:#7cc0f5}
+.tab-shell :is(input,select,textarea):focus-visible,.acta-shell :is(input,textarea):focus-visible{outline:none;border-color:var(--tab-accent)!important;box-shadow:0 0 0 3px #1474bd2e}
+.acta-shell label:has(>input:focus-visible){outline:2px solid var(--tab-accent);outline-offset:2px}
+.tab-shell input[type=checkbox],.tab-shell input[type=radio],.acta-shell input[type=checkbox],.acta-shell input[type=radio]{accent-color:var(--tab-accent)}
+.tab-shell .state-pill{font-size:10px;padding:4px 9px}
+.tab-shell .tournament-table-wrap tbody tr:not(.tab-cut):hover td{background:#f8fbff}
+.tab-shell .round-tabs button{min-height:36px;font-size:12px}
+.tab-shell .round-tabs button:hover{border-color:#c3cedc}
+.tab-shell .round-tabs button.selected{border-color:var(--tab-accent);background:var(--tab-accent-soft);color:var(--tab-accent-strong)}
+.tab-tab-count{display:inline-grid;place-items:center;min-width:20px;height:18px;padding:0 6px;border-radius:9px;background:#eef1f6;color:#5b687c;font-size:10px;font-weight:750;font-variant-numeric:tabular-nums}
+.tab-tab-count.ok{background:var(--tab-ok-soft);color:var(--tab-ok)}
+.round-tabs button.selected .tab-tab-count{background:#fff}
+.tab-shell .tab-ballot-list button:hover{border-color:#c3cedc}
+.tab-shell .tab-ballot-list button.selected{border-color:var(--tab-accent);box-shadow:inset 3px 0 var(--tab-accent);background:var(--tab-accent-soft)}
+.tab-shell .tab-list li.current{border-color:var(--tab-accent-line);background:var(--tab-accent-soft)}
+.tab-shell .tab-bulk summary,.tab-shell .tab-log-details summary{color:var(--tab-accent)}
+.tab-shell .tab-draft{border-color:var(--tab-accent-line);box-shadow:0 0 0 3px var(--tab-accent-soft)}
+.tab-shell .tab-judge-chip.chair{border-color:var(--tab-accent-line);background:var(--tab-accent-soft)}
+.tab-shell .tab-aduma{border-color:var(--tab-accent-line);background:linear-gradient(135deg,var(--tab-accent-soft),#fff 60%)}
+.tab-shell .tab-handoff{border-color:var(--tab-accent-line);background:#f7fbfe}
+.tab-shell .tab-round-screen{border-color:var(--tab-accent-line)}
+.tab-shell .tab-screen-card h4{color:var(--tab-accent-strong)}
+.tab-shell .tab-fieldset legend{display:inline-flex;align-items:center;font-size:12px}
+/* Sidebar badges */
+.tab-shell .nav-badge{font-style:normal;font-size:10px;font-weight:800;line-height:1;padding:4px 7px;border-radius:10px;background:#334155;color:#e2e8f0;flex-shrink:0}
+.tab-shell .nav-badge.warn{background:#f2b544;color:#3b2706}
+.tab-shell .nav-badge.info{background:#2f86cf;color:#fff}
+/* Tournament progress */
+.tab-progress{margin:16px 0 0;overflow-x:auto;background:#fff;border:1px solid var(--tab-line);border-radius:12px;box-shadow:var(--tab-shadow);padding:6px 10px}
+.tab-progress ol{list-style:none;margin:0;padding:0;display:flex;min-width:max-content}
+.tab-step{display:flex;align-items:center;flex:1 1 0}
+.tab-step:not(:last-child):after{content:"";flex:1;min-width:16px;height:2px;background:var(--tab-line);margin:0 6px;border-radius:2px}
+.tab-step.done:not(:last-child):after{background:var(--tab-ok-line)}
+.tab-step button{display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:6px;border-radius:8px;color:var(--tab-muted);text-align:left}
+.tab-step button:hover{background:#f1f5f9}
+.tab-step-dot{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;font-size:11px;font-weight:750;background:#fff;border:2px solid #d5dce6;color:#7b879a}
+.tab-step-text{display:grid;line-height:1.25}
+.tab-step-text b{font-size:12px;font-weight:650;color:var(--tab-ink);white-space:nowrap}
+.tab-step-text small{font-size:10px;color:var(--tab-muted);white-space:nowrap}
+.tab-step.done .tab-step-dot{background:var(--tab-ok);border-color:var(--tab-ok);color:#fff}
+.tab-step.done .tab-step-text small{color:var(--tab-ok)}
+.tab-step.active .tab-step-dot{border-color:var(--tab-accent);color:var(--tab-accent);box-shadow:0 0 0 4px var(--tab-accent-soft)}
+.tab-step.draft .tab-step-dot{border-style:dashed;border-color:var(--tab-accent);color:var(--tab-accent)}
+.tab-step.next .tab-step-dot{border-color:var(--tab-accent);background:var(--tab-accent);color:#fff}
+.tab-step:is(.active,.draft,.next) .tab-step-text small{color:var(--tab-accent-strong);font-weight:650}
+.tab-step.pending .tab-step-text b{color:#8a95a7;font-weight:500}
+/* Home: next step */
+.tab-next-step{display:flex;align-items:center;gap:14px;margin:0 0 16px;padding:14px 16px;border:1px solid var(--tab-accent-line);border-radius:12px;background:linear-gradient(135deg,var(--tab-accent-soft),#fff 70%)}
+.tab-next-step>div{flex:1;display:grid;gap:3px;min-width:0}
+.tab-next-step small{font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--tab-accent-strong)}
+.tab-next-step b{font-size:14px;line-height:1.4}
+.tab-next-icon{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;flex-shrink:0;background:var(--tab-accent);color:#fff}
+.tab-next-step.finished{border-color:var(--tab-ok-line);background:linear-gradient(135deg,var(--tab-ok-soft),#fff 70%)}
+.tab-next-step.finished .tab-next-icon{background:var(--tab-ok)}
+.tab-next-step.finished small{color:var(--tab-ok)}
+/* Rounds: grouped toolbar, «Más acciones», draft review and the confirm bar */
+.tab-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:10px 0 14px}
+.tab-toolbar-group{display:flex;flex-wrap:wrap;gap:8px;padding-right:10px;border-right:1px solid var(--tab-line)}
+.tab-toolbar-group:last-of-type{border-right:0;padding-right:0}
+.tab-toolbar .button{padding:9px 12px}
+.tab-menu::details-content{transition-duration:120ms}
+.tab-menu{position:relative;margin-left:auto}
+.tab-menu>summary{list-style:none;cursor:pointer}
+.tab-menu>summary::-webkit-details-marker{display:none}
+.tab-menu[open]>summary{background:#eef2f7;color:var(--tab-ink)}
+.tab-menu-list{position:absolute;z-index:10;top:calc(100% + 6px);right:0;min-width:260px;display:grid;padding:6px;background:#fff;border:1px solid var(--tab-line);border-radius:10px;box-shadow:var(--tab-shadow-lg)}
+.tab-menu-list button{display:flex;align-items:center;gap:9px;border:0;background:transparent;text-align:left;padding:9px 10px;border-radius:7px;font-size:12px;color:var(--tab-ink)}
+.tab-menu-list button:hover{background:#f1f5f9}
+.tab-menu-list button.danger-action{color:var(--tab-danger)}
+.tab-menu-list button.danger-action:hover{background:var(--tab-danger-soft)}
+.tab-menu-list hr{border:0;border-top:1px solid #edf0f5;margin:4px 2px;width:auto}
+.tab-review{display:grid;gap:4px;margin-top:14px;padding:12px 14px;border:1px solid var(--tab-warn-line);background:var(--tab-warn-soft);border-radius:10px}
+.tab-review:has(.tab-review-title.error){border-color:var(--tab-danger-line);background:var(--tab-danger-soft)}
+.tab-review-title{margin:0;font-size:12px;color:var(--tab-warn)}
+.tab-review-title.error{color:var(--tab-danger)}
+.tab-review .tab-issues{margin:0 0 6px}
+.tab-confirm-hint{margin:12px 0 0}
+.tab-confirm-bar,.tab-editor-bar{position:sticky;bottom:0;z-index:4;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:14px -21px -21px;padding:12px 21px;background:rgba(255,255,255,.96);backdrop-filter:blur(6px);border-top:1px solid var(--tab-line);border-radius:0 0 12px 12px;box-shadow:0 -10px 24px -16px rgba(16,24,40,.3)}
+.tab-confirm-status{display:flex;flex-wrap:wrap;gap:6px;margin-right:auto}
+.tab-confirm-bar .tab-acknowledge{margin:0}
+.tab-confirm-bar .tab-big-button{margin-left:auto}
+/* Actas: numbered sections, totals, round progress and the save bar */
+.tab-section-number{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;margin-right:7px;background:var(--tab-accent-soft);color:var(--tab-accent-strong);font-size:10px;font-weight:800}
+.tab-total-row td{font-weight:750;background:#f8fafc;border-top:2px solid #dfe5ee!important;font-variant-numeric:tabular-nums}
+.tab-progressbar{height:6px;margin:-6px 0 12px;border-radius:4px;background:#edf1f6;overflow:hidden}
+.tab-progressbar>span{display:block;height:100%;border-radius:4px;background:var(--tab-accent);transition:width .3s ease}
+.tab-progressbar.complete>span{background:var(--tab-ok)}
+.tab-editor-bar{justify-content:space-between}
+.tab-editor-status{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;font-size:12px}
+.tab-editor-bar .tab-actions{margin:0;align-items:center}
+.tab-unsaved{display:inline-flex;align-items:center;gap:6px;color:var(--tab-warn);font-size:11px;font-weight:750}
+.tab-unsaved:before{content:"";width:7px;height:7px;border-radius:50%;background:#d49b36}
+html:has(.tab-confirm-bar),html:has(.tab-editor-bar){scroll-padding-bottom:90px}
+/* Standings: the break */
+.tab-standings tr.tab-qualified td{background:#f5fbf8}
+.tab-standings tr.tab-qualified td:first-child{box-shadow:inset 3px 0 var(--tab-ok)}
+.tab-shell .tab-cut td{width:auto;padding:0;border-top:0;background:transparent!important}
+.tab-cut td span{display:flex;align-items:center;gap:10px;padding:6px 10px;font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--tab-ok)}
+.tab-cut td span:before,.tab-cut td span:after{content:"";flex:1;border-top:2px dashed var(--tab-ok-line)}
+.tab-projection .tab-cut td span{font-size:14px}
+.tab-shell .panel-title .tab-cut-note{margin-top:3px;color:var(--tab-ok)}
+@media(max-width:760px){
+  .tab-confirm-bar,.tab-editor-bar{margin:14px -15px -15px;padding:10px 15px}
+  .tab-toolbar-group{border-right:0;padding-right:0}
+  .tab-menu-list{position:static;margin-top:6px;min-width:0;box-shadow:none}
+  .tab-next-step{flex-wrap:wrap}
+  .tab-next-step .button{width:100%}
+  .tab-shell .topbar{flex-wrap:wrap;gap:10px;padding:12px 0}
+  .tab-shell .topbar>div:first-child{flex:1 1 100%}
+}
+@media print{.tab-confirm-bar,.tab-editor-bar,.tab-progress,.tab-next-step{display:none!important}}
+/* Judge's phone: compact sticky bar, steps that tick, selected options and a summary before sending */
+html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
+.acta-shell{color:var(--tab-ink)}
+.acta-header{margin-bottom:12px;padding:16px 16px 14px;border-radius:14px;background:linear-gradient(135deg,#0f5f9d,#1474BD);color:#fff;box-shadow:var(--tab-shadow-lg)}
+.acta-header .eyebrow{color:#cfe3f5}
+.acta-header h1{color:#fff}
+.acta-header .acta-teams span{color:#cfe3f5}
+.acta-header .muted{color:#dbeaf7}
+.acta-topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;margin:0 -14px 12px;padding:9px 14px 11px;background:rgba(244,246,250,.95);backdrop-filter:blur(8px);border-bottom:1px solid var(--tab-line)}
+.acta-topbar>div{flex:1;display:grid;min-width:0;line-height:1.3}
+.acta-topbar b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acta-topbar>div span{font-size:12px;color:var(--tab-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.acta-topbar .state-pill{font-size:11px;padding:5px 10px}
+.acta-topbar>i{position:absolute;left:0;bottom:-1px;height:3px;background:var(--tab-accent);transition:width .25s ease}
+.acta-topbar:has(.state-pill.ready)>i{background:var(--tab-ok)}
+.acta-card{border-color:var(--tab-line);box-shadow:var(--tab-shadow)}
+.acta-card h2{display:flex;align-items:center;gap:10px;font-size:16px}
+.acta-card h2 small{font-size:12px;font-weight:500;color:var(--tab-muted)}
+.acta-step{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;font-size:13px;font-weight:750;background:var(--tab-accent-soft);color:var(--tab-accent-strong)}
+.acta-step.done{background:var(--tab-ok);color:#fff}
+.acta-option{min-height:48px;cursor:pointer;background:#fff;transition:border-color .15s,background-color .15s}
+.acta-option:has(input:checked){border-color:var(--tab-accent);background:var(--tab-accent-soft);box-shadow:inset 0 0 0 1px var(--tab-accent)}
+.acta-roles label{min-height:36px;padding:6px 10px;border:1px solid var(--tab-line);border-radius:999px;background:#fff;cursor:pointer}
+.acta-roles label:has(input:checked){border-color:var(--tab-accent);background:var(--tab-accent-soft);color:var(--tab-accent-strong);font-weight:650}
+.acta-card.acta-send{display:grid;gap:10px;padding:14px}
+.acta-card textarea{font-family:inherit}
+.acta-summary{margin:0;border:1px solid var(--tab-line);border-radius:10px;overflow:hidden}
+.acta-summary>div{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;padding:9px 12px;border-top:1px solid #edf0f5;font-size:14px}
+.acta-summary>div:first-child{border-top:0}
+.acta-summary dt{padding-top:1px;font-size:12px;color:var(--tab-muted)}
+.acta-summary dd{margin:0;font-weight:650;overflow-wrap:anywhere}
+.acta-summary em{font-style:normal;font-weight:600;color:var(--tab-warn)}
+.acta-send-button{min-height:52px;border-radius:12px}
