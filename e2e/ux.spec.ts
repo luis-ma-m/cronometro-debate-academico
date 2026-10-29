@@ -64,6 +64,14 @@ test('todas las pantallas: sin errores en consola, controles con nombre y sin de
   await page.locator('.tab-ballot-list li button').first().click();
   await page.locator('.tab-whatsapp-inbox summary').click();
   await audit(page, 'Acta abierta');
+  // The two speakers tables must never spill over each other, at any desktop width.
+  for (const width of [1280, 1440, 1600, 1680, 1920, 2560]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const spill = await page.evaluate(() => [...document.querySelectorAll('.tab-speaker-blocks > div')]
+      .map((block) => (block.querySelector('table')?.getBoundingClientRect().right ?? 0) - block.getBoundingClientRect().right));
+    expect(Math.max(...spill), 'tabla de oradores a ' + width + ' px').toBeLessThanOrEqual(1);
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await nav(page, 'Inicio');
   await page.getByRole('button', { name: 'Comprobar ahora' }).click();
   await expect(page.getByText(/Todo en orden|equipos activos/).first()).toBeVisible();
