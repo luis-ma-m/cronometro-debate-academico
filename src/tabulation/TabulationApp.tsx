@@ -49,6 +49,7 @@ function TabulationShell() {
   const [projection, setProjection] = useState(false);
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [managerConnection, setManagerConnection] = useState<{ connected: boolean; checkedAt: number | null; lastSuccessAt: number | null }>({ connected: false, checkedAt: null, lastSuccessAt: null });
   const tournament = state.tournament;
 
   useEffect(() => {
@@ -56,6 +57,27 @@ function TabulationShell() {
     window.addEventListener('hashchange', onHashChange);
     const timer = window.setInterval(() => setNow(Date.now()), 5000);
     return () => { window.removeEventListener('hashchange', onHashChange); window.clearInterval(timer); };
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    const checkManagerConnection = async () => {
+      try {
+        const response = await fetch('/api?action=health', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
+        if (!response.ok) throw new Error('Health check failed');
+        const body: unknown = await response.json();
+        if (body && typeof body === 'object' && 'ok' in body && (body as { ok?: unknown }).ok === false) throw new Error('Health check failed');
+        const at = Date.now();
+        if (!disposed) setManagerConnection({ connected: true, checkedAt: at, lastSuccessAt: at });
+      } catch {
+        if (!disposed) setManagerConnection((current) => ({ ...current, connected: false, checkedAt: Date.now() }));
+      }
+    };
+    void checkManagerConnection();
+    const interval = window.setInterval(() => void checkManagerConnection(), 15000);
+    const onOnline = () => void checkManagerConnection();
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onOnline);
+    return () => { disposed = true; window.clearInterval(interval); window.removeEventListener('online', onOnline); window.removeEventListener('focus', onOnline); };
   }, []);
   useEffect(() => {
     // Every unexpected error is kept in the log (once per message); none of them stops the page.
@@ -156,6 +178,10 @@ function TabulationShell() {
         </button>;
       })}</nav>
       <div className="sidebar-bottom">
+        <div className={'tab-manager-connection ' + (managerConnection.connected ? 'is-connected' : 'is-disconnected')} role="status" aria-live="polite">
+          <span><span className="tab-manager-connection-dot" />{managerConnection.connected ? 'Gestor y base de datos conectados' : 'Sin conexión con gestor / base de datos'}</span>
+          <small>{managerConnection.lastSuccessAt ? 'Última conexión hace ' + Math.max(0, Math.floor((now - managerConnection.lastSuccessAt) / 1000)) + ' s' : managerConnection.checkedAt ? 'Sin conexión confirmada' : 'Comprobando conexión…'}</small>
+        </div>
         <span className={'connection-dot' + (state.status === 'conflict' || state.status === 'error' || state.readOnly ? ' tab-dot-error' : '')} />
         <span>{saveLabel}</span>
         <span className="tab-operator">Operador: {state.operator || 'sin nombre'}</span>

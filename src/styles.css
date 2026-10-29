@@ -881,3 +881,11 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .acta-summary dd{margin:0;font-weight:650;overflow-wrap:anywhere}
 .acta-summary em{font-style:normal;font-weight:600;color:var(--tab-warn)}
 .acta-send-button{min-height:52px;border-radius:12px}
+
+
+/* Connectivity to the authoritative manager/backend; red is reserved for a failed health check. */
+.tab-manager-connection { display:flex; flex-direction:column; gap:4px; padding:10px 12px; margin:0 0 8px; border:1px solid var(--border, #d8dee8); border-radius:10px; font-size:12px; line-height:1.35; }
+.tab-manager-connection small { opacity:.8; padding-left:13px; }
+.tab-manager-connection-dot { width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:6px; background:#b42318; box-shadow:0 0 0 2px rgba(180,35,24,.12); }
+.tab-manager-connection.is-connected .tab-manager-connection-dot { background:#16803c; box-shadow:0 0 0 2px rgba(22,128,60,.12); }
+.tab-manager-connection.is-disconnected { color:#b42318; border-color:rgba(180,35,24,.35); background:rgba(180,35,24,.06); }
