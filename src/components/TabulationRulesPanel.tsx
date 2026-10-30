@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, RefreshCw, Save } from 'lucide-react';
 import { getTabulationSettings, saveTabulationSettings, type PersistedTabulationSettings } from '../api';
-import { createTabTournament, makeTabId, type TabSettings } from '../tabulation/types';
+import { makeTabId, type TabSettings } from '../tabulation/types';
+import { createTabTournament } from '../tabulation/presets';
 import { RulesView } from '../tabulation/views/RulesView';
 import type { TabStore } from '../tabulation/store';
 
