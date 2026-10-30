@@ -1,5 +1,5 @@
-import { validateJointActa } from './acta';
-import { effectivePenalties, type EffectivePenalties } from './penalties';
+import { validateJointActa } from './acta.js';
+import { effectivePenalties, type EffectivePenalties } from './penalties.js';
 import {
   isFallenAt,
   SPEAKER_ROLES,
@@ -11,9 +11,9 @@ import {
   type TabSpeaker,
   type TabTeam,
   type TabTournament,
-} from './types';
+} from './types.js';
 
-export { effectivePenalties, minorsFromWarnings, penaltyConversionWarning, type EffectivePenalties } from './penalties';
+export { effectivePenalties, minorsFromWarnings, penaltyConversionWarning, type EffectivePenalties } from './penalties.js';
 
 export interface OutcomeContext {
   settings: TabSettings;
