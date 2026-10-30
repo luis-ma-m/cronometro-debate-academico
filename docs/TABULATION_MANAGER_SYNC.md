@@ -636,3 +636,22 @@ Se añade `api/sync-operation-policy.ts` como segunda frontera, separada del val
 La política devuelve códigos diferenciados para sesión ausente, identidad de torneo distinta y operación no permitida. Se añaden pruebas de los límites de autorización. El módulo queda incluido expresamente en `npm run typecheck:api`, además de la suite `npm run test:coverage`.
 
 **Límite deliberado:** esta política todavía no está conectada a un endpoint ni realiza escrituras. El siguiente paso es definir validadores de dominio para publicación de ronda y acta, y después implementar la recepción transaccional con idempotencia, revisión y auditoría. No hay worker HTTP ni ACK remoto. No se han ejecutado migraciones ni escrituras en Neon.
+
+
+## Incremento: validación de dominio de propuestas de ronda
+
+Se añade `api/tabulation-sync-domain.ts` para validar la propuesta exacta que genera `buildOutbox` antes de cualquier futura escritura remota. La validación de dominio es independiente de la validación del sobre/hash y de la política de autorización.
+
+Comprueba, entre otros puntos:
+
+- Identidad canónica del torneo y coincidencia exacta de revisión/fecha base del gestor.
+- Formato y versión de la propuesta, fecha, nombre de ronda y presencia de debates.
+- Existencia y estado activo de salas físicas, equipos y jueces.
+- Una única asignación por sala y por equipo dentro de la ronda.
+- Equipos enfrentados distintos.
+- Ausencia de jueces duplicados o asignados simultáneamente en varias salas.
+- Tamaño mínimo del panel y pertenencia de la presidencia al panel asignado.
+
+Se añaden pruebas unitarias de casos válidos, referencias inexistentes, entidades inactivas, duplicados, paneles insuficientes, identidad y revisión obsoletas. El nuevo módulo se incluye en `npm run typecheck:api`.
+
+**Límite deliberado:** el validador no escribe en PostgreSQL, no publica la ronda y no genera ACK. La publicación continúa siendo una acción explícita del gestor; esta validación será una precondición de la futura transacción de publicación. La política también debe seguir aplicándose después de validar el sobre. No se han ejecutado migraciones ni escrituras en Neon.
