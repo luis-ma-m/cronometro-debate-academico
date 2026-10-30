@@ -65,7 +65,17 @@ describe('panel → tabulation', () => {
     const handoff = buildPanelHandoff(source, now);
     expect(handoff.tournamentId).toBe('remote-tournament-123');
     const tab = tournamentFromHandoff(handoff, 'ledu-groups', now, 1);
-    expect(tab.panelLink).toEqual({ tournamentName: 'Torneo de prueba', linkedAt: now, remoteId: 'remote-tournament-123' });
+    expect(tab.panelLink).toEqual({
+      tournamentName: 'Torneo de prueba',
+      linkedAt: now,
+      remoteId: 'remote-tournament-123',
+      idMap: {
+        teams: { t1: 't1', t2: 't2', t3: 't3', t4: 't4' },
+        speakers: { s1: 's1' },
+        judges: { j1: 'j1', j2: 'j2', j3: 'j3' },
+        venues: { 'physical-a1': 'physical-a1', 'physical-a2': 'physical-a2' },
+      },
+    });
   });
 
   it('refuses to merge a handoff from another remote tournament, even when the name matches', () => {
@@ -87,6 +97,35 @@ describe('panel → tabulation', () => {
     expect(result.tournament).toBe(local);
   });
 
+
+
+  it('links an existing local tournament only through the reviewed map and remaps references', () => {
+    const local = createTabTournament('Copia local', 'ledu-groups', now, 1);
+    local.teams = [{ id: 'local-team', name: 'Equipo A', institution: 'Universidad A', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] }];
+    local.speakers = [{ id: 'local-speaker', teamId: 'local-team', name: 'Ana' }];
+    local.judges = [{ id: 'local-judge', name: 'Juez 1', institution: 'LEDU', active: true, rating: 5, canChair: false, incompatibleJudgeIds: [], unavailableRoundIds: [] }];
+    local.venues = [{ id: 'local-venue', name: 'Sala A1', active: true }];
+    const remote = panel();
+    remote.teams = [{ id: 'remote-team', name: 'Equipo A', institution: 'Universidad A', active: true, incompatibleJudgeIds: ['remote-judge'] }];
+    remote.speakers = [{ id: 'remote-speaker', teamId: 'remote-team', name: 'Ana' }];
+    remote.judges = [{ id: 'remote-judge', name: 'Juez 1', institution: 'LEDU', active: true, incompatibleJudgeIds: [] }];
+    remote.physicalRooms = [{ id: 'remote-venue', slug: 'sala-a1', name: 'Sala A1', active: true, createdAt: now, updatedAt: now }];
+    const handoff = buildPanelHandoff({ ...remote, remoteId: 'remote-tournament-123' }, now);
+    const idMap = {
+      teams: { 'local-team': 'remote-team' },
+      speakers: { 'local-speaker': 'remote-speaker' },
+      judges: { 'local-judge': 'remote-judge' },
+      venues: { 'local-venue': 'remote-venue' },
+    };
+    const result = mergeHandoff(local, handoff, now, idMap);
+    expect(result.issues).toEqual([]);
+    expect(result.tournament.teams.map((item) => item.id)).toEqual(['local-team']);
+    expect(result.tournament.speakers).toEqual([{ id: 'local-speaker', teamId: 'local-team', name: 'Ana' }]);
+    expect(result.tournament.teams[0].incompatibleJudgeIds).toEqual(['local-judge']);
+    expect(result.tournament.judges[0]).toMatchObject({ id: 'local-judge', rating: 5, canChair: false });
+    expect(result.tournament.venues.map((item) => item.id)).toEqual(['local-venue']);
+    expect(result.tournament.panelLink?.idMap).toEqual(idMap);
+  });
 
   it('suggests possible entity matches without accepting them', () => {
     const local = createTabTournament('Copia local', 'ledu-groups', now, 1);
