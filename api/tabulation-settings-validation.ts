@@ -71,6 +71,7 @@ export function validateTabulationSettings(value: unknown): TabSettings {
     rubricIds.add(row.id);
   }
   if (!Array.isArray(input.bracketSeedOrder) || input.bracketSeedOrder.length > 32 ||
+      new Set(input.bracketSeedOrder).size !== input.bracketSeedOrder.length ||
       input.bracketSeedOrder.some((item) => !Number.isInteger(item) || (item as number) < 1 || (item as number) > 32)) {
     throw new TabulationSettingsValidationError("El orden de cabezas de serie no es válido.");
   }
