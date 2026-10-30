@@ -105,8 +105,14 @@ function validateResult(value: unknown, context: TabulationActaDomainContext): T
   }
   const ballots = value.ballots as unknown[], seen = new Set<string>();
   for (const ballot of ballots) {
-    if (!record(ballot) || !onlyKeys(ballot, ["judgeId", "totals", "speeches", "winnerTeamId"]) || !text(ballot.judgeId) || !judgeIds.has(ballot.judgeId)) {
-      issues.push("Una papeleta pertenece a un juez que no está asignado al debate."); continue;
+    if (!record(ballot)) {
+      issues.push("Una papeleta no tiene una estructura válida.");
+      continue;
+    }
+    if (!onlyKeys(ballot, ["judgeId", "totals", "speeches", "winnerTeamId"])) issues.push("La papeleta contiene campos desconocidos.");
+    if (!text(ballot.judgeId) || !judgeIds.has(ballot.judgeId)) {
+      issues.push("Una papeleta pertenece a un juez que no está asignado al debate.");
+      continue;
     }
     if (seen.has(ballot.judgeId)) issues.push("Un juez tiene más de una papeleta para el mismo debate.");
     seen.add(ballot.judgeId);
