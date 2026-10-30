@@ -577,3 +577,18 @@ La propuesta local de ronda que se envía al gestor incluye, cuando el torneo es
 - Esta comprobación es una precondición para la revisión/publicación: no publica ni guarda asignaciones automáticamente. El operador todavía debe revisar la propuesta, confirmarla y guardar los cambios desde el gestor.
 
 Este control evita aplicar cruces a otro torneo o sobre una revisión que cambió después de generar el sorteo. No sustituye la futura publicación remota transaccional ni la reconciliación multi-dispositivo.
+
+
+## Incremento: infraestructura de outbox local duradera
+
+Se añade `src/tabulation/syncOutbox.ts` como infraestructura independiente del `TabStore` y de `localStorage`:
+
+- Persistencia en IndexedDB (`ledu-tabulation-sync-v1`), separada de los datos de torneo y de las copias de seguridad existentes.
+- Sobre de operación con `operationId`, `tournamentId`, tipo/ID de entidad, operación, `baseRevision`, payload, hash SHA-256, estado, intentos y marcas de tiempo.
+- Serialización JSON determinista para calcular el hash; se rechazan payloads no serializables o superiores a 1 MB.
+- Claim atómico en transacción read-write de IndexedDB: solo se entrega la operación pendiente más antigua de cada torneo. Una operación en conflicto o fallida bloquea las posteriores de ese torneo, no las de otros torneos.
+- Lease temporal y `workerId` para evitar que otra pestaña complete o libere una operación reclamada por un worker distinto. Los leases expirados pueden recuperarse sin robar operaciones activas.
+- Los reintentos conservan el mismo `operationId` y hash. La operación solo se elimina mediante `acknowledge`, que exige el worker propietario; el adaptador futuro deberá llamarlo exclusivamente tras confirmar el commit remoto o consultar idempotencia.
+- Los conflictos (`REVISION_CONFLICT`) y errores semánticos permanecen en cola para intervención; no hay política last-write-wins.
+
+**Límite deliberado de esta entrega:** esta es la capa de almacenamiento y ciclo de vida de la cola, no un sincronizador remoto completo. Todavía no está conectada a las ediciones de actas, reglas o rondas; no hay worker HTTP, endpoint de publicación ni UI de estados. Por tanto, no se encolan ni se transmiten operaciones automáticamente y no debe mostrarse «sincronizado». Tampoco se implementan aún coalescing de upserts ni dependencias entre entidades. Esos pasos requieren contratos de API y validación de servidor antes de activar el envío.
