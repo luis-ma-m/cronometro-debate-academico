@@ -5,6 +5,7 @@ import { createTimer, LEDU_PHASES } from '../timer';
 import { applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, tournamentFromHandoff, writeHandoff } from './panelBridge';
 import { memoryStorage } from './store';
 import { qualifyingRound } from './test-fixtures';
+import { createTabTournament } from './presets';
 import type { TabTournament } from './types';
 
 const now = 1_800_000_000_000;
