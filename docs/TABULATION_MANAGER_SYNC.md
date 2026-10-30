@@ -607,3 +607,12 @@ Se añade `api/sync-operation-validation.ts` como frontera de validación del so
 Se añaden pruebas para protocolo/versiones, UUID, IDs, revisiones, pares operación-entidad, hash alterado, payload no JSON, tamaño y claves especiales.
 
 **Límite deliberado:** esto valida únicamente el sobre de transporte. No autentica sesión, no comprueba permisos/relaciones de dominio, no consulta ni modifica PostgreSQL y no implementa endpoint ni worker HTTP. Las validaciones semánticas de cada tipo de operación y la escritura deben realizarse dentro de una transacción de servidor con identidad, revisión e idempotencia; no se debe conectar todavía el worker ni confirmar operaciones desde esta capa. El contrato tampoco convierte al gestor singleton en multi-torneo.
+
+
+## Corrección: canonicalización idéntica en cliente y servidor
+
+La revisión del contrato encontró un caso límite importante: al canonicalizar un objeto JSON con una clave literal `__proto__`, la outbox del navegador construía el objeto normal `{}` y podía invocar el setter heredado en vez de conservar la clave. El validador de servidor ya utilizaba objetos sin prototipo, por lo que ambos lados podían calcular hashes diferentes para el mismo payload.
+
+Se corrige la outbox para construir los objetos canonicalizados con prototipo nulo, preservando literalmente `__proto__` sin modificar prototipos. Se añaden pruebas para claves especiales y una prueba cruzada que exige que cliente y servidor produzcan exactamente el mismo SHA-256.
+
+Esta corrección no amplía el alcance funcional: no hay endpoint ni worker, y el ACK sigue reservado a una confirmación remota real.
