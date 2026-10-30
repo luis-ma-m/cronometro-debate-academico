@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assertSyncOperationAuthorized, SyncAuthorizationError } from "./sync-operation-policy.js";
 import {
   canonicalSyncPayload,
   createSyncPayloadHash,
@@ -68,5 +69,65 @@ describe("sync operation transport contract", () => {
     const payload = JSON.parse('{"__proto__":{"polluted":true},"safe":1}') as Record<string, unknown>;
     expect(canonicalSyncPayload(payload)).toBe('{"__proto__":{"polluted":true},"safe":1}');
     expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+});
+
+
+describe("sync operation authorization policy", () => {
+  const operation = (overrides: Record<string, unknown> = {}) =>
+    validateSyncOperationEnvelope(validEnvelope(overrides));
+
+  const context = {
+    authenticatedManager: true,
+    canonicalTournamentId: "00000000-0000-4000-8000-000000000001",
+  };
+
+  it("allows only explicit round publication and acta replacement for the canonical tournament", () => {
+    expect(() => assertSyncOperationAuthorized(operation(), context)).not.toThrow();
+    const actaPayload = { source: "tabulation-acta" };
+    expect(() => assertSyncOperationAuthorized(operation({
+      entityType: "acta",
+      entityId: "acta-1",
+      operation: "replace-acta",
+      payload: actaPayload,
+      payloadHash: createSyncPayloadHash(actaPayload),
+    }), context)).not.toThrow();
+  });
+
+  it.each([
+    ["unauthenticated manager session", { authenticatedManager: false, canonicalTournamentId: context.canonicalTournamentId }, "UNAUTHORIZED"],
+    ["different canonical tournament", { ...context, canonicalTournamentId: "00000000-0000-4000-8000-000000000002" }, "TOURNAMENT_MISMATCH"],
+  ] as const)("rejects %s", (_label, authContext, code) => {
+    try {
+      assertSyncOperationAuthorized(operation(), authContext);
+      throw new Error("Expected authorization to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SyncAuthorizationError);
+      expect((error as SyncAuthorizationError).code).toBe(code);
+    }
+  });
+
+  it("rejects generic upserts because they could bypass manager-owned entity authority", () => {
+    expect(() => assertSyncOperationAuthorized(operation({
+      operation: "upsert",
+      entityType: "team",
+    }), context)).toThrowError(/upserts genéricos/);
+  });
+
+  it("rejects settings writes from Tabulation because the manager is the sole editor", () => {
+    const payload = { presetId: "ledu-groups" };
+    expect(() => assertSyncOperationAuthorized(operation({
+      operation: "settings",
+      entityType: "settings",
+      payload,
+      payloadHash: createSyncPayloadHash(payload),
+    }), context)).toThrowError(/autoritativas en Gestor/);
+  });
+
+  it("rejects operation/entity combinations not authorized by the authority matrix", () => {
+    expect(() => assertSyncOperationAuthorized(operation({
+      operation: "publish-round",
+      entityType: "acta",
+    }), context)).toThrowError(SyncAuthorizationError);
   });
 });
