@@ -50,7 +50,7 @@ describe("validateTabulationActaResult", () => {
     expect(() => validateTabulationActaResult({
       ...payload,
       result: { ...payload.result, ballots: [{ ...ballot, unexpected: true }, ...payload.result.ballots.slice(1)] },
-    }, context)).toThrow("no está asignado");
+    }, context)).toThrow("campos desconocidos");
   });
   it("rejects joint acta rubric items outside the configured rubric", () => {
     const { context, payload } = fixture();
