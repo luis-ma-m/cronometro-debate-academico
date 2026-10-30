@@ -130,6 +130,14 @@ export function validatePublishedRoundPayload(
             continue;
           }
           if (seenJudges.has(judgeId)) issues.push(prefix + "contiene jueces duplicados.");
+          const candidateJudge = judges.get(judgeId);
+          for (const previousJudgeId of seenJudges) {
+            const previousJudge = judges.get(previousJudgeId);
+            if (candidateJudge?.incompatibleJudgeIds?.includes(previousJudgeId)
+              || previousJudge?.incompatibleJudgeIds?.includes(judgeId)) {
+              issues.push(prefix + "hay dos jueces incompatibles en el mismo panel.");
+            }
+          }
           if (usedJudges.has(judgeId)) issues.push(prefix + "un juez aparece asignado en más de un debate de la misma ronda.");
           seenJudges.add(judgeId);
           usedJudges.add(judgeId);
