@@ -194,6 +194,13 @@ export function mergeHandoff(
       for (const item of localItems) if (remoteIds.has(item.id)) idMap[kind][item.id] = item.id;
     }
   }
+  if (!handoff.tournamentId) {
+    // Legacy/demo hand-offs keep their historical same-ID behavior; they do not claim a canonical remote identity.
+    for (const kind of ['teams', 'speakers', 'judges', 'venues'] as const) {
+      const remoteItems = kind === 'teams' ? handoff.teams : kind === 'speakers' ? handoff.speakers : kind === 'judges' ? handoff.judges : handoff.venues;
+      for (const item of remoteItems) idMap[kind][item.id] = item.id;
+    }
+  }
 
   if (handoff.tournamentId) {
     const mapIssues = validatePanelEntityIdMap(tournament, handoff, idMap);
@@ -303,8 +310,12 @@ export function mergeHandoff(
 
 export function tournamentFromHandoff(handoff: PanelHandoff, presetId: PresetId, now = Date.now(), seed = randomSeed()): TabTournament {
   const created = createTabTournament(handoff.tournamentName, presetId, now, seed);
-  const linked = handoff.tournamentId
-    ? { ...created, panelLink: {
+  // Import through the legacy same-ID path first, then attach the canonical identity and its exact map.
+  const imported = mergeHandoff(created, { ...handoff, tournamentId: undefined }, now).tournament;
+  if (!handoff.tournamentId) return imported;
+  return {
+    ...imported,
+    panelLink: {
       tournamentName: handoff.tournamentName,
       linkedAt: now,
       remoteId: handoff.tournamentId,
@@ -314,9 +325,8 @@ export function tournamentFromHandoff(handoff: PanelHandoff, presetId: PresetId,
         judges: Object.fromEntries(handoff.judges.map((item) => [item.id, item.id])),
         venues: Object.fromEntries(handoff.venues.map((item) => [item.id, item.id])),
       },
-    } }
-    : created;
-  return mergeHandoff(linked, handoff, now).tournament;
+    },
+  };
 }
 
 export interface OutboxResult { outbox: PanelOutbox | null; issues: string[]; warnings: string[] }
