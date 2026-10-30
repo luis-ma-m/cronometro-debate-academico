@@ -1,5 +1,5 @@
-import { createTabTournament } from './presets';
-import { isFallenAt, type PresetId, type TabBallot, type TabDebate, type TabDebateResult, type TabJointActa, type TabJudge, type TabRound, type TabTeam, type TabTournament } from './types';
+import { createTabTournament } from './presets.js';
+import { isFallenAt, type PresetId, type TabBallot, type TabDebate, type TabDebateResult, type TabJointActa, type TabJudge, type TabRound, type TabTeam, type TabTournament } from './types.js;
 
 /** Deterministic fixtures shared by the tabulation tests. */
 export function team(id: string, institution = 'Inst ' + id, extra: Partial<TabTeam> = {}): TabTeam {
