@@ -1,4 +1,4 @@
-import type { TabPenalties, TabSettings, WarningConversion } from './types';
+import type { TabPenalties, TabSettings, WarningConversion } from './types.js;
 
 export interface EffectivePenalties {
   warnings: number;
