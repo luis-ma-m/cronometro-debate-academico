@@ -60,24 +60,57 @@ function TabulationShell() {
   }, []);
   useEffect(() => {
     let disposed = false;
+    let checking = false;
+    let activeController: AbortController | null = null;
     const checkManagerConnection = async () => {
+      // Do not overlap polls or let a slow response overwrite a newer result.
+      if (disposed || checking || document.visibilityState === 'hidden') return;
+      checking = true;
+      const controller = new AbortController();
+      activeController = controller;
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
       try {
-        const response = await fetch('/api?action=health', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
+        const response = await fetch('/api?action=health', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: controller.signal,
+        });
         if (!response.ok) throw new Error('Health check failed');
         const body: unknown = await response.json();
-        if (body && typeof body === 'object' && 'ok' in body && (body as { ok?: unknown }).ok === false) throw new Error('Health check failed');
+        if (!body || typeof body !== 'object' || !('ok' in body) || (body as { ok?: unknown }).ok !== true) {
+          throw new Error('Health check failed');
+        }
         const at = Date.now();
-        if (!disposed) setManagerConnection({ connected: true, checkedAt: at, lastSuccessAt: at });
+        if (!disposed && activeController === controller) {
+          setManagerConnection({ connected: true, checkedAt: at, lastSuccessAt: at });
+        }
       } catch {
-        if (!disposed) setManagerConnection((current) => ({ ...current, connected: false, checkedAt: Date.now() }));
+        if (!disposed && activeController === controller) {
+          setManagerConnection((current) => ({ ...current, connected: false, checkedAt: Date.now() }));
+        }
+      } finally {
+        window.clearTimeout(timeout);
+        if (activeController === controller) activeController = null;
+        checking = false;
       }
     };
     void checkManagerConnection();
     const interval = window.setInterval(() => void checkManagerConnection(), 15000);
     const onOnline = () => void checkManagerConnection();
+    const onFocus = () => void checkManagerConnection();
+    const onVisibilityChange = () => { if (document.visibilityState === 'visible') void checkManagerConnection(); };
     window.addEventListener('online', onOnline);
-    window.addEventListener('focus', onOnline);
-    return () => { disposed = true; window.clearInterval(interval); window.removeEventListener('online', onOnline); window.removeEventListener('focus', onOnline); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      disposed = true;
+      activeController?.abort();
+      window.clearInterval(interval);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
   useEffect(() => {
     // Every unexpected error is kept in the log (once per message); none of them stops the page.
@@ -179,8 +212,8 @@ function TabulationShell() {
       })}</nav>
       <div className="sidebar-bottom">
         <div className={'tab-manager-connection ' + (managerConnection.connected ? 'is-connected' : 'is-disconnected')} role="status" aria-live="polite">
-          <span><span className="tab-manager-connection-dot" />{managerConnection.connected ? 'Gestor y base de datos conectados' : 'Sin conexión con gestor / base de datos'}</span>
-          <small>{managerConnection.lastSuccessAt ? 'Última conexión hace ' + Math.max(0, Math.floor((now - managerConnection.lastSuccessAt) / 1000)) + ' s' : managerConnection.checkedAt ? 'Sin conexión confirmada' : 'Comprobando conexión…'}</small>
+          <span><span className="tab-manager-connection-dot" />{managerConnection.connected ? 'API, Neon y Redis disponibles' : 'Sin conexión con el servidor'}</span>
+          <small>{managerConnection.lastSuccessAt ? 'Último health correcto hace ' + Math.max(0, Math.floor((now - managerConnection.lastSuccessAt) / 1000)) + ' s' : managerConnection.checkedAt ? 'Sin conexión confirmada' : 'Comprobando disponibilidad…'}</small>
         </div>
         <span className={'connection-dot' + (state.status === 'conflict' || state.status === 'error' || state.readOnly ? ' tab-dot-error' : '')} />
         <span>{saveLabel}</span>
