@@ -118,6 +118,10 @@ export interface PanelOutbox {
   format: 'ledu-tabulacion-outbox';
   version: 1;
   createdAt: number;
+  /** Canonical identity and base revision of the manager snapshot used to create this proposal. */
+  tournamentId?: string;
+  basePanelRevision?: number;
+  basePanelUpdatedAt?: number;
   tabTournamentName: string;
   panelTournamentName: string | null;
   roundName: string;
@@ -357,6 +361,13 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   const venues = new Map(tournament.venues.map((venue) => [venue.id, venue.name]));
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
   const debates: PanelOutboxDebate[] = [];
+  const idMap = tournament.panelLink?.idMap;
+  const remoteId = (kind: keyof PanelEntityIdMap, localId: string): string | null => {
+    if (!tournament.panelLink?.remoteId) return localId;
+    // Early linked copies used identical local/manager IDs before the explicit map existed.
+    if (!idMap) return localId;
+    return idMap[kind][localId] ?? null;
+  };
   let fallen = 0;
   for (const debate of round.debates) {
     const [a, b] = debate.teamIds;
@@ -366,13 +377,22 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
     if (!a || !b) { issues.push(venueName + ': faltan equipos.'); continue; }
     const favor = debate.favorTeamId ?? a;
     const panel = tournament.settings.conflictPolicy === 'lastResort' ? panelAcceptedJudges(tournament, debate, venueName, warnings) : debate;
+    const physicalRoomId = remoteId('venues', debate.venueId);
+    const teamFavorId = remoteId('teams', favor);
+    const teamContraId = remoteId('teams', favor === a ? b : a);
+    const judgeIds = panel.judgeIds.map((id) => remoteId('judges', id));
+    const chairId = panel.chairId ? remoteId('judges', panel.chairId) : '';
+    if (!physicalRoomId) issues.push(venueName + ': la sala local «' + debate.venueId + '» no tiene correspondencia con una sala del gestor.');
+    if (!teamFavorId || !teamContraId) issues.push(venueName + ': algún equipo no tiene correspondencia con el gestor.');
+    if (judgeIds.some((id) => !id)) issues.push(venueName + ': algún juez no tiene correspondencia con el gestor.');
+    if (panel.chairId && !chairId) issues.push(venueName + ': la presidencia no tiene correspondencia con el gestor.');
     debates.push({
-      physicalRoomId: debate.venueId,
+      physicalRoomId: physicalRoomId ?? debate.venueId,
       venueName,
-      teamFavorId: favor,
-      teamContraId: favor === a ? b : a,
-      judgeIds: [...panel.judgeIds].sort(),
-      chairId: panel.chairId,
+      teamFavorId: teamFavorId ?? favor,
+      teamContraId: teamContraId ?? (favor === a ? b : a),
+      judgeIds: judgeIds.filter((id): id is string => Boolean(id)).sort(),
+      chairId: chairId ?? '',
       sidesProvisional: !debate.favorTeamId,
     });
   }
@@ -386,6 +406,9 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       format: 'ledu-tabulacion-outbox',
       version: 1,
       createdAt: now,
+      ...(tournament.panelLink?.remoteId ? { tournamentId: tournament.panelLink.remoteId } : {}),
+      ...(typeof tournament.panelLink?.remoteRevision === 'number' ? { basePanelRevision: tournament.panelLink.remoteRevision } : {}),
+      ...(typeof tournament.panelLink?.remoteUpdatedAt === 'number' ? { basePanelUpdatedAt: tournament.panelLink.remoteUpdatedAt } : {}),
       tabTournamentName: tournament.name,
       panelTournamentName: tournament.panelLink?.tournamentName ?? null,
       roundName: round.name,
@@ -435,6 +458,23 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const issues: string[] = [];
   const round = panel.rounds.find((item) => item.id === panelRoundId);
   if (!round) return { rooms: null, issues: ['Selecciona una ronda del panel.'], summary: [], changed: 0 };
+  if (outbox.tournamentId && panel.remoteId !== outbox.tournamentId) {
+    return { rooms: null, issues: ['La propuesta pertenece a otra identidad de torneo o el gestor no tiene una identidad verificable. No se ha aplicado ningún cambio.'], summary: [], changed: 0 };
+  }
+  if (!outbox.tournamentId && panel.remoteId) {
+    return { rooms: null, issues: ['La propuesta no contiene identidad canónica del torneo. Vuelve a sincronizar Tabulación con el gestor antes de cargar la ronda.'], summary: [], changed: 0 };
+  }
+  if (outbox.tournamentId) {
+    if (!Number.isInteger(outbox.basePanelRevision)) {
+      return { rooms: null, issues: ['La propuesta no contiene la revisión base del gestor. Actualiza Tabulación antes de publicar la ronda.'], summary: [], changed: 0 };
+    }
+    if (panel.revision !== outbox.basePanelRevision) {
+      return { rooms: null, issues: ['El gestor ha cambiado desde que se generó esta ronda (revisión ' + outbox.basePanelRevision + ' → ' + panel.revision + '). Actualiza Tabulación, revisa los cambios y genera/publica de nuevo la propuesta.'], summary: [], changed: 0 };
+    }
+    if (outbox.basePanelUpdatedAt !== undefined && panel.updatedAt !== outbox.basePanelUpdatedAt) {
+      return { rooms: null, issues: ['La fecha de actualización del gestor no coincide con la revisión base de la propuesta. Actualiza Tabulación antes de continuar.'], summary: [], changed: 0 };
+    }
+  }
   const physicalRooms = new Map(panel.physicalRooms.map((physical) => [physical.id, physical]));
   const teams = new Map(panel.teams.map((team) => [team.id, team]));
   const judges = new Set(panel.judges.map((judge) => judge.id));
