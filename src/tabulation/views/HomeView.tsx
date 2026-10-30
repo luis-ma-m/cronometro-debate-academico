@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ArrowRight, Check, ClipboardList, Database, Download, Flag, Gavel, Plus, RotateCcw, ShieldCheck, Sparkles, Stethoscope, Trash2, Trophy, Upload, Users } from 'lucide-react';
 import { tournamentChampion } from '../bracket';
+import { PanelLinkReview } from '../PanelLinkReview';
 import { parseBackupFile } from '../emergency';
 import { downloadEmergencyCopy } from '../ErrorBoundary';
 import { checkIntegrity, type IntegrityReport } from '../integrity';
@@ -11,7 +12,7 @@ import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS } from '../pres
 import { roundIsComplete, type DebateOutcome } from '../results';
 import { createSampleTournament } from '../sample';
 import { MAX_BACKUPS, type TabStore, type TabStoreState } from '../store';
-import { eliminationRounds, isFallenAt, qualifyingRounds, type PresetId, type TabTournament } from '../types';
+import { eliminationRounds, isFallenAt, qualifyingRounds, type PresetId, type TabTournament, type PanelEntityIdMap } from '../types';
 import { BUILD_INFO, exportTournamentCopy, Field, formatNumber, IssueList, Notice, type NoticeKind } from '../ui';
 
 type CreatablePreset = Exclude<PresetId, 'custom'>;
@@ -59,6 +60,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const [presetId, setPresetId] = useState<CreatablePreset>('ledu-groups');
   const [operator, setOperator] = useState(state.operator);
   const [handoffVersion, setHandoffVersion] = useState(0);
+  const [showLinkReview, setShowLinkReview] = useState(false);
   const [backupVersion, setBackupVersion] = useState(0);
   const [diagnosis, setDiagnosis] = useState<{ integrity: IntegrityReport; log: LogVerification & { issues: string[] } } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -129,6 +131,21 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     notify('Participantes actualizados: ' + merged.added + ' nuevos y ' + merged.updated + ' modificados.' + (merged.warnings.length ? ' ' + merged.warnings.join(' ') : ''), merged.warnings.length ? 'warning' : 'success');
   };
 
+  const linkExistingFromPanel = (idMap: PanelEntityIdMap) => {
+    if (!handoff || !tournament || readOnlyNotice()) return;
+    const merged = mergeHandoff(tournament, handoff, Date.now(), idMap);
+    if (merged.issues.length) { notify(merged.issues.join(' '), 'error'); return; }
+    store.backup('Antes de vincular con el panel');
+    if (!store.update(() => merged.tournament, { type: 'tournament.link', message: 'Torneo local vinculado al panel mediante correspondencias revisadas.' })) {
+      notify('No se ha podido guardar la vinculación. Los datos locales no se han modificado.', 'error');
+      return;
+    }
+    clearHandoff(window.localStorage);
+    setHandoffVersion((value) => value + 1);
+    setShowLinkReview(false);
+    notify('Torneo vinculado. Se han conservado los IDs locales y se han importado las entidades remotas no vinculadas.', 'success');
+  };
+
   const importFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -175,10 +192,24 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       <div className="tab-actions">
         <Field label="Formato"><select value={presetId} onChange={(event) => setPresetId(event.target.value as CreatablePreset)}>{PRESET_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></Field>
         <button type="button" className="button primary" onClick={createFromPanel}><Plus size={16} /> Crear torneo con estos datos</button>
-        {tournament && <button type="button" className="button secondary" onClick={mergeFromPanel}><RotateCcw size={16} /> Actualizar «{tournament.name}»</button>}
-        <button type="button" className="text-button" onClick={() => { clearHandoff(window.localStorage); setHandoffVersion((value) => value + 1); }}>Descartar</button>
+        {tournament && !tournament.panelLink?.remoteId && handoff.tournamentId && !tournament.panelLink
+          && <button type="button" className="button secondary" onClick={() => setShowLinkReview(true)}>Vincular torneo existente con revisión</button>}
+        {tournament && ((!handoff.tournamentId && !tournament.panelLink?.remoteId)
+          || (handoff.tournamentId && tournament.panelLink?.remoteId === handoff.tournamentId))
+          && <button type="button" className="button secondary" onClick={mergeFromPanel}><RotateCcw size={16} /> Actualizar «{tournament.name}»</button>}
+        {tournament && handoff.tournamentId && tournament.panelLink?.remoteId && tournament.panelLink.remoteId !== handoff.tournamentId
+          && <p className="muted">Este snapshot pertenece a otra identidad remota. No se puede aplicar a «{tournament.name}».</p>}
+        {tournament && handoff.tournamentId && tournament.panelLink && !tournament.panelLink.remoteId
+          && <p className="muted">Este torneo conserva un vínculo antiguo sin identidad verificable. Para evitar una asociación incorrecta, crea una copia nueva vinculada desde el panel.</p>}
+        <button type="button" className="text-button" onClick={() => { clearHandoff(window.localStorage); setHandoffVersion((value) => value + 1); setShowLinkReview(false); }}>Descartar</button>
       </div>
     </section>}
+    {showLinkReview && tournament && handoff?.tournamentId && !tournament.panelLink && <PanelLinkReview
+      tournament={tournament}
+      handoff={handoff}
+      onCancel={() => setShowLinkReview(false)}
+      onConfirm={linkExistingFromPanel}
+    />}
 
     {tournament && <section className="panel">
       <div className="panel-title"><div><h3>{tournament.name}</h3><p>{PRESET_OPTIONS.find((option) => option.id === tournament.settings.presetId)?.label ?? 'Reglas personalizadas'} · {tournament.settings.stage === 'groups' ? 'liguilla de grupos' : 'sistema suizo'}{tournament.sample ? ' · torneo de ejemplo' : ''}</p></div></div>
