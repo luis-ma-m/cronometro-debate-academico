@@ -22,7 +22,8 @@ const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 /** Characters that encode a group of 0–8 bytes (a whole group of 8 takes 11). */
 const GROUP_CHARS = [0, 2, 3, 5, 6, 7, 9, 10, 11];
 const LINK_V1 = /^#?A1-([0-9A-Za-z]+)-([0-9a-fA-F]{14})$/;
-const LINK_V2 = /^#?A2-([0-9A-Za-z]+)-([0-9a-fA-F]{8})$/;
+const LINK_V2 = /^#?A2-([0-9A-Za-z]+)-([0-9a-fA-F]{8})$/; // Legacy links remain valid.
+const LINK_V2_COMPACT = /^#?A2([0-9A-Za-z]+)$/;
 const CODE_V1 = /^ACTA1-([0-9A-Za-z]+)-([0-9a-fA-F]{14})$/;
 const CODE_V2 = /^ACTA2-([0-9A-Za-z]+)-([0-9a-fA-F]{14})$/;
 const CODES = /ACTA([12])-([0-9A-Za-z]+)-([0-9a-fA-F]{14})(?![0-9A-Za-z])/g;
@@ -234,7 +235,9 @@ export function buildActaLink(tournament: TabTournament, round: TabRound, debate
     rulesDiff(actaRules(tournament.settings)),
   ];
   const data = pack(compact, base62Encode);
-  return { url: baseUrl.replace(/\/+$/, '') + ACTA_PAGE_PATH + '#A2-' + data + '-' + cyrb53(data).slice(0, 8), link: linkFromCompact(compact)! };
+  // Keep the fragment alphanumeric and contiguous: WhatsApp iOS otherwise stops auto-linking at the first hyphen.
+  // The final 8 characters are the checksum, so no separator is needed.
+  return { url: baseUrl.replace(/\/+$/, '') + ACTA_PAGE_PATH + '#A2' + data + cyrb53(data).slice(0, 8), link: linkFromCompact(compact)! };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -277,12 +280,18 @@ function isLink(value: unknown): value is ActaLink {
 
 /** Reads the part of the judges' link after «#», in either format. */
 export function decodeActaLink(hash: string): ActaLink {
-  const compact = LINK_V2.exec(hash.trim());
-  if (compact) {
-    if (cyrb53(compact[1]).slice(0, 8) !== compact[2].toLowerCase()) throw new ActaFormatError(BROKEN_LINK);
+  const normalized = hash.trim();
+  const compact = LINK_V2.exec(normalized);
+  const compactWithoutSeparators = LINK_V2_COMPACT.exec(normalized);
+  if (compact || compactWithoutSeparators) {
+    // New WhatsApp-safe links carry data + checksum as one alphanumeric fragment.
+    // Keep accepting the previous A2 form so already-sent messages do not break.
+    const data = compact ? compact[1] : compactWithoutSeparators![1].slice(0, -8);
+    const checksum = compact ? compact[2] : compactWithoutSeparators![1].slice(-8);
+    if (!data || cyrb53(data).slice(0, 8) !== checksum.toLowerCase()) throw new ActaFormatError(BROKEN_LINK);
     let link: ActaLink | null = null;
     try {
-      link = linkFromCompact(unpack(compact[1], base62Decode));
+      link = linkFromCompact(unpack(data, base62Decode));
     } catch { /* Reported below. */ }
     if (!link) throw new ActaFormatError(BROKEN_LINK);
     return link;

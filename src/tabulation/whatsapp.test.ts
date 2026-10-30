@@ -98,9 +98,17 @@ describe('acta link for the judge', () => {
   it('carries only the names the page needs, in a link of letters and digits', () => {
     const tournament = aduma();
     const { url, link } = linkOf(tournament);
-    expect(url).toMatch(/^https:\/\/debate\.example\/acta#A2-[0-9A-Za-z]+-[0-9a-f]{8}$/);
-    const decoded = decodeActaLink(url.slice(url.indexOf('#')));
+    expect(url).toMatch(/^https:\/\/debate\.example\/acta#A2[0-9A-Za-z]+$/);
+    const fragment = url.slice(url.indexOf('#'));
+    expect(fragment).not.toContain('-');
+    const decoded = decodeActaLink(fragment);
     expect(decoded).toEqual(link);
+
+    // Previously sent A2 links used separators. They must remain valid after
+    // switching newly generated links to the WhatsApp-safe contiguous format.
+    const payloadAndChecksum = fragment.slice(3);
+    const legacyFragment = `A2-${payloadAndChecksum.slice(0, -8)}-${payloadAndChecksum.slice(-8)}`;
+    expect(decodeActaLink(legacyFragment)).toEqual(link);
     expect(decoded).toMatchObject({ version: 2, round: { number: 2, name: 'Ronda 2', elimination: false }, venue: 'Aula 1', desk: '34600999888', jury: ['Juez j1', 'Juez j2', 'Juez j3'] });
     expect(decoded.teams.map((team) => [team.name, team.members.map((member) => member.name)])).toEqual([
       ['Equipo a', ['Orador 1 de a', 'Orador 2 de a', 'Orador 3 de a', 'Orador 4 de a', 'Quinta integrante con un nombre bastante largo']],
