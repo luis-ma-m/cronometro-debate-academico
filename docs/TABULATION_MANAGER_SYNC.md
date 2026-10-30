@@ -656,3 +656,12 @@ Comprueba, entre otros puntos:
 Se añaden pruebas unitarias de casos válidos, referencias inexistentes, entidades inactivas, duplicados, paneles insuficientes, identidad y revisión obsoletas. El nuevo módulo se incluye en `npm run typecheck:api`.
 
 **Límite deliberado:** el validador no escribe en PostgreSQL, no publica la ronda y no genera ACK. La publicación continúa siendo una acción explícita del gestor; esta validación será una precondición de la futura transacción de publicación. La política también debe seguir aplicándose después de validar el sobre. No se han ejecutado migraciones ni escrituras en Neon.
+
+
+## 8.1 Validador de dominio de actas — primera capa
+
+Se añade `api/tabulation-acta-domain.ts` como validador puro de la propuesta de acta. El contexto debe proceder del estado canónico cargado por el servidor, nunca del cliente como autoridad.
+
+El payload conserva identidad UUID, revisión y fecha base, ronda, debate y el `TabDebateResult` fuente completo. Se validan referencias de equipos/oradores/jueces, duplicidad de papeletas, contadores de sanciones, modo `judges` frente a `joint`, votos de eliminatorias y decisiones manuales justificadas. Para comprobar que el acta está completa y es válida se reutiliza `computeDebateOutcome`, el mismo motor de Tabulación; no se replica el cálculo de votos, sanciones, rúbricas ni ganador.
+
+El validador no proyecta a `RoundScorecard`, no agrega ni descarta papeletas, no sustituye una scorecard, no hace diff, no incrementa reescrituras y no persiste ni confirma ACK. Esos pasos requerirán una futura transacción con procedencia, historial e idempotencia. Se añaden pruebas unitarias; su ejecución queda pendiente de una ejecución real.
