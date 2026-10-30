@@ -66,10 +66,11 @@ export function PanelLinkReview({ tournament, handoff, onCancel, onConfirm }: {
       <div className="panel-title"><div><h4>{LABELS[kind]} ({remoteItems[kind].length})</h4><p>Selecciona una entidad local o indica que debe crearse una nueva. Las sugerencias nunca se aceptan automáticamente.</p></div></div>
       {remoteItems[kind].length ? <div className="tab-form-grid">
         {remoteItems[kind].map((remote) => {
-          const suggestion = suggestions.find((item) => item.kind === kind && item.remoteId === remote.id);
+          const matches = suggestions.filter((item) => item.kind === kind && item.remoteId === remote.id);
+          const suggestion = matches.length === 1 ? matches[0] : undefined;
           const selected = selections[kind][remote.id] ?? '__new__';
-          return <label className="field" key={remote.id}>
-            <span className="field-label">{remote.name}</span>
+          return <label className="tab-field" key={remote.id}>
+            <span>{remote.name}</span>
             <select value={selected} onChange={(event) => {
               setSelections((current) => ({ ...current, [kind]: { ...current[kind], [remote.id]: event.target.value } }));
               setError('');
@@ -77,9 +78,11 @@ export function PanelLinkReview({ tournament, handoff, onCancel, onConfirm }: {
               <option value="__new__">Crear nueva entidad local</option>
               {localItems[kind].map((local) => <option value={local.id} key={local.id}>{local.name} · {local.id}</option>)}
             </select>
-            <small className="muted">{suggestion
-              ? 'Posible coincidencia: ' + (localItems[kind].find((item) => item.id === suggestion.localId)?.name ?? suggestion.localId) + (suggestion.reason === 'same-id' ? ' (mismo ID)' : ' (nombre' + (suggestion.reason === 'name-and-institution' ? ' e institución' : '') + ')')
-              : 'Sin coincidencia sugerida. Se creará una entidad local salvo que selecciones otra.'}</small>
+            <small>{matches.length > 1
+              ? matches.length + ' posibles coincidencias; selecciona manualmente.'
+              : suggestion
+                ? 'Posible coincidencia: ' + (localItems[kind].find((item) => item.id === suggestion.localId)?.name ?? suggestion.localId) + (suggestion.reason === 'same-id' ? ' (mismo ID)' : ' (nombre' + (suggestion.reason === 'name-and-institution' ? ' e institución' : '') + ')')
+                : 'Sin coincidencia sugerida. Se creará una entidad local salvo que selecciones otra.'}</small>
           </label>;
         })}
       </div> : <p className="muted">No hay {LABELS[kind].toLocaleLowerCase('es-ES')} en el snapshot remoto.</p>}
@@ -93,7 +96,7 @@ export function PanelLinkReview({ tournament, handoff, onCancel, onConfirm }: {
       <p className="muted">Comprueba especialmente los homónimos y las instituciones. Las coincidencias solo son sugerencias; la decisión final es manual.</p>
     </div>
     {KINDS.map(renderKind)}
-    {error && <div className="notice error" role="alert">{error}</div>}
+    {error && <ul className="tab-issues error"><li>{error}</li></ul>}
     <div className="tab-actions">
       <button type="button" className="button primary" onClick={confirm}>Confirmar vinculación e importar</button>
       <button type="button" className="button secondary" onClick={onCancel}>Cancelar</button>
