@@ -49,6 +49,23 @@ export function validateTabulationSettings(value: unknown): TabSettings {
       (input.itemMax as number) <= (input.itemMin as number)) {
     throw new TabulationSettingsValidationError("Los máximos de puntuación deben ser superiores a los mínimos.");
   }
+  const integerRules = ["groupCount", "groupAdvance", "swissRounds", "breakSize", "qualifyingPanelSize", "eliminationPanelSize", "minorsPerMajor", "expectedTeams"];
+  for (const key of integerRules) {
+    if (!Number.isInteger(input[key])) throw new TabulationSettingsValidationError("La regla " + key + " debe ser un número entero.");
+  }
+  if ((input.groupAdvance as number) > (input.groupCount as number)) {
+    throw new TabulationSettingsValidationError("Los grupos no pueden clasificar a más equipos de los que contienen.");
+  }
+  if ((input.minorsPerMajor as number) < 1) {
+    throw new TabulationSettingsValidationError("Debe haber al menos una falta leve por cada bloque de faltas graves.");
+  }
+  if ((input.speakerScoreStep as number) <= 0) {
+    throw new TabulationSettingsValidationError("El intervalo de puntuación de oradores debe ser mayor que cero.");
+  }
+  if (input.oddPanels === true &&
+      ((input.qualifyingPanelSize as number) % 2 === 0 || (input.eliminationPanelSize as number) % 2 === 0)) {
+    throw new TabulationSettingsValidationError("La configuración exige paneles impares, pero hay un tamaño de panel par.");
+  }
   for (const key of ["avoidSameInstitution", "scoresIncludePenalties", "trimExtremes", "speakerScores", "oddPanels", "blindQualifying"]) {
     if (typeof input[key] !== "boolean") throw new TabulationSettingsValidationError("La regla " + key + " debe ser booleana.");
   }
