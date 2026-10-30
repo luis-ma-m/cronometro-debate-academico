@@ -1,6 +1,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
-import { checkDatabase, databaseConfigured } from "./db.js";
+import { checkDatabase, databaseConfigured, getPool } from "./db.js";
+import { presetSettings } from "../src/tabulation/presets.js";
+import { TAB_SCHEMA_VERSION, type TabSettings } from "../src/tabulation/types.js";
 import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
@@ -348,6 +350,12 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "getTournament":
       await requireSession(payload.token);
       return tournamentFromData(await loadSheetData());
+    case "getTabulationSettings":
+      await requireSession(payload.token);
+      return getTabulationSettings();
+    case "saveTabulationSettings":
+      await requireSession(payload.token);
+      return saveTabulationSettings(payload);
     case "getPublicRoom":
       return publicRoomPayload(tournamentFromData(await loadSheetData()), str(payload.roomId));
     case "roomHeartbeat":
@@ -373,6 +381,182 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       return updateRoomTimer(payload);
     default:
       throw new ApiError("UNKNOWN_ACTION", "Acción no reconocida.");
+  }
+}
+
+type PersistedTabulationSettings = {
+  schemaVersion: number;
+  tournamentId: "default";
+  revision: number;
+  settings: TabSettings;
+  updatedAt: number | null;
+  updatedBy: string;
+};
+
+const TABULATION_SETTINGS_DEFAULT_PRESET = "ledu-groups" as const;
+const TABULATION_SETTINGS_MAX_BYTES = 64 * 1024;
+
+function validateTabulationSettings(value: unknown): TabSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ApiError("INVALID_PAYLOAD", "Las reglas de tabulación deben ser un objeto válido.");
+  }
+  const input = value as Record<string, unknown>;
+  const defaults = presetSettings(TABULATION_SETTINGS_DEFAULT_PRESET) as unknown as Record<string, unknown>;
+  const expectedKeys = Object.keys(defaults).sort();
+  const actualKeys = Object.keys(input).sort();
+  if (JSON.stringify(expectedKeys) !== JSON.stringify(actualKeys)) {
+    throw new ApiError("INVALID_PAYLOAD", "La versión de las reglas no coincide con el esquema esperado. Actualiza Tabulación antes de guardar.");
+  }
+  const enums: Record<string, string[]> = {
+    presetId: ["ledu-groups", "uc3m-swiss", "aduma", "custom"],
+    stage: ["groups", "swiss"], bracketMode: ["fixed", "reseed"],
+    qualifyingSideMode: ["draw", "balanced"], speakerMetric: ["sum", "average"],
+    warningConversion: ["ledu", "pairs", "aduma", "none"],
+    majorMode: ["forfeit", "points"], forfeitWinnerPoints: ["average", "ballots", "roundAverage"],
+    tiebreakFallback: ["lots", "manual"], ballotMode: ["judges", "joint"],
+    minorEscalation: ["blocks", "aduma"], conflictPolicy: ["hard", "lastResort"],
+  };
+  for (const [key, allowed] of Object.entries(enums)) {
+    if (!allowed.includes(String(input[key]))) throw new ApiError("INVALID_PAYLOAD", "Valor no válido para la regla " + key + ".");
+  }
+  const ranges: Record<string, [number, number]> = {
+    groupCount: [1, 16], groupAdvance: [1, 8], swissRounds: [1, 12], breakSize: [2, 32],
+    qualifyingPanelSize: [1, 9], eliminationPanelSize: [1, 9], scoreMin: [0, 1000], scoreMax: [0, 1000],
+    speakerScoreMin: [0, 100], speakerScoreMax: [0, 100], speakerScoreStep: [0, 10],
+    minorPoints: [0, 1000], minorsPerMajor: [0, 100], majorPoints: [0, 1000],
+    forfeitLoserPoints: [0, 1000], itemMin: [0, 1000], itemMax: [0, 1000], expectedTeams: [0, 500],
+  };
+  for (const [key, [min, max]] of Object.entries(ranges)) {
+    const number = input[key];
+    if (typeof number !== "number" || !Number.isFinite(number) || number < min || number > max) {
+      throw new ApiError("INVALID_PAYLOAD", "El valor de " + key + " debe estar entre " + min + " y " + max + ".");
+    }
+  }
+  if ((input.scoreMax as number) <= (input.scoreMin as number) ||
+      (input.speakerScoreMax as number) <= (input.speakerScoreMin as number) ||
+      (input.itemMax as number) <= (input.itemMin as number)) {
+    throw new ApiError("INVALID_PAYLOAD", "Los máximos de puntuación deben ser superiores a los mínimos.");
+  }
+  for (const key of ["avoidSameInstitution", "scoresIncludePenalties", "trimExtremes", "speakerScores", "oddPanels", "blindQualifying"]) {
+    if (typeof input[key] !== "boolean") throw new ApiError("INVALID_PAYLOAD", "La regla " + key + " debe ser booleana.");
+  }
+  if (!Array.isArray(input.tiebreaks) || input.tiebreaks.length > 11 ||
+      new Set(input.tiebreaks).size !== input.tiebreaks.length ||
+      input.tiebreaks.some((item) => typeof item !== "string" || !["ballots","pointsTotal","pointsAverage","headToHead","headToHeadBallots","headToHeadPoints","speakerPoints","fewestPenalties","fewestMajors","fewestMinors"].includes(item))) {
+    throw new ApiError("INVALID_PAYLOAD", "La lista de desempates contiene valores no válidos o duplicados.");
+  }
+  if (!Array.isArray(input.rubric) || input.rubric.length > 100) throw new ApiError("INVALID_PAYLOAD", "La rúbrica no puede superar 100 ítems.");
+  const rubricIds = new Set<string>();
+  for (const item of input.rubric) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new ApiError("INVALID_PAYLOAD", "Hay un ítem de rúbrica no válido.");
+    const row = item as Record<string, unknown>;
+    if (typeof row.id !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(row.id) || rubricIds.has(row.id) ||
+        typeof row.name !== "string" || !row.name.trim() || row.name.length > 200 ||
+        typeof row.section !== "string" || row.section.length > 100 ||
+        typeof row.description !== "string" || row.description.length > 1000) {
+      throw new ApiError("INVALID_PAYLOAD", "Los ítems de rúbrica necesitan IDs únicos y textos válidos.");
+    }
+    rubricIds.add(row.id);
+  }
+  if (!Array.isArray(input.bracketSeedOrder) || input.bracketSeedOrder.length > 32 ||
+      input.bracketSeedOrder.some((item) => !Number.isInteger(item) || (item as number) < 1 || (item as number) > 32)) {
+    throw new ApiError("INVALID_PAYLOAD", "El orden de cabezas de serie no es válido.");
+  }
+  const serialized = JSON.stringify(input);
+  if (Buffer.byteLength(serialized, "utf8") > TABULATION_SETTINGS_MAX_BYTES) {
+    throw new ApiError("INVALID_PAYLOAD", "Las reglas superan el tamaño máximo permitido.");
+  }
+  return structuredClone(input) as unknown as TabSettings;
+}
+
+function defaultPersistedTabulationSettings(): PersistedTabulationSettings {
+  return {
+    schemaVersion: TAB_SCHEMA_VERSION,
+    tournamentId: "default",
+    revision: 0,
+    settings: presetSettings(TABULATION_SETTINGS_DEFAULT_PRESET),
+    updatedAt: null,
+    updatedBy: "system-default:" + TABULATION_SETTINGS_DEFAULT_PRESET,
+  };
+}
+
+async function getTabulationSettings(): Promise<PersistedTabulationSettings> {
+  const pool = getPool();
+  const result = await pool.query("SELECT schema_version, revision, settings, updated_at, updated_by FROM tabulation_settings WHERE id = 1");
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row || !row.settings || Object.keys(row.settings as object).length === 0) return defaultPersistedTabulationSettings();
+  const schemaVersion = num(row.schema_version);
+  if (schemaVersion > TAB_SCHEMA_VERSION) {
+    throw new ApiError("SCHEMA_TOO_NEW", "Las reglas fueron guardadas con una versión más reciente. Esta versión entra en solo lectura; actualiza la aplicación.", 409);
+  }
+  return {
+    schemaVersion,
+    tournamentId: "default",
+    revision: num(row.revision),
+    settings: validateTabulationSettings(row.settings),
+    updatedAt: row.updated_at ? new Date(String(row.updated_at)).getTime() : null,
+    updatedBy: str(row.updated_by) || "unknown",
+  };
+}
+
+async function saveTabulationSettings(payload: Record<string, unknown>): Promise<PersistedTabulationSettings> {
+  const settings = validateTabulationSettings(payload.settings);
+  const schemaVersion = num(payload.schemaVersion);
+  if (schemaVersion !== TAB_SCHEMA_VERSION) throw new ApiError("SCHEMA_MISMATCH", "Actualiza la aplicación antes de guardar estas reglas.", 409);
+  const expectedRevision = num(payload.expectedRevision);
+  const operationId = str(payload.operationId);
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(operationId)) throw new ApiError("INVALID_PAYLOAD", "Falta un identificador de operación válido.");
+  const payloadHash = sha256(JSON.stringify({ schemaVersion, settings }));
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const priorOperation = await client.query(
+      "SELECT payload_hash, response FROM tabulation_settings_operations WHERE operation_id = $1",
+      [operationId],
+    );
+    if (priorOperation.rows[0]) {
+      const prior = priorOperation.rows[0] as { payload_hash: string; response: PersistedTabulationSettings };
+      if (prior.payload_hash !== payloadHash) throw new ApiError("IDEMPOTENCY_MISMATCH", "El identificador de operación ya se utilizó con otro contenido.", 409);
+      await client.query("COMMIT");
+      return prior.response;
+    }
+    const currentResult = await client.query("SELECT revision FROM tabulation_settings WHERE id = 1 FOR UPDATE");
+    const currentRevision = num((currentResult.rows[0] as { revision?: unknown } | undefined)?.revision);
+    if (currentRevision !== expectedRevision) {
+      throw new ApiError("REVISION_CONFLICT", "Las reglas han cambiado en otro dispositivo. Recarga la configuración antes de guardar.", 409);
+    }
+    const nextRevision = currentRevision + 1;
+    const now = Date.now();
+    const response: PersistedTabulationSettings = {
+      schemaVersion: TAB_SCHEMA_VERSION, tournamentId: "default", revision: nextRevision,
+      settings, updatedAt: now, updatedBy: "admin",
+    };
+    await client.query(
+      "UPDATE tabulation_settings SET schema_version = $1, revision = $2, settings = $3::jsonb, updated_at = now(), updated_by = $4 WHERE id = 1",
+      [TAB_SCHEMA_VERSION, nextRevision, JSON.stringify(settings), "admin"],
+    );
+    await client.query(
+      "INSERT INTO tabulation_settings_versions(tournament_id, revision, schema_version, settings, operation_id, updated_by) VALUES ('default', $1, $2, $3::jsonb, $4, $5)",
+      [nextRevision, TAB_SCHEMA_VERSION, JSON.stringify(settings), operationId, "admin"],
+    );
+    await client.query(
+      "INSERT INTO tabulation_settings_operations(operation_id, payload_hash, response) VALUES ($1, $2, $3::jsonb)",
+      [operationId, payloadHash, JSON.stringify(response)],
+    );
+    await client.query(
+      "INSERT INTO audit_events(event_key, event_type, details) VALUES ($1, $2, $3::jsonb)",
+      ["tabulation-settings:" + operationId, "tabulation_settings_updated", JSON.stringify({ revision: nextRevision, schemaVersion: TAB_SCHEMA_VERSION, presetId: settings.presetId, operationId, updatedBy: "admin" })],
+    );
+    await client.query("UPDATE tournament_settings SET revision = revision + 1, updated_at = now() WHERE id = 1");
+    await client.query("COMMIT");
+    return response;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("DATABASE_UNAVAILABLE", "No se han podido guardar las reglas de tabulación en PostgreSQL.", 503);
+  } finally {
+    client.release();
   }
 }
 

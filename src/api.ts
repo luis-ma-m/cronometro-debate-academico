@@ -113,3 +113,22 @@ export const updateTimer = (
 ) => apiCall<PublicRoom>('updateRoomTimer', {
   roomId, action, expectedRevision, controlKey, assignmentId, expectedActivationRevision,
 });
+
+export interface PersistedTabulationSettings {
+  schemaVersion: number;
+  tournamentId: string;
+  revision: number;
+  settings: import('./tabulation/types').TabSettings;
+  updatedAt: number | null;
+  updatedBy: string;
+}
+export const getTabulationSettings = (token: string) =>
+  apiCall<PersistedTabulationSettings>('getTabulationSettings', { token });
+export const saveTabulationSettings = (
+  token: string,
+  expectedRevision: number,
+  settings: import('./tabulation/types').TabSettings,
+  operationId: string,
+) => apiCall<PersistedTabulationSettings>('saveTabulationSettings', {
+  token, expectedRevision, schemaVersion: 2, settings, operationId,
+});
