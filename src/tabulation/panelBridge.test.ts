@@ -101,7 +101,7 @@ describe('panel → tabulation', () => {
     const local = createTabTournament('Copia local', 'ledu-groups', now, 1);
     const handoff = buildPanelHandoff(panel(), now);
     const errors = validatePanelEntityIdMap(local, handoff, {
-      teams: { [local.teams[0].id]: 't1', [local.teams[1].id]: 't1', 'missing-local': 'missing-remote' },
+      teams: { [local.teams[0].id]: 't1', 'other-local': 't1', 'missing-local': 'missing-remote' },
       speakers: {}, judges: {}, venues: {},
     });
     expect(errors.join(' ')).toContain('más de una entidad local');
