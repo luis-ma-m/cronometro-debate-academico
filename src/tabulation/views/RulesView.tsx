@@ -35,7 +35,7 @@ function SeedOrderField({ value, breakSize, onChange }: { value: number[]; break
   </Field>;
 }
 
-export function RulesView({ tournament, update, notify, store }: ViewProps) {
+export function RulesView({ tournament, update, notify, store, managerMode = false }: ViewProps & { managerMode?: boolean }) {
   const { settings } = tournament;
   const [presetChoice, setPresetChoice] = useState<Exclude<PresetId, 'custom'>>(settings.presetId === 'custom' ? 'ledu-groups' : settings.presetId);
   const hasRounds = tournament.rounds.length > 0;
@@ -71,7 +71,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
     <section className="panel">
       <div className="panel-title"><div><h3>Torneo y reglamento de partida</h3><p>Estado actual: {settings.presetId === 'custom' ? 'reglas personalizadas' : PRESET_OPTIONS.find((option) => option.id === settings.presetId)?.label}.</p></div></div>
       <div className="tab-form-grid">
-        <Field label="Nombre del torneo"><input value={tournament.name} onChange={(event) => update((current) => ({ ...current, name: event.target.value }))} /></Field>
+        {!managerMode && <Field label="Nombre del torneo"><input value={tournament.name} onChange={(event) => update((current) => ({ ...current, name: event.target.value }))} /></Field>}
         <Field label="Reglamento" hint={PRESET_OPTIONS.find((option) => option.id === presetChoice)?.description}>
           <select value={presetChoice} onChange={(event) => setPresetChoice(event.target.value as Exclude<PresetId, 'custom'>)}>{PRESET_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select>
         </Field>
@@ -145,7 +145,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
         </>}
     </section>
 
-    {settings.ballotMode === 'joint' && <section className="panel">
+    {settings.ballotMode === 'joint' && !managerMode && <section className="panel">
       <div className="panel-title"><div><h3>Actas por WhatsApp</h3><p>Cada juez principal recibe por WhatsApp el enlace de su debate, rellena el acta en el móvil y la envía a la mesa con un código que la tabulación comprueba. No usa ningún servidor: basta con que esta página esté publicada.</p></div></div>
       <div className="tab-form-grid">
         <Field label="Móvil de la mesa de tabulación (WhatsApp)" hint={whatsAppNumber(tournament.whatsapp?.deskPhone ?? '') ? 'Las actas llegarán al +' + whatsAppNumber(tournament.whatsapp?.deskPhone ?? '') + '.' : 'Vacío: el juez elige el chat al enviar.'}>

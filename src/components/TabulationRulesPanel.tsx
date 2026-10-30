@@ -84,6 +84,7 @@ export function TabulationRulesPanel({ token }: { token: string }) {
       update={updateRules}
       notify={(message, kind) => { setNotice(message); if (kind === 'error') setError(message); }}
       store={storeStub}
+      managerMode
     />}
   </section>;
 }
