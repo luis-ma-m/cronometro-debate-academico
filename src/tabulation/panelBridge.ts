@@ -293,7 +293,17 @@ export function mergeHandoff(
 export function tournamentFromHandoff(handoff: PanelHandoff, presetId: PresetId, now = Date.now(), seed = randomSeed()): TabTournament {
   const created = createTabTournament(handoff.tournamentName, presetId, now, seed);
   const linked = handoff.tournamentId
-    ? { ...created, panelLink: { tournamentName: handoff.tournamentName, linkedAt: now, remoteId: handoff.tournamentId } }
+    ? { ...created, panelLink: {
+      tournamentName: handoff.tournamentName,
+      linkedAt: now,
+      remoteId: handoff.tournamentId,
+      idMap: {
+        teams: Object.fromEntries(handoff.teams.map((item) => [item.id, item.id])),
+        speakers: Object.fromEntries(handoff.speakers.map((item) => [item.id, item.id])),
+        judges: Object.fromEntries(handoff.judges.map((item) => [item.id, item.id])),
+        venues: Object.fromEntries(handoff.venues.map((item) => [item.id, item.id])),
+      },
+    } }
     : created;
   return mergeHandoff(linked, handoff, now).tournament;
 }
