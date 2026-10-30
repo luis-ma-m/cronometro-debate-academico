@@ -138,9 +138,10 @@ describe('panel → tabulation', () => {
 
   it('rejects many-to-one and stale identity mappings', () => {
     const local = createTabTournament('Copia local', 'ledu-groups', now, 1);
+    local.teams = [{ id: 'local-team', name: 'Equipo local', institution: '', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] }];
     const handoff = buildPanelHandoff(panel(), now);
     const errors = validatePanelEntityIdMap(local, handoff, {
-      teams: { [local.teams[0].id]: 't1', 'other-local': 't1', 'missing-local': 'missing-remote' },
+      teams: { 'local-team': 't1', 'other-local': 't1', 'missing-local': 'missing-remote' },
       speakers: {}, judges: {}, venues: {},
     });
     expect(errors.join(' ')).toContain('más de una entidad local');
