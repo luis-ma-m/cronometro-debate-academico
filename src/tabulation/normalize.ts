@@ -338,7 +338,7 @@ export function normalizeTabTournament(raw: unknown): NormalizeResult {
     rounds,
     breakSeeds: ids(raw.breakSeeds),
     manualOrder: ids(raw.manualOrder),
-    ...(isObject(raw.panelLink) ? { panelLink: { tournamentName: text(raw.panelLink.tournamentName), linkedAt: num(raw.panelLink.linkedAt, 0), ...(typeof raw.panelLink.remoteId === 'string' && raw.panelLink.remoteId ? { remoteId: raw.panelLink.remoteId } : {}), ...(isObject(raw.panelLink.idMap) ? { idMap: normalizePanelEntityIdMap(raw.panelLink.idMap) } : {}) } } : {}),
+    ...(isObject(raw.panelLink) ? { panelLink: { tournamentName: text(raw.panelLink.tournamentName), linkedAt: num(raw.panelLink.linkedAt, 0), ...(typeof raw.panelLink.remoteId === 'string' && raw.panelLink.remoteId ? { remoteId: raw.panelLink.remoteId } : {}), ...(Number.isInteger(raw.panelLink.remoteRevision) ? { remoteRevision: raw.panelLink.remoteRevision as number } : {}), ...(isFiniteNumber(raw.panelLink.remoteUpdatedAt) ? { remoteUpdatedAt: raw.panelLink.remoteUpdatedAt } : {}), ...(isObject(raw.panelLink.idMap) ? { idMap: normalizePanelEntityIdMap(raw.panelLink.idMap) } : {}) } } : {}),
     ...(isObject(raw.whatsapp) ? { whatsapp: { deskPhone: text(raw.whatsapp.deskPhone), baseUrl: text(raw.whatsapp.baseUrl) } } : {}),
     judgeConflicts,
     ...(draftRound ? { draftRound } : {}),
