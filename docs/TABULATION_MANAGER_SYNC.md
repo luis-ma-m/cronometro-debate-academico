@@ -616,3 +616,8 @@ La revisión del contrato encontró un caso límite importante: al canonicalizar
 Se corrige la outbox para construir los objetos canonicalizados con prototipo nulo, preservando literalmente `__proto__` sin modificar prototipos. Se añaden pruebas para claves especiales y una prueba cruzada que exige que cliente y servidor produzcan exactamente el mismo SHA-256.
 
 Esta corrección no amplía el alcance funcional: no hay endpoint ni worker, y el ACK sigue reservado a una confirmación remota real.
+
+
+### Ajuste de compatibilidad ESM en pruebas
+
+La compilación Preview detectó imports relativos sin extensión en los archivos de test del validador (TypeScript con resolución Node16/NodeNext). Se corrigieron para usar la extensión `.js` que espera el proyecto ESM. La compilación de Vercel llegó a completar el despliegue, pero el log de diagnóstico mostró ese error de TypeScript en los tests; por tanto, el build anterior no se considera validación suficiente de esta corrección. Se espera un nuevo Preview con el ajuste.
