@@ -82,11 +82,12 @@ export function validatePublishedRoundPayload(
     issues.push("La propuesta debe contener al menos un debate.");
   }
 
-  const rooms = new Set(context.physicalRooms.map((item) => item.id));
+  const rooms = new Map(context.physicalRooms.map((item) => [item.id, item]));
   const teams = new Map(context.teams.map((item) => [item.id, item]));
   const judges = new Map(context.judges.map((item) => [item.id, item]));
   const usedRooms = new Set<string>();
   const usedTeams = new Set<string>();
+  const usedJudges = new Set<string>();
 
   if (Array.isArray(value.debates)) {
     for (const [index, raw] of value.debates.entries()) {
@@ -98,6 +99,8 @@ export function validatePublishedRoundPayload(
       const { physicalRoomId, venueName, teamFavorId, teamContraId, judgeIds, chairId, sidesProvisional } = raw;
       if (!nonEmptyString(physicalRoomId) || !rooms.has(physicalRoomId)) {
         issues.push(prefix + "la sala física no existe en el gestor.");
+      } else if (!rooms.get(physicalRoomId)?.active) {
+        issues.push(prefix + "se ha asignado una sala física inactiva.");
       } else if (usedRooms.has(physicalRoomId)) {
         issues.push(prefix + "la misma sala aparece en más de un debate.");
       } else {
@@ -127,7 +130,9 @@ export function validatePublishedRoundPayload(
             continue;
           }
           if (seenJudges.has(judgeId)) issues.push(prefix + "contiene jueces duplicados.");
+          if (usedJudges.has(judgeId)) issues.push(prefix + "un juez aparece asignado en más de un debate de la misma ronda.");
           seenJudges.add(judgeId);
+          usedJudges.add(judgeId);
           if (!judges.get(judgeId)?.active) issues.push(prefix + "se ha asignado un juez inactivo.");
         }
         if (!nonEmptyString(chairId) || !seenJudges.has(chairId)) {
