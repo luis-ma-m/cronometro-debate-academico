@@ -68,9 +68,9 @@ describe("validateTabulationSettings", () => {
     expectInvalid(malformed);
   });
 
-  it("rejects fractional counts and inconsistent group or penalty rules", () => {
+  it("rejects fractional counts and invalid penalty rules while allowing independent group advance counts", () => {
     expectInvalid({ ...validSettings(), groupCount: 2.5 });
-    expectInvalid({ ...validSettings(), groupCount: 2, groupAdvance: 3 });
+    expect(validateTabulationSettings({ ...validSettings(), groupCount: 2, groupAdvance: 3 })).toMatchObject({ groupCount: 2, groupAdvance: 3 });
     expectInvalid({ ...validSettings(), minorsPerMajor: 0 });
     expectInvalid({ ...validSettings(), speakerScoreStep: 0 });
   });
