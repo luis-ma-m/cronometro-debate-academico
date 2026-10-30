@@ -3,7 +3,7 @@ import { createTimer, resolvePhases, validateAssignments, withRoomStatus } from 
 import { pickChair } from './adjudication';
 import { createTabTournament } from './presets';
 import { randomSeed } from './random';
-import { isFallenAt, sameInstitution, type PresetId, type TabDebate, type TabJudge, type TabTeam, type TabTournament, type PanelEntityIdMap } from './types';
+import { isFallenAt, sameInstitution, type PresetId, type TabDebate, type TabJudge, type TabTeam, type TabTournament, type PanelEntityIdMap, makeTabId } from './types';
 
 /**
  * Versioned hand-offs between the admin panel and the local tabulation. Each side only reads the other's
@@ -145,7 +145,12 @@ export interface MergeSummary { tournament: TabTournament; added: number; update
  * incompatibilities; the tabulation keeps its own judge levels, chairs, availability, swing, break eligibility
  * and active flags. Nothing is ever deleted.
  */
-export function mergeHandoff(tournament: TabTournament, handoff: PanelHandoff, now = Date.now()): MergeSummary {
+export function mergeHandoff(
+  tournament: TabTournament,
+  handoff: PanelHandoff,
+  now = Date.now(),
+  reviewedIdMap?: PanelEntityIdMap,
+): MergeSummary {
   let added = 0;
   let updated = 0;
   const warnings: string[] = [];
@@ -158,13 +163,87 @@ export function mergeHandoff(tournament: TabTournament, handoff: PanelHandoff, n
     issues.push('Este torneo tiene un vínculo antiguo sin identidad verificable. Crea una copia vinculada desde el panel; no se fusionarán datos por nombre.');
     return { tournament, added, updated, warnings, issues };
   }
-  if (!tournament.panelLink && handoff.tournamentId) {
-    issues.push('Este torneo local todavía no está vinculado. La vinculación inicial requiere una revisión explícita; crea primero una copia desde el panel.');
+  if (!tournament.panelLink && handoff.tournamentId && !reviewedIdMap) {
+    issues.push('Este torneo local todavía no está vinculado. La vinculación inicial requiere una revisión explícita de las correspondencias.');
     return { tournament, added, updated, warnings, issues };
   }
   if (tournament.panelLink && tournament.panelLink.tournamentName !== handoff.tournamentName) {
     warnings.push('Este torneo se enlazó con «' + tournament.panelLink.tournamentName + '» y los datos vienen de «' + handoff.tournamentName + '».');
   }
+
+  const emptyMap = (): PanelEntityIdMap => ({ teams: {}, speakers: {}, judges: {}, venues: {} });
+  const idMap: PanelEntityIdMap = structuredClone(reviewedIdMap ?? tournament.panelLink?.idMap ?? emptyMap());
+  if (!reviewedIdMap && tournament.panelLink?.remoteId && !tournament.panelLink.idMap) {
+    // Older copies were created from a hand-off that reused the manager IDs. Recover only exact ID matches.
+    for (const kind of ['teams', 'speakers', 'judges', 'venues'] as const) {
+      const localItems = kind === 'teams' ? tournament.teams : kind === 'speakers' ? tournament.speakers : kind === 'judges' ? tournament.judges : tournament.venues;
+      const remoteItems = kind === 'teams' ? handoff.teams : kind === 'speakers' ? handoff.speakers : kind === 'judges' ? handoff.judges : handoff.venues;
+      const remoteIds = new Set(remoteItems.map((item) => item.id));
+      for (const item of localItems) if (remoteIds.has(item.id)) idMap[kind][item.id] = item.id;
+    }
+  }
+
+  if (handoff.tournamentId) {
+    const mapIssues = validatePanelEntityIdMap(tournament, handoff, idMap);
+    if (mapIssues.length) return { tournament, added, updated, warnings, issues: mapIssues };
+  }
+
+  const localIds = {
+    teams: new Set(tournament.teams.map((item) => item.id)),
+    speakers: new Set(tournament.speakers.map((item) => item.id)),
+    judges: new Set(tournament.judges.map((item) => item.id)),
+    venues: new Set(tournament.venues.map((item) => item.id)),
+  };
+  const mapRemote = (kind: PanelEntityKind, remoteId: string): string => {
+    const existing = Object.entries(idMap[kind]).find(([, value]) => value === remoteId)?.[0];
+    if (existing) return existing;
+    let localId = '';
+    do { localId = makeTabId(kind.slice(0, -1)); } while (localIds[kind].has(localId));
+    localIds[kind].add(localId);
+    idMap[kind][localId] = remoteId;
+    return localId;
+  };
+
+  // References are translated as well as entity IDs; a cross-entity reference must never keep a remote ID.
+  const remoteTeamIds = new Set(handoff.teams.map((item) => item.id));
+  const remoteJudgeIds = new Set(handoff.judges.map((item) => item.id));
+  const remoteSpeakerIds = new Set(handoff.speakers.map((item) => item.id));
+  const referenceIssues: string[] = [];
+  for (const team of handoff.teams) for (const judgeId of team.incompatibleJudgeIds) {
+    if (!remoteJudgeIds.has(judgeId)) referenceIssues.push('El equipo «' + team.name + '» referencia un juez remoto inexistente (' + judgeId + ').');
+  }
+  for (const judge of handoff.judges) for (const judgeId of judge.incompatibleJudgeIds) {
+    if (!remoteJudgeIds.has(judgeId)) referenceIssues.push('El juez «' + judge.name + '» referencia un juez remoto inexistente (' + judgeId + ').');
+  }
+  for (const speaker of handoff.speakers) if (!remoteTeamIds.has(speaker.teamId)) {
+    referenceIssues.push('El orador «' + speaker.name + '» referencia un equipo remoto inexistente (' + speaker.teamId + ').');
+  }
+  if (referenceIssues.length) return { tournament, added, updated, warnings, issues: referenceIssues };
+
+  const judgeId = (id: string) => mapRemote('judges', id);
+  const teamId = (id: string) => mapRemote('teams', id);
+  const mappedTeams: TabTeam[] = handoff.teams.map((team) => ({
+    ...team,
+    id: teamId(team.id),
+    incompatibleJudgeIds: team.incompatibleJudgeIds.map(judgeId),
+    swing: false,
+    breakEligible: true,
+  }));
+  const mappedSpeakers = handoff.speakers.map((speaker) => ({
+    ...speaker,
+    id: mapRemote('speakers', speaker.id),
+    teamId: teamId(speaker.teamId),
+  }));
+  const mappedJudges: TabJudge[] = handoff.judges.map((judge) => ({
+    ...judge,
+    id: judgeId(judge.id),
+    incompatibleJudgeIds: judge.incompatibleJudgeIds.map(judgeId),
+    rating: 3,
+    canChair: true,
+    unavailableRoundIds: [],
+  }));
+  const mappedVenues = handoff.venues.map((venue) => ({ ...venue, id: mapRemote('venues', venue.id) }));
+
   const merge = <T extends { id: string }>(current: T[], incoming: T[], update: (existing: T, next: T) => T) => {
     const result = [...current];
     for (const item of incoming) {
@@ -177,23 +256,33 @@ export function mergeHandoff(tournament: TabTournament, handoff: PanelHandoff, n
   };
   const teams = merge<TabTeam>(
     tournament.teams,
-    handoff.teams.map((team) => ({ ...team, swing: false, breakEligible: true })),
+    mappedTeams,
     (existing, next) => ({ ...existing, name: next.name, institution: next.institution, incompatibleJudgeIds: next.incompatibleJudgeIds }),
   );
-  const teamIds = new Set(teams.map((team) => team.id));
   const speakers = merge(
     tournament.speakers,
-    handoff.speakers.filter((speaker) => teamIds.has(speaker.teamId)),
+    mappedSpeakers,
     (existing, next) => ({ ...existing, name: next.name, teamId: next.teamId }),
   );
   const judges = merge<TabJudge>(
     tournament.judges,
-    handoff.judges.map((judge) => ({ ...judge, rating: 3, canChair: true, unavailableRoundIds: [] })),
+    mappedJudges,
     (existing, next) => ({ ...existing, name: next.name, institution: next.institution, incompatibleJudgeIds: next.incompatibleJudgeIds }),
   );
-  const venues = merge(tournament.venues, handoff.venues, (existing, next) => ({ ...existing, name: next.name }));
+  const venues = merge(tournament.venues, mappedVenues, (existing, next) => ({ ...existing, name: next.name }));
   return {
-    tournament: { ...tournament, teams, speakers, judges, venues, panelLink: { tournamentName: handoff.tournamentName, linkedAt: now, ...(handoff.tournamentId ? { remoteId: handoff.tournamentId } : {}) } },
+    tournament: {
+      ...tournament,
+      teams,
+      speakers,
+      judges,
+      venues,
+      panelLink: {
+        tournamentName: handoff.tournamentName,
+        linkedAt: tournament.panelLink?.linkedAt ?? now,
+        ...(handoff.tournamentId ? { remoteId: handoff.tournamentId, idMap } : {}),
+      },
+    },
     added,
     updated,
     warnings,
