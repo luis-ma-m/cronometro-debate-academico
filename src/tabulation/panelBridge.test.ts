@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { validateTournamentInput } from '../../api/core';
 import type { Room, Tournament } from '../domain';
 import { createTimer, LEDU_PHASES } from '../timer';
-import { applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, tournamentFromHandoff, writeHandoff } from './panelBridge';
+import { applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, suggestPanelEntityMatches, validatePanelEntityIdMap, tournamentFromHandoff, writeHandoff } from './panelBridge';
 import { memoryStorage } from './store';
 import { qualifyingRound } from './test-fixtures';
 import { createTabTournament } from './presets';
@@ -85,6 +85,27 @@ describe('panel → tabulation', () => {
     const result = mergeHandoff(local, handoff, now);
     expect(result.issues[0]).toContain('no está vinculado');
     expect(result.tournament).toBe(local);
+  });
+
+
+  it('suggests possible entity matches without accepting them', () => {
+    const local = createTabTournament('Copia local', 'ledu-groups', now, 1);
+    local.teams = [{ ...local.teams[0], id: 'local-team', name: 'Equipo Á', institution: 'Universidad A' }];
+    const remote = { ...panel(), teams: [{ id: 'remote-team', name: 'Equipo A', institution: 'Universidad A', active: true, incompatibleJudgeIds: [] }] };
+    const suggestions = suggestPanelEntityMatches(local, buildPanelHandoff(remote, now));
+    expect(suggestions).toContainEqual({ kind: 'teams', localId: 'local-team', remoteId: 'remote-team', reason: 'name-and-institution' });
+    expect(local.panelLink).toBeUndefined();
+  });
+
+  it('rejects many-to-one and stale identity mappings', () => {
+    const local = createTabTournament('Copia local', 'ledu-groups', now, 1);
+    const handoff = buildPanelHandoff(panel(), now);
+    const errors = validatePanelEntityIdMap(local, handoff, {
+      teams: { [local.teams[0].id]: 't1', [local.teams[1].id]: 't1', 'missing-local': 'missing-remote' },
+      speakers: {}, judges: {}, venues: {},
+    });
+    expect(errors.join(' ')).toContain('más de una entidad local');
+    expect(errors.join(' ')).toContain('no existe');
   });
 
   it('merges idempotently and respects which side owns each field', () => {
