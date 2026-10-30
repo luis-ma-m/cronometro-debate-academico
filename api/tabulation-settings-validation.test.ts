@@ -64,6 +64,18 @@ describe("validateTabulationSettings", () => {
     expectInvalid(malformed);
   });
 
+  it("rejects fractional counts and inconsistent group or penalty rules", () => {
+    expectInvalid({ ...validSettings(), groupCount: 2.5 });
+    expectInvalid({ ...validSettings(), groupCount: 2, groupAdvance: 3 });
+    expectInvalid({ ...validSettings(), minorsPerMajor: 0 });
+    expectInvalid({ ...validSettings(), speakerScoreStep: 0 });
+  });
+
+  it("enforces odd panel sizes when the tournament requires odd panels", () => {
+    expectInvalid({ ...validSettings(), oddPanels: true, qualifyingPanelSize: 2 });
+    expectInvalid({ ...validSettings(), oddPanels: true, eliminationPanelSize: 4 });
+  });
+
   it("rejects invalid bracket seeds and oversized payloads", () => {
     expectInvalid({ ...validSettings(), bracketSeedOrder: [1, 1] });
     const oversized = validSettings();
