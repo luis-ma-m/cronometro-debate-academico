@@ -633,6 +633,6 @@ Se añade `api/sync-operation-policy.ts` como segunda frontera, separada del val
 - Rechaza `upsert` genérico: permitirlo podría modificar equipos, jueces, oradores o salas saltándose la autoridad del gestor y sus validaciones específicas.
 - Rechaza escrituras `settings` desde Tabulación: las reglas solo se editan en Gestor → Configuración.
 
-La política devuelve códigos diferenciados para sesión ausente, identidad de torneo distinta y operación no permitida. Se añaden pruebas de los límites de autorización.
+La política devuelve códigos diferenciados para sesión ausente, identidad de torneo distinta y operación no permitida. Se añaden pruebas de los límites de autorización. El módulo queda incluido expresamente en `npm run typecheck:api`, además de la suite `npm run test:coverage`.
 
 **Límite deliberado:** esta política todavía no está conectada a un endpoint ni realiza escrituras. El siguiente paso es definir validadores de dominio para publicación de ronda y acta, y después implementar la recepción transaccional con idempotencia, revisión y auditoría. No hay worker HTTP ni ACK remoto. No se han ejecutado migraciones ni escrituras en Neon.
