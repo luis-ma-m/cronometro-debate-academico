@@ -3,7 +3,7 @@ import { createTimer, resolvePhases, validateAssignments, withRoomStatus } from 
 import { pickChair } from './adjudication';
 import { createTabTournament } from './presets';
 import { randomSeed } from './random';
-import { isFallenAt, sameInstitution, type PresetId, type TabDebate, type TabJudge, type TabTeam, type TabTournament } from './types';
+import { isFallenAt, sameInstitution, type PresetId, type TabDebate, type TabJudge, type TabTeam, type TabTournament, type PanelEntityIdMap } from './types';
 
 /**
  * Versioned hand-offs between the admin panel and the local tabulation. Each side only reads the other's
@@ -25,6 +25,67 @@ export interface PanelHandoff {
   speakers: Speaker[];
   judges: Array<Pick<Judge, 'id' | 'name' | 'institution' | 'active' | 'incompatibleJudgeIds'>>;
   venues: Array<{ id: string; name: string; active: boolean }>;
+}
+
+
+export type PanelEntityKind = 'teams' | 'speakers' | 'judges' | 'venues';
+export interface PanelEntityMatchSuggestion {
+  kind: PanelEntityKind;
+  localId: string;
+  remoteId: string;
+  reason: 'same-id' | 'name-and-institution' | 'name';
+}
+
+/** Suggestions are deliberately advisory: callers must ask the operator to confirm every mapping. */
+export function suggestPanelEntityMatches(tournament: TabTournament, handoff: PanelHandoff): PanelEntityMatchSuggestion[] {
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLocaleLowerCase('es-ES').replace(/[^a-z0-9]+/g, ' ').trim();
+  const suggestions: PanelEntityMatchSuggestion[] = [];
+  const collect = <T extends { id: string; name: string }, R extends { id: string; name: string }>(
+    kind: PanelEntityKind,
+    local: T[],
+    remote: R[],
+    institution?: (item: T | R) => string,
+  ) => {
+    for (const incoming of remote) {
+      const sameId = local.find((item) => item.id === incoming.id);
+      if (sameId) {
+        suggestions.push({ kind, localId: sameId.id, remoteId: incoming.id, reason: 'same-id' });
+        continue;
+      }
+      const name = normalize(incoming.name);
+      const candidates = local.filter((item) => normalize(item.name) === name && (!institution
+        || normalize(institution(item)) === normalize(institution(incoming))));
+      for (const candidate of candidates) {
+        suggestions.push({ kind, localId: candidate.id, remoteId: incoming.id, reason: institution ? 'name-and-institution' : 'name' });
+      }
+    }
+  };
+  collect('teams', tournament.teams, handoff.teams, (item) => 'institution' in item ? String(item.institution ?? '') : '');
+  collect('speakers', tournament.speakers, handoff.speakers);
+  collect('judges', tournament.judges, handoff.judges, (item) => 'institution' in item ? String(item.institution ?? '') : '');
+  collect('venues', tournament.venues, handoff.venues);
+  return suggestions;
+}
+
+/** Rejects stale, cross-type and many-to-one mappings before any local data can be changed. */
+export function validatePanelEntityIdMap(tournament: TabTournament, handoff: PanelHandoff, idMap: PanelEntityIdMap): string[] {
+  const errors: string[] = [];
+  const definitions: Array<{ kind: PanelEntityKind; localIds: Set<string>; remoteIds: Set<string> }> = [
+    { kind: 'teams', localIds: new Set(tournament.teams.map((item) => item.id)), remoteIds: new Set(handoff.teams.map((item) => item.id)) },
+    { kind: 'speakers', localIds: new Set(tournament.speakers.map((item) => item.id)), remoteIds: new Set(handoff.speakers.map((item) => item.id)) },
+    { kind: 'judges', localIds: new Set(tournament.judges.map((item) => item.id)), remoteIds: new Set(handoff.judges.map((item) => item.id)) },
+    { kind: 'venues', localIds: new Set(tournament.venues.map((item) => item.id)), remoteIds: new Set(handoff.venues.map((item) => item.id)) },
+  ];
+  for (const definition of definitions) {
+    const seenRemote = new Set<string>();
+    for (const [localId, remoteId] of Object.entries(idMap[definition.kind] ?? {})) {
+      if (!definition.localIds.has(localId)) errors.push('El ID local «' + localId + '» no existe en ' + definition.kind + '.');
+      if (!definition.remoteIds.has(remoteId)) errors.push('El ID remoto «' + remoteId + '» no existe en ' + definition.kind + '.');
+      if (seenRemote.has(remoteId)) errors.push('El ID remoto «' + remoteId + '» está asignado a más de una entidad local en ' + definition.kind + '.');
+      seenRemote.add(remoteId);
+    }
+  }
+  return [...new Set(errors)];
 }
 
 export interface PanelOutboxDebate {
