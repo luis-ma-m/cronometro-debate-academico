@@ -40,6 +40,32 @@ describe("validateTabulationActaResult", () => {
     expect(validateTabulationActaResult({ ...payload, result: resultPayload }, elimination).result).toEqual(resultPayload);
     expect(() => validateTabulationActaResult({ ...payload, result: { ...resultPayload, ballots: [{ judgeId: "j1", totals: { a: 1 }, speeches: {} }] } }, elimination)).toThrow("votar por uno");
   });
+  it("rejects unknown ballot fields and intervention positions ignored by the outcome engine", () => {
+    const { context, payload } = fixture();
+    const ballot = payload.result.ballots[0];
+    expect(() => validateTabulationActaResult({
+      ...payload,
+      result: { ...payload.result, ballots: [{ ...ballot, speeches: { a: { unexpected_role: 50 } } }] },
+    }, context)).toThrow("posiciones o valores no válidos");
+    expect(() => validateTabulationActaResult({
+      ...payload,
+      result: { ...payload.result, ballots: [{ ...ballot, unexpected: true }, ...payload.result.ballots.slice(1)] },
+    }, context)).toThrow("no está asignado");
+  });
+  it("rejects joint acta rubric items outside the configured rubric", () => {
+    const { context, payload } = fixture();
+    const jointContext = { ...context, settings: presetSettings("aduma") };
+    const jointResult = result([], {
+      joint: {
+        winnerTeamId: "a",
+        items: { a: { unconfigured_item: 5 }, b: {} },
+        quickTotals: { a: 40, b: 30 },
+        speakers: { a: [], b: [] },
+      },
+    });
+    expect(() => validateTabulationActaResult({ ...payload, result: jointResult }, jointContext))
+      .toThrow("ítems desconocidos");
+  });
   it("rejects invalid penalty counters and speaker ownership", () => {
     const { context, payload } = fixture();
     expect(() => validateTabulationActaResult({ ...payload, result: { ...payload.result, penalties: { a: { warnings: -1, minors: 0, majors: 0, disqualified: false } } } }, context)).toThrow("sanciones");
