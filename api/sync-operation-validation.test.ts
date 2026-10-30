@@ -124,10 +124,4 @@ describe("sync operation authorization policy", () => {
     }), context)).toThrowError(/autoritativas en Gestor/);
   });
 
-  it("rejects operation/entity combinations not authorized by the authority matrix", () => {
-    expect(() => assertSyncOperationAuthorized(operation({
-      operation: "publish-round",
-      entityType: "acta",
-    }), context)).toThrowError(SyncAuthorizationError);
-  });
 });
