@@ -36,16 +36,53 @@ export interface SyncOutbox {
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const DEFAULT_LEASE_MS = 60_000;
-function stableValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (value && typeof value === 'object') {
-    const source = value as Record<string, unknown>;
-    return Object.fromEntries(Object.keys(source).sort().map((key) => [key, stableValue(source[key])]));
+function stableValue(value: unknown, ancestors = new Set<object>()): unknown {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error('El payload de sincronización contiene un número no finito.');
+    return value;
   }
-  if (typeof value === 'bigint' || typeof value === 'function' || typeof value === 'symbol' || value === undefined) {
+  if (typeof value !== 'object') {
     throw new Error('El payload de sincronización contiene un valor no serializable.');
   }
-  return value;
+  if (ancestors.has(value)) throw new Error('El payload de sincronización contiene una referencia circular.');
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      const ownKeys = Reflect.ownKeys(value);
+      if (ownKeys.some((key) => typeof key === 'symbol' || (key !== 'length' && (!/^\\d+$/.test(key) || Number(key) >= value.length)))) {
+        throw new Error('El payload de sincronización contiene propiedades de array no serializables.');
+      }
+      const result: unknown[] = [];
+      for (let index = 0; index < value.length; index++) {
+        if (!Object.prototype.hasOwnProperty.call(value, index)) {
+          throw new Error('El payload de sincronización contiene un array disperso no serializable.');
+        }
+        result.push(stableValue(value[index], ancestors));
+      }
+      return result;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error('El payload de sincronización solo admite objetos JSON planos.');
+    }
+    const keys = Reflect.ownKeys(value);
+    if (keys.some((key) => typeof key === 'symbol')) {
+      throw new Error('El payload de sincronización contiene claves no serializables.');
+    }
+    const source = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const key of (keys as string[]).sort()) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+        throw new Error('El payload de sincronización contiene propiedades no serializables.');
+      }
+      result[key] = stableValue(source[key], ancestors);
+    }
+    return result;
+  } finally {
+    ancestors.delete(value);
+  }
 }
 export function serializeSyncPayload(payload: unknown): string {
   let serialized: string;
