@@ -1,0 +1,78 @@
+import { describe, expect, it } from "vitest";
+import { presetSettings } from "../src/tabulation/presets.js";
+import { TabulationSettingsValidationError, validateTabulationSettings } from "./tabulation-settings-validation.js";
+
+function validSettings() {
+  return presetSettings("ledu-groups");
+}
+
+function expectInvalid(value: unknown) {
+  expect(() => validateTabulationSettings(value)).toThrow(TabulationSettingsValidationError);
+}
+
+describe("validateTabulationSettings", () => {
+  it("accepts a complete supported preset without mutating its input", () => {
+    const input = validSettings();
+    const before = structuredClone(input);
+    const result = validateTabulationSettings(input);
+
+    expect(result).toEqual(before);
+    expect(result).not.toBe(input);
+    expect(input).toEqual(before);
+  });
+
+  it.each([null, undefined, [], "rules", 12])("rejects non-object payloads (%s)", (value) => {
+    expectInvalid(value);
+  });
+
+  it("rejects missing and unknown schema keys", () => {
+    const missing = validSettings() as unknown as Record<string, unknown>;
+    delete missing.stage;
+    expectInvalid(missing);
+
+    const extra = { ...validSettings(), unexpected: true };
+    expectInvalid(extra);
+  });
+
+  it("rejects unsupported enum values and non-finite numbers", () => {
+    expectInvalid({ ...validSettings(), ballotMode: "automatic" });
+    expectInvalid({ ...validSettings(), groupCount: Number.NaN });
+    expectInvalid({ ...validSettings(), swissRounds: Number.POSITIVE_INFINITY });
+  });
+
+  it("rejects inconsistent score ranges and non-boolean flags", () => {
+    expectInvalid({ ...validSettings(), scoreMin: 10, scoreMax: 10 });
+    expectInvalid({ ...validSettings(), speakerScoreMin: 8, speakerScoreMax: 7 });
+    expectInvalid({ ...validSettings(), avoidSameInstitution: "false" });
+  });
+
+  it("rejects duplicate or unknown tiebreak criteria", () => {
+    expectInvalid({ ...validSettings(), tiebreaks: ["ballots", "ballots"] });
+    expectInvalid({ ...validSettings(), tiebreaks: ["unknown"] });
+  });
+
+  it("rejects malformed rubric entries and duplicate rubric IDs", () => {
+    const duplicate = validSettings();
+    duplicate.rubric = [
+      { id: "same", name: "A", section: "S", description: "" },
+      { id: "same", name: "B", section: "S", description: "" },
+    ];
+    expectInvalid(duplicate);
+
+    const malformed = validSettings();
+    malformed.rubric = [{ id: "bad id", name: "A", section: "S", description: "" }];
+    expectInvalid(malformed);
+  });
+
+  it("rejects invalid bracket seeds and oversized payloads", () => {
+    expectInvalid({ ...validSettings(), bracketSeedOrder: [1, 1] });
+    const oversized = validSettings();
+    oversized.rubric = Array.from({ length: 100 }, (_, index) => ({
+      id: "item-" + index,
+      name: "x".repeat(200),
+      section: "section",
+      description: "d".repeat(1000),
+    }));
+    expectInvalid(oversized);
+  });
+});
