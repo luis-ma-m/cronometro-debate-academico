@@ -13,7 +13,7 @@ export async function guardNetwork(context: BrowserContext, baseURL: string): Pr
     const url = new URL(route.request().url());
     if (url.origin === origin && url.pathname === '/api' && url.searchParams.get('action') === 'health' && route.request().method() === 'GET') {
       await route.fulfill({
-        status: 503,
+        status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ ok: false, error: { code: 'NOT_CONFIGURED', message: 'Backend intentionally unavailable in this offline test.' } }),
       });
