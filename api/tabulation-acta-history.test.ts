@@ -49,6 +49,7 @@ describe("readTabulationActaHistory", () => {
     expect(history.rewriteCount).toBe(1);
     expect(history.versions[0]).toMatchObject({
       id: "source-2", sourceMode: "joint", roundKind: "qualifying", baseRevision: 12,
+      sourceHash: "a".repeat(64), operationId: "operation-0002",
       supersedesSourceId: "source-1", createdAt: new Date("2026-10-30T12:00:00Z").getTime(),
     });
     expect(calls.some((call) => call.sql.includes("UPDATE") || call.sql.includes("INSERT") || call.sql.includes("DELETE"))).toBe(false);
