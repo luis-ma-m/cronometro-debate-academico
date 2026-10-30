@@ -62,7 +62,7 @@ function normalizePanelEntityIdMap(raw: unknown): PanelEntityIdMap | undefined {
   if (!isObject(raw)) return undefined;
   const read = (value: unknown): Record<string, string> => {
     if (!isObject(value)) return {};
-    return Object.fromEntries(Object.entries(value).filter(([localId, remoteId]) => localId.length > 0 && isText(remoteId)));
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => entry[0].length > 0 && isText(entry[1])));
   };
   return { teams: read(raw.teams), speakers: read(raw.speakers), judges: read(raw.judges), venues: read(raw.venues) };
 }
