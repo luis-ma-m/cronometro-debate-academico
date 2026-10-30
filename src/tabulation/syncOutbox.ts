@@ -71,7 +71,8 @@ function stableValue(value: unknown, ancestors = new Set<object>()): unknown {
       throw new Error('El payload de sincronización contiene claves no serializables.');
     }
     const source = value as Record<string, unknown>;
-    const result: Record<string, unknown> = {};
+    // A null-prototype object preserves the literal `__proto__` key instead of invoking its setter.
+    const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
     for (const key of (keys as string[]).sort()) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
