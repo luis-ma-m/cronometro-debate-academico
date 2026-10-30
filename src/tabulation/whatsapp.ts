@@ -235,7 +235,9 @@ export function buildActaLink(tournament: TabTournament, round: TabRound, debate
     rulesDiff(actaRules(tournament.settings)),
   ];
   const data = pack(compact, base62Encode);
-  // Keep the fragment alphanumeric and contiguous: WhatsApp iOS otherwise stops auto-linking at the first hyphen.\n  // The final 8 characters are the checksum, so no separator is needed.\n  return { url: baseUrl.replace(/\\/+$/, '') + ACTA_PAGE_PATH + '#A2' + data + cyrb53(data).slice(0, 8), link: linkFromCompact(compact)! };
+  // Keep the fragment alphanumeric and contiguous: WhatsApp iOS otherwise stops auto-linking at the first hyphen.
+  // The final 8 characters are the checksum, so no separator is needed.
+  return { url: baseUrl.replace(/\/+$/, '') + ACTA_PAGE_PATH + '#A2' + data + cyrb53(data).slice(0, 8), link: linkFromCompact(compact)! };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
