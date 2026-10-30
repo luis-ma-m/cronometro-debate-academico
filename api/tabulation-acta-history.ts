@@ -14,8 +14,6 @@ export interface TabulationActaHistoryVersion {
   roundKind: "qualifying" | "elimination";
   baseRevision: number;
   sourceHash: string;
-  sourcePayload: Record<string, unknown>;
-  rulesSnapshot: Record<string, unknown>;
   operationId: string;
   supersedesSourceId: string | null;
   createdBy: string;
@@ -63,7 +61,7 @@ export async function readTabulationActaHistory(
       [assignmentId],
     ),
     db.query(
-      "SELECT id::text AS id, source_mode, round_kind, base_revision, source_hash, source_payload, rules_snapshot, operation_id, supersedes_source_id::text AS supersedes_source_id, created_by, created_at FROM tabulation_acta_sources WHERE assignment_id = $1 AND tournament_id = $2 ORDER BY created_at DESC, id DESC LIMIT 101",
+      "SELECT id::text AS id, source_mode, round_kind, base_revision, source_hash, operation_id, supersedes_source_id::text AS supersedes_source_id, created_by, created_at FROM tabulation_acta_sources WHERE assignment_id = $1 AND tournament_id = $2 ORDER BY created_at DESC, id DESC LIMIT 101",
       [assignmentId, tournamentId],
     ),
   ]);
@@ -82,8 +80,6 @@ export async function readTabulationActaHistory(
     roundKind: row.round_kind === "elimination" ? "elimination" : "qualifying",
     baseRevision: Number(row.base_revision),
     sourceHash: asText(row.source_hash),
-    sourcePayload: asObject(row.source_payload),
-    rulesSnapshot: asObject(row.rules_snapshot),
     operationId: asText(row.operation_id),
     supersedesSourceId: asText(row.supersedes_source_id) || null,
     createdBy: asText(row.created_by),
@@ -98,5 +94,50 @@ export async function readTabulationActaHistory(
     rewriteCount,
     truncated: totalVersions > 100,
     versions,
+  };
+}
+
+export interface TabulationActaVersionDetail {
+  id: string;
+  assignmentId: string;
+  tournamentId: string;
+  sourceMode: "judges" | "joint";
+  roundKind: "qualifying" | "elimination";
+  baseRevision: number;
+  sourceHash: string;
+  sourcePayload: Record<string, unknown>;
+  rulesSnapshot: Record<string, unknown>;
+  operationId: string;
+  supersedesSourceId: string | null;
+  createdBy: string;
+  createdAt: number;
+}
+
+/** Fetch the potentially large immutable payload only when an operator opens one history entry. */
+export async function readTabulationActaVersion(
+  db: ActaHistoryQueryable,
+  assignmentId: string,
+  versionId: string,
+): Promise<TabulationActaVersionDetail> {
+  const result = await db.query(
+    "SELECT s.id::text AS id, s.assignment_id, s.tournament_id::text AS tournament_id, s.source_mode, s.round_kind, s.base_revision, s.source_hash, s.source_payload, s.rules_snapshot, s.operation_id, s.supersedes_source_id::text AS supersedes_source_id, s.created_by, s.created_at FROM tabulation_acta_sources s JOIN tournament_identity ti ON ti.tournament_id = s.tournament_id WHERE ti.id = 1 AND s.assignment_id = $1 AND s.id = $2",
+    [assignmentId, versionId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new ApiError("NOT_FOUND", "La versión de acta no existe para esta asignación.", 404);
+  return {
+    id: asText(row.id),
+    assignmentId: asText(row.assignment_id),
+    tournamentId: asText(row.tournament_id),
+    sourceMode: row.source_mode === "joint" ? "joint" : "judges",
+    roundKind: row.round_kind === "elimination" ? "elimination" : "qualifying",
+    baseRevision: Number(row.base_revision),
+    sourceHash: asText(row.source_hash),
+    sourcePayload: asObject(row.source_payload),
+    rulesSnapshot: asObject(row.rules_snapshot),
+    operationId: asText(row.operation_id),
+    supersedesSourceId: asText(row.supersedes_source_id) || null,
+    createdBy: asText(row.created_by),
+    createdAt: asMillis(row.created_at),
   };
 }
