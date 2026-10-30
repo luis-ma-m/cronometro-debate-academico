@@ -135,7 +135,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     if (!handoff || !tournament || readOnlyNotice()) return;
     const merged = mergeHandoff(tournament, handoff, Date.now(), idMap);
     if (merged.issues.length) { notify(merged.issues.join(' '), 'error'); return; }
-    if (!store.backup('Antes de vincular con el panel')) {\n      notify('No se ha podido crear la copia de seguridad previa. Libera espacio o exporta una copia antes de vincular.', 'error');\n      return;\n    }
+    if (!store.backup('Antes de vincular con el panel')) {
+      notify('No se ha podido crear la copia de seguridad previa. Libera espacio o exporta una copia antes de vincular.', 'error');
+      return;
+    }
     if (!store.update(() => merged.tournament, { type: 'tournament.link', message: 'Torneo local vinculado al panel mediante correspondencias revisadas.' })) {
       notify('No se ha podido guardar la vinculación. Los datos locales no se han modificado.', 'error');
       return;
