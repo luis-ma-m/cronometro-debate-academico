@@ -125,6 +125,12 @@ describe('durable sync outbox contract', () => {
     expect(() => serializeSyncPayload({ text: 'x'.repeat(1_048_577) })).toThrow('1 MB');
   });
 
+  it('preserves special object keys identically to the server canonicalizer', () => {
+    const payload = JSON.parse('{"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}},"safe":1}') as Record<string, unknown>;
+    expect(serializeSyncPayload(payload)).toBe('{"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}},"safe":1}');
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
   it('rejects values that JSON.stringify would silently coerce or discard', () => {
     expect(() => serializeSyncPayload({ date: new Date('2026-01-01T00:00:00Z') })).toThrow('objetos JSON planos');
     expect(() => serializeSyncPayload({ map: new Map([['a', 1]]) })).toThrow('objetos JSON planos');
