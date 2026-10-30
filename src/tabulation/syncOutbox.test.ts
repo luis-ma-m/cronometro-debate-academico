@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createSyncPayloadHash as createServerSyncPayloadHash } from '../../api/sync-operation-validation';
 import {
   createSyncOutbox, hashSyncPayload, serializeSyncPayload,
   type PendingSyncOperation, type SyncOutboxRepository,
@@ -123,6 +124,11 @@ describe('durable sync outbox contract', () => {
     await expect(outbox.enqueue({ tournamentId: 't', entityType: 'round', entityId: 'r', operation: 'publish-round', baseRevision: -1, payload: {} })).rejects.toThrow('revisión base');
     expect(() => serializeSyncPayload({ bad: undefined })).toThrow('no serializable');
     expect(() => serializeSyncPayload({ text: 'x'.repeat(1_048_577) })).toThrow('1 MB');
+  });
+
+  it('produces the same payload hash in browser and server implementations', async () => {
+    const payload = JSON.parse('{"__proto__":{"x":1},"nested":{"b":2,"a":1}}') as Record<string, unknown>;
+    expect(await hashSyncPayload(payload)).toBe(createServerSyncPayloadHash(payload));
   });
 
   it('preserves special object keys identically to the server canonicalizer', () => {
