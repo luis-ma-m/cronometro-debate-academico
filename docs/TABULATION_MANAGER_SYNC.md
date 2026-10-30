@@ -621,3 +621,18 @@ Esta corrección no amplía el alcance funcional: no hay endpoint ni worker, y e
 ### Ajuste de compatibilidad ESM en pruebas
 
 La compilación Preview detectó imports relativos sin extensión en los archivos de test del validador (TypeScript con resolución Node16/NodeNext). Se corrigieron para usar la extensión `.js` que espera el proyecto ESM. La compilación de Vercel llegó a completar el despliegue, pero el log de diagnóstico mostró ese error de TypeScript en los tests; por tanto, el build anterior no se considera validación suficiente de esta corrección. Se espera un nuevo Preview con el ajuste.
+
+
+## Incremento: política de autorización para operaciones entrantes
+
+Se añade `api/sync-operation-policy.ts` como segunda frontera, separada del validador del sobre de transporte. La política aplica la matriz de autoridad aprobada para operaciones Tabulación → Gestor:
+
+- Requiere que el llamador indique que la sesión privada del gestor ya se ha verificado.
+- Compara el UUID de la operación con la identidad canónica cargada por el servidor; nunca confía en el nombre ni en IDs locales.
+- Solo admite la vía explícita `publish-round` sobre `round` y `replace-acta` sobre `acta`.
+- Rechaza `upsert` genérico: permitirlo podría modificar equipos, jueces, oradores o salas saltándose la autoridad del gestor y sus validaciones específicas.
+- Rechaza escrituras `settings` desde Tabulación: las reglas solo se editan en Gestor → Configuración.
+
+La política devuelve códigos diferenciados para sesión ausente, identidad de torneo distinta y operación no permitida. Se añaden pruebas de los límites de autorización.
+
+**Límite deliberado:** esta política todavía no está conectada a un endpoint ni realiza escrituras. El siguiente paso es definir validadores de dominio para publicación de ronda y acta, y después implementar la recepción transaccional con idempotencia, revisión y auditoría. No hay worker HTTP ni ACK remoto. No se han ejecutado migraciones ni escrituras en Neon.
