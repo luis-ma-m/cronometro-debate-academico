@@ -514,6 +514,9 @@ async function saveTabulationSettings(payload: Record<string, unknown>): Promise
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof ApiError) throw error;
+    if (isMissingTabulationSettingsMigration(error)) {
+      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0010_tabulation_settings.sql en la base de datos del entorno. No se ha modificado ningún dato.", 503);
+    }
     throw new ApiError("DATABASE_UNAVAILABLE", "No se han podido guardar las reglas de tabulación en PostgreSQL.", 503);
   } finally {
     client.release();
