@@ -21,9 +21,57 @@ const text = (v: unknown): v is string => typeof v === "string" && v.trim().leng
 const finite = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const onlyKeys = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).every((key) => keys.includes(key));
 
+function validateJointShape(value: unknown, teamIds: string[], rubricIds: string[], speakers: Map<string, TabSpeaker>, issues: string[]) {
+  if (!record(value)) return;
+  if (!onlyKeys(value, ["winnerTeamId", "items", "quickTotals", "writtenTotals", "speakers"])) issues.push("El acta conjunta contiene campos desconocidos.");
+  if (!teamIds.includes(value.winnerTeamId as string)) issues.push("El ganador declarado no pertenece al debate.");
+  if (!record(value.items) || !onlyKeys(value.items, teamIds)) {
+    issues.push("Los ítems del acta conjunta contienen equipos no válidos.");
+  } else {
+    for (const [teamId, rawItems] of Object.entries(value.items)) {
+      if (!record(rawItems) || !onlyKeys(rawItems, rubricIds)) {
+        issues.push("El detalle de rúbrica contiene ítems desconocidos o una estructura no válida para " + teamId + ".");
+        continue;
+      }
+      if (Object.values(rawItems).some((score) => !finite(score))) issues.push("Los ítems de rúbrica deben contener puntuaciones numéricas finitas.");
+    }
+  }
+  for (const field of ["quickTotals", "writtenTotals"] as const) {
+    const totals = value[field];
+    if (totals !== undefined && (!record(totals) || !onlyKeys(totals, teamIds)
+      || Object.values(totals).some((score) => !finite(score)))) {
+      issues.push("Los totales " + field + " del acta conjunta no son válidos.");
+    }
+  }
+  if (!record(value.speakers) || !onlyKeys(value.speakers, teamIds)) {
+    issues.push("Las puntuaciones de oradores contienen equipos no válidos.");
+    return;
+  }
+  for (const [teamId, entries] of Object.entries(value.speakers)) {
+    if (!Array.isArray(entries)) {
+      issues.push("La lista de oradores del acta conjunta no es válida.");
+      continue;
+    }
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      if (!record(entry) || !onlyKeys(entry, ["speakerId", "score", "roles"])
+        || !text(entry.speakerId) || speakers.get(entry.speakerId)?.teamId !== teamId
+        || !finite(entry.score) || !Array.isArray(entry.roles)
+        || entry.roles.some((role) => !["introductor", "first_rebuttal", "second_rebuttal", "concluder"].includes(String(role)))
+        || new Set(entry.roles).size !== entry.roles.length) {
+        issues.push("Una puntuación conjunta de orador contiene datos o referencias no válidas.");
+        continue;
+      }
+      if (seen.has(entry.speakerId)) issues.push("Un orador aparece dos veces en la lista conjunta de su equipo.");
+      seen.add(entry.speakerId);
+    }
+  }
+}
+
 function validateResult(value: unknown, context: TabulationActaDomainContext): TabDebateResult {
   if (!record(value)) throw new TabulationActaValidationError(["El resultado del acta debe ser un objeto."]);
   const issues: string[] = [];
+  if (!onlyKeys(value, ["lineup", "ballots", "penalties", "override", "joint", "notes", "updatedAt"])) issues.push("El resultado contiene campos desconocidos.");
   if (!record(value.lineup) || !Array.isArray(value.ballots) || !record(value.penalties)
     || typeof value.notes !== "string" || !finite(value.updatedAt) || value.updatedAt <= 0) {
     throw new TabulationActaValidationError(["La estructura básica del resultado no es válida."]);
@@ -35,6 +83,8 @@ function validateResult(value: unknown, context: TabulationActaDomainContext): T
   const lineup = value.lineup as Record<string, unknown>;
   if (!onlyKeys(lineup, teamIds)) issues.push("La alineación contiene equipos ajenos al debate.");
   const roles = ["introductor", "first_rebuttal", "second_rebuttal", "concluder"];
+  if (teamIds[0] === teamIds[1]) issues.push("El debate debe enfrentar a dos equipos distintos.");
+  if (new Set(context.debate.judgeIds).size !== context.debate.judgeIds.length) issues.push("El panel del debate contiene jueces duplicados.");
   for (const [teamId, row] of Object.entries(lineup)) {
     if (!teamIds.includes(teamId) || !record(row)) { issues.push("La alineación contiene una referencia no válida."); continue; }
     if (!onlyKeys(row, roles)) issues.push("La alineación contiene posiciones desconocidas.");
@@ -47,7 +97,7 @@ function validateResult(value: unknown, context: TabulationActaDomainContext): T
   const penalties = value.penalties as Record<string, unknown>;
   if (!onlyKeys(penalties, teamIds)) issues.push("Las sanciones contienen equipos ajenos al debate.");
   for (const [teamId, p] of Object.entries(penalties)) {
-    if (!teamIds.includes(teamId) || !record(p)
+    if (!teamIds.includes(teamId) || !record(p) || !onlyKeys(p, ["warnings", "minors", "majors", "disqualified"])
       || !Number.isInteger(p.warnings) || (p.warnings as number) < 0 || (p.warnings as number) > 100
       || !Number.isInteger(p.minors) || (p.minors as number) < 0 || (p.minors as number) > 100
       || !Number.isInteger(p.majors) || (p.majors as number) < 0 || (p.majors as number) > 100
@@ -55,13 +105,19 @@ function validateResult(value: unknown, context: TabulationActaDomainContext): T
   }
   const ballots = value.ballots as unknown[], seen = new Set<string>();
   for (const ballot of ballots) {
-    if (!record(ballot) || !text(ballot.judgeId) || !judgeIds.has(ballot.judgeId)) {
+    if (!record(ballot) || !onlyKeys(ballot, ["judgeId", "totals", "speeches", "winnerTeamId"]) || !text(ballot.judgeId) || !judgeIds.has(ballot.judgeId)) {
       issues.push("Una papeleta pertenece a un juez que no está asignado al debate."); continue;
     }
     if (seen.has(ballot.judgeId)) issues.push("Un juez tiene más de una papeleta para el mismo debate.");
     seen.add(ballot.judgeId);
     if (!record(ballot.totals) || !record(ballot.speeches)) { issues.push("La papeleta contiene puntuaciones o intervenciones no válidas."); continue; }
     if (!onlyKeys(ballot.totals, teamIds) || !onlyKeys(ballot.speeches, teamIds)) issues.push("La papeleta contiene equipos ajenos al debate.");
+    if (Object.values(ballot.totals).some((score) => !finite(score))) issues.push("Las puntuaciones de la papeleta deben ser numéricas y finitas.");
+    for (const speechRow of Object.values(ballot.speeches)) {
+      if (!record(speechRow) || !onlyKeys(speechRow, roles) || Object.values(speechRow).some((score) => !finite(score))) {
+        issues.push("Las puntuaciones de intervención contienen posiciones o valores no válidos.");
+      }
+    }
     if (context.round.kind === "elimination") {
       if (ballot.winnerTeamId !== a && ballot.winnerTeamId !== b) issues.push("Cada papeleta eliminatoria debe votar por uno de los dos equipos.");
       if (Object.keys(ballot.totals).length) issues.push("Las eliminatorias registran votos, no puntuaciones de clasificatoria.");
@@ -74,9 +130,12 @@ function validateResult(value: unknown, context: TabulationActaDomainContext): T
     if (ballots.length) issues.push("El modo de acta conjunta no admite papeletas individuales.");
     if (!record(value.joint)) issues.push("Falta el acta conjunta configurada para este torneo.");
   } else if (value.joint !== undefined) issues.push("El torneo está configurado para papeletas individuales, no para acta conjunta.");
+  if (value.joint !== undefined && context.settings.ballotMode === "joint") {
+    validateJointShape(value.joint, teamIds, context.settings.rubric.map((item) => item.id), speakers, issues);
+  }
   if (value.override !== undefined) {
     const override = value.override as Record<string, unknown>;
-    if (!teamIds.includes(override.winnerTeamId as string) || !text(override.reason)) {
+    if (!onlyKeys(override, ["winnerTeamId", "reason"]) || !teamIds.includes(override.winnerTeamId as string) || !text(override.reason)) {
       issues.push("La decisión manual debe identificar un equipo del debate y justificar el motivo.");
     }
   }
