@@ -70,13 +70,13 @@ export function PanelLinkReview({ tournament, handoff, onCancel, onConfirm }: {
           const suggestion = matches.length === 1 ? matches[0] : undefined;
           const selected = selections[kind][remote.id] ?? '__new__';
           return <label className="tab-field" key={remote.id}>
-            <span>{remote.name}</span>
+            <span>{remote.name}{'institution' in remote && remote.institution ? ' · ' + remote.institution : ''}</span>
             <select value={selected} onChange={(event) => {
               setSelections((current) => ({ ...current, [kind]: { ...current[kind], [remote.id]: event.target.value } }));
               setError('');
             }}>
               <option value="__new__">Crear nueva entidad local</option>
-              {localItems[kind].map((local) => <option value={local.id} key={local.id}>{local.name} · {local.id}</option>)}
+              {localItems[kind].map((local) => <option value={local.id} key={local.id}>{local.name}{'institution' in local && local.institution ? ' · ' + local.institution : ''} · {local.id}</option>)}
             </select>
             <small>{matches.length > 1
               ? matches.length + ' posibles coincidencias; selecciona manualmente.'
