@@ -64,6 +64,50 @@ CREATE TRIGGER tabulation_acta_source_scorecard_assignment_check
 BEFORE INSERT OR UPDATE OF assignment_id, scorecard_id ON tabulation_acta_sources
 FOR EACH ROW EXECUTE FUNCTION enforce_tabulation_acta_source_scorecard_assignment();
 
+-- Serialize source creation per assignment and require a linear version chain.
+CREATE OR REPLACE FUNCTION guard_tabulation_acta_source_version()
+RETURNS trigger LANGUAGE plpgsql AS $
+DECLARE current_source uuid;
+BEGIN
+  PERFORM 1 FROM room_assignments WHERE id = NEW.assignment_id FOR UPDATE;
+  SELECT source_id INTO current_source
+  FROM tabulation_acta_heads
+  WHERE assignment_id = NEW.assignment_id
+  FOR UPDATE;
+
+  IF current_source IS NULL AND NEW.supersedes_source_id IS NOT NULL THEN
+    RAISE EXCEPTION 'The first Tabulation acta source cannot supersede another version'
+      USING ERRCODE = '23514';
+  END IF;
+  IF current_source IS NOT NULL AND NEW.supersedes_source_id IS DISTINCT FROM current_source THEN
+    RAISE EXCEPTION 'Tabulation acta source must supersede the current version'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$;
+DROP TRIGGER IF EXISTS tabulation_acta_source_version_guard ON tabulation_acta_sources;
+CREATE TRIGGER tabulation_acta_source_version_guard
+BEFORE INSERT ON tabulation_acta_sources
+FOR EACH ROW EXECUTE FUNCTION guard_tabulation_acta_source_version();
+
+-- Advancing the head in the same transaction makes the accepted source and
+-- the visible current version inseparable, including under concurrent writes.
+CREATE OR REPLACE FUNCTION advance_tabulation_acta_head()
+RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+  INSERT INTO tabulation_acta_heads (assignment_id, source_id, updated_at)
+  VALUES (NEW.assignment_id, NEW.id, NEW.created_at)
+  ON CONFLICT (assignment_id) DO UPDATE
+    SET source_id = EXCLUDED.source_id, updated_at = EXCLUDED.updated_at;
+  RETURN NEW;
+END;
+$;
+DROP TRIGGER IF EXISTS tabulation_acta_source_advance_head ON tabulation_acta_sources;
+CREATE TRIGGER tabulation_acta_source_advance_head
+AFTER INSERT ON tabulation_acta_sources
+FOR EACH ROW EXECUTE FUNCTION advance_tabulation_acta_head();
+
 CREATE OR REPLACE FUNCTION prevent_tabulation_acta_source_mutation()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
