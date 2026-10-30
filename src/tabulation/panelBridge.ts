@@ -179,6 +179,17 @@ export function mergeHandoff(
     issues.push('Este torneo local todavía no está vinculado. La vinculación inicial requiere una revisión explícita de las correspondencias.');
     return { tournament, added, updated, warnings, issues };
   }
+  if (tournament.panelLink?.remoteId && tournament.panelLink.remoteRevision !== undefined) {
+    if (handoff.revision === undefined || handoff.updatedAt === undefined) {
+      issues.push('El snapshot recibido no incluye revisión y fecha de actualización; no se puede comprobar si está obsoleto.');
+      return { tournament, added, updated, warnings, issues };
+    }
+    if (handoff.revision < tournament.panelLink.remoteRevision
+      || (handoff.revision === tournament.panelLink.remoteRevision && tournament.panelLink.remoteUpdatedAt !== undefined && handoff.updatedAt < tournament.panelLink.remoteUpdatedAt)) {
+      issues.push('El snapshot recibido es más antiguo que la última versión aplicada. No se han modificado datos locales.');
+      return { tournament, added, updated, warnings, issues };
+    }
+  }
   if (tournament.panelLink && tournament.panelLink.tournamentName !== handoff.tournamentName) {
     warnings.push('Este torneo se enlazó con «' + tournament.panelLink.tournamentName + '» y los datos vienen de «' + handoff.tournamentName + '».');
   }
@@ -298,7 +309,7 @@ export function mergeHandoff(
       panelLink: {
         tournamentName: handoff.tournamentName,
         linkedAt: tournament.panelLink?.linkedAt ?? now,
-        ...(handoff.tournamentId ? { remoteId: handoff.tournamentId, idMap } : {}),
+        ...(handoff.tournamentId ? { remoteId: handoff.tournamentId, ...(typeof handoff.revision === 'number' ? { remoteRevision: handoff.revision } : {}), ...(typeof handoff.updatedAt === 'number' ? { remoteUpdatedAt: handoff.updatedAt } : {}), idMap } : {}),
       },
     },
     added,
