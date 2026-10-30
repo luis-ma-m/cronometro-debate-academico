@@ -264,6 +264,62 @@ describe('tabulation → panel', () => {
   });
 });
 
+
+  it('translates local entity IDs through the reviewed map before sending a round', () => {
+    const source = { ...panel(), remoteId: 'remote-tournament-123' };
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.panelLink!.idMap = {
+      teams: { t1: 't3', t2: 't4', t3: 't1', t4: 't2' },
+      speakers: { s1: 's1' },
+      judges: { j2: 'j3', j3: 'j2' },
+      venues: { 'physical-a1': 'physical-a2', 'physical-a2': 'physical-a1' },
+    };
+    const { outbox, issues } = buildOutbox(tab, 'r1', now);
+    expect(issues).toEqual([]);
+    expect(outbox).toMatchObject({
+      tournamentId: 'remote-tournament-123',
+      basePanelRevision: 1,
+      basePanelUpdatedAt: now,
+      debates: [
+        { physicalRoomId: 'physical-a2', teamFavorId: 't3', teamContraId: 't1', judgeIds: ['j3'] },
+        { physicalRoomId: 'physical-a1', teamFavorId: 't4', teamContraId: 't2', judgeIds: ['j2'] },
+      ],
+    });
+    const applied = applyOutboxToPanel(source, 'r2', outbox!, { makeId, now });
+    expect(applied.issues).toEqual([]);
+    expect(applied.rooms!.filter((room) => room.roundId === 'r2').map((room) => [room.physicalRoomId, room.teamFavorId, room.teamContraId, room.judgeIds])).toEqual([
+      ['physical-a2', 't3', 't1', ['j3']],
+      ['physical-a1', 't4', 't2', ['j2']],
+    ]);
+  });
+
+  it('rejects a round proposal for a different manager tournament identity', () => {
+    const source = { ...panel(), remoteId: 'remote-tournament-123' };
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    const outbox = buildOutbox(tab, 'r1', now).outbox!;
+    const result = applyOutboxToPanel({ ...source, remoteId: 'another-tournament' }, 'r2', outbox, { makeId, now });
+    expect(result.rooms).toBeNull();
+    expect(result.issues.join(' ')).toContain('otra identidad');
+  });
+
+  it('rejects a round proposal when the manager revision changed after the tabulation snapshot', () => {
+    const source = { ...panel(), remoteId: 'remote-tournament-123' };
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    const outbox = buildOutbox(tab, 'r1', now).outbox!;
+    const result = applyOutboxToPanel({ ...source, revision: source.revision + 1, updatedAt: now + 1 }, 'r2', outbox, { makeId, now });
+    expect(result.rooms).toBeNull();
+    expect(result.issues.join(' ')).toContain('El gestor ha cambiado');
+  });
+
+  it('requires a manager mapping for every linked entity used by the proposed round', () => {
+    const source = { ...panel(), remoteId: 'remote-tournament-123' };
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    delete tab.panelLink!.idMap!.teams.t1;
+    const result = buildOutbox(tab, 'r1', now);
+    expect(result.outbox).toBeNull();
+    expect(result.issues.join(' ')).toContain('no tiene correspondencia');
+  });
+
 describe('ADUMA rounds sent to the panel', () => {
   it('skips debates against a fallen team, which are not held', () => {
     const source = panel();
