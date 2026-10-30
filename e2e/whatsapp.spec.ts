@@ -30,6 +30,9 @@ test('un juez rellena el acta en el móvil y la mesa la recibe por WhatsApp', as
   expect(sendLink).toMatch(/^https:\/\/wa\.me\/\d*\?text=/);
   const actaUrl = (await desk.getByRole('link', { name: /Abrir el acta de/ }).first().getAttribute('href'))!;
   expect(decodeURIComponent(sendLink!.split('?text=')[1])).toContain(actaUrl);
+  // WhatsApp iOS must see the entire fragment as one URL: no separators after #A2.
+  expect(actaUrl).toMatch(/#A2[0-9A-Za-z]+$/);
+  expect(actaUrl.slice(actaUrl.indexOf('#A2'))).not.toContain('-');
 
   // The judge's phone.
   const phone = await context.newPage();
