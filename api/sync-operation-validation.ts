@@ -37,7 +37,7 @@ export function canonicalSyncPayload(value: unknown, ancestors = new Set<object>
     try {
       if (Array.isArray(item)) {
         const keys = Reflect.ownKeys(item);
-        if (keys.some((key) => typeof key === "symbol" || (key !== "length" && (!/^\d+$/.test(key)test(key) || Number(key) >= item.length)))) {
+        if (keys.some((key) => typeof key === "symbol" || (key !== "length" && (!/^\d+$/.test(key) || Number(key) >= item.length)))) {
           invalid("El payload contiene propiedades de array no serializables.");
         }
         const result: unknown[] = [];
