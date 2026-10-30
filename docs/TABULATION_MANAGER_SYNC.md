@@ -697,11 +697,11 @@ Se incorpora la acción autenticada `getTabulationActaHistory` y el lector `api/
 
 - Requiere sesión privada y un `assignmentId` existente; no acepta un `tournamentId` arbitrario del cliente. Resuelve la identidad canónica desde el singleton del gestor.
 - Lee en una transacción `REPEATABLE READ READ ONLY` el puntero de versión vigente, el total de versiones, el total de reescrituras y las últimas 100 versiones.
-- Devuelve el payload fuente y el snapshot de reglas de cada versión, el hash, el `operationId`, la versión sustituida y la fecha/actor.
+- Devuelve metadatos de cada versión (hash, `operationId`, versión sustituida, fecha/actor), sin cargar todos los payloads íntegros en la respuesta de lista. La acción autenticada `getTabulationActaVersion` recupera el payload fuente y snapshot de reglas de una versión concreta cuando el operador abre su detalle.
 - El contador de reescrituras se calcula en PostgreSQL contando versiones con `supersedes_source_id`; no se guarda ni incrementa desde el navegador.
 - Si hay más de 100 versiones, informa `truncated: true` y conserva el total real. No presenta una historia parcial como si estuviera completa.
 - Es una consulta de solo lectura. No crea ACK, no cambia el estado de outbox y no sustituye puntuaciones.
 
-La consulta requiere la migración `0012_tabulation_acta_sources.sql`; si no está aplicada, devuelve `MIGRATION_REQUIRED` y no intenta crear tablas ni ejecutar migraciones. Se han añadido pruebas para historial vacío, versión vigente, recuento de reescrituras, límite de lectura, asignación inexistente y contadores incoherentes.
+La consulta requiere la migración `0012_tabulation_acta_sources.sql`; si no está aplicada, devuelve `MIGRATION_REQUIRED` y no intenta crear tablas ni ejecutar migraciones. Se han añadido pruebas para historial vacío, versión vigente, recuento de reescrituras, límite de lectura, detalle bajo demanda, aislamiento por asignación, asignación inexistente y contadores incoherentes.
 
 **Pendiente:** conectar esta respuesta a la interfaz de la sala para mostrar el historial y el contador, e implementar la operación de escritura oficial con diff y confirmación. El endpoint no debe invocarse desde la UI hasta que el vínculo remoto y la asignación hayan sido verificados.
