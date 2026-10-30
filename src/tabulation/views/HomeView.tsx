@@ -111,13 +111,14 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     store.create(tournamentFromHandoff(handoff, presetId));
     clearHandoff(window.localStorage);
     setHandoffVersion((value) => value + 1);
-    notify('Torneo creado con los participantes del panel. Revisa las reglas, los niveles de los jueces y quién puede presidir.');
+    notify('Torneo creado y vinculado con la identidad del panel. Revisa las reglas, los niveles de los jueces y quién puede presidir.');
     onNavigate('reglas');
   };
 
   const mergeFromPanel = () => {
     if (!handoff || !tournament) return;
     const merged = mergeHandoff(tournament, handoff);
+    if (merged.issues.length) { notify(merged.issues.join(' '), 'error'); return; }
     store.backup('Antes de actualizar desde el panel');
     if (!store.update(() => merged.tournament, { type: 'tournament.import', message: 'Participantes actualizados desde el panel: ' + merged.added + ' nuevos y ' + merged.updated + ' modificados.' })) {
       notify('No se han podido aplicar los datos del panel en esta pestaña.', 'error');
