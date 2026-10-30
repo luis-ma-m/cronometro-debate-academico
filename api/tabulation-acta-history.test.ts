@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "./core.js";
-import { readTabulationActaHistory, type ActaHistoryQueryable } from "./tabulation-acta-history.js";
+import { readTabulationActaHistory, readTabulationActaVersion, type ActaHistoryQueryable } from "./tabulation-acta-history.js";
 
 const tournamentId = "123e4567-e89b-42d3-a456-426614174000";
 
@@ -40,8 +40,7 @@ describe("readTabulationActaHistory", () => {
       total: 2, rewrites: 1, head: "source-2",
       history: [{
         id: "source-2", source_mode: "joint", round_kind: "qualifying", base_revision: 12,
-        source_hash: "a".repeat(64), source_payload: { result: { winner: "team-a" } },
-        rules_snapshot: { presetId: "aduma" }, operation_id: "operation-0002",
+        source_hash: "a".repeat(64), operation_id: "operation-0002",
         supersedes_source_id: "source-1", created_by: "admin", created_at: new Date("2026-10-30T12:00:00Z"),
       }],
     });
@@ -50,7 +49,6 @@ describe("readTabulationActaHistory", () => {
     expect(history.rewriteCount).toBe(1);
     expect(history.versions[0]).toMatchObject({
       id: "source-2", sourceMode: "joint", roundKind: "qualifying", baseRevision: 12,
-      sourcePayload: { result: { winner: "team-a" } }, rulesSnapshot: { presetId: "aduma" },
       supersedesSourceId: "source-1", createdAt: new Date("2026-10-30T12:00:00Z").getTime(),
     });
     expect(calls.some((call) => call.sql.includes("UPDATE") || call.sql.includes("INSERT") || call.sql.includes("DELETE"))).toBe(false);
@@ -59,7 +57,7 @@ describe("readTabulationActaHistory", () => {
   it("caps the returned history at 100 while preserving the total and rewrite count", async () => {
     const historyRows = Array.from({ length: 101 }, (_, index) => ({
       id: "source-" + index, source_mode: "judges", round_kind: "qualifying", base_revision: 1,
-      source_hash: "b".repeat(64), source_payload: {}, rules_snapshot: {}, operation_id: "operation-" + index,
+      source_hash: "b".repeat(64), operation_id: "operation-" + index,
       supersedes_source_id: index ? "source-" + (index - 1) : null, created_by: "admin", created_at: new Date(index * 1000),
     }));
     const { db } = fakeDb({ total: 125, rewrites: 124, history: historyRows });
@@ -68,6 +66,32 @@ describe("readTabulationActaHistory", () => {
     expect(history.totalVersions).toBe(125);
     expect(history.rewriteCount).toBe(124);
     expect(history.truncated).toBe(true);
+  });
+
+
+  it("loads a full immutable payload only when a specific version is opened", async () => {
+    const db: ActaHistoryQueryable = {
+      async query(sql) {
+        if (sql.includes("FROM tabulation_acta_sources s JOIN tournament_identity")) return { rows: [{
+          id: "source-2", assignment_id: "assignment-1", tournament_id: tournamentId,
+          source_mode: "judges", round_kind: "qualifying", base_revision: 9,
+          source_hash: "c".repeat(64), source_payload: { ballots: [{ judgeId: "judge-1" }] },
+          rules_snapshot: { presetId: "ledu-groups" }, operation_id: "operation-detail",
+          supersedes_source_id: "source-1", created_by: "admin", created_at: new Date("2026-10-30T13:00:00Z"),
+        }] };
+        throw new Error("Unexpected SQL query: " + sql);
+      },
+    };
+    const detail = await readTabulationActaVersion(db, "assignment-1", "source-2");
+    expect(detail.sourcePayload).toEqual({ ballots: [{ judgeId: "judge-1" }] });
+    expect(detail.rulesSnapshot).toEqual({ presetId: "ledu-groups" });
+    expect(detail.supersedesSourceId).toBe("source-1");
+  });
+
+  it("does not expose a version belonging to another assignment or tournament", async () => {
+    const db: ActaHistoryQueryable = { async query() { return { rows: [] }; } };
+    await expect(readTabulationActaVersion(db, "assignment-1", "source-elsewhere"))
+      .rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
   });
 
   it("does not return an empty history for an unknown assignment", async () => {
