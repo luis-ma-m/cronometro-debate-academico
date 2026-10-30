@@ -18,6 +18,8 @@ export interface PanelHandoff {
   format: 'ledu-tabulacion-handoff';
   version: 1;
   createdAt: number;
+  /** Canonical ID supplied by the authenticated manager; absent only in legacy/demo mode. */
+  tournamentId?: string;
   tournamentName: string;
   teams: Array<Pick<Team, 'id' | 'name' | 'institution' | 'active' | 'incompatibleJudgeIds'>>;
   speakers: Speaker[];
@@ -60,6 +62,7 @@ export function buildPanelHandoff(panel: Tournament, now = Date.now()): PanelHan
     format: 'ledu-tabulacion-handoff',
     version: 1,
     createdAt: now,
+    ...(panel.remoteId ? { tournamentId: panel.remoteId } : {}),
     tournamentName: panel.tournamentName,
     teams: panel.teams.map(({ id, name, institution, active, incompatibleJudgeIds }) => ({ id, name, institution, active, incompatibleJudgeIds: [...incompatibleJudgeIds] })),
     speakers: (panel.speakers ?? []).map((speaker) => ({ ...speaker })),
@@ -74,7 +77,7 @@ export const clearHandoff = (storage: SimpleStorage) => storage.removeItem(HANDO
 export const writeOutbox = (storage: SimpleStorage, outbox: PanelOutbox) => storage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
 export const readOutbox = (storage: SimpleStorage) => readJson<PanelOutbox>(storage, OUTBOX_KEY, 'ledu-tabulacion-outbox');
 
-export interface MergeSummary { tournament: TabTournament; added: number; updated: number; warnings: string[] }
+export interface MergeSummary { tournament: TabTournament; added: number; updated: number; warnings: string[]; issues: string[] }
 
 /**
  * Brings the panel participants into a tabulation (same IDs). The panel owns names, institutions and
@@ -85,6 +88,19 @@ export function mergeHandoff(tournament: TabTournament, handoff: PanelHandoff, n
   let added = 0;
   let updated = 0;
   const warnings: string[] = [];
+  const issues: string[] = [];
+  if (tournament.panelLink?.remoteId && handoff.tournamentId !== tournament.panelLink.remoteId) {
+    issues.push('El torneo local está vinculado a otra identidad remota. No se han aplicado cambios.');
+    return { tournament, added, updated, warnings, issues };
+  }
+  if (tournament.panelLink && handoff.tournamentId && !tournament.panelLink.remoteId) {
+    issues.push('Este torneo tiene un vínculo antiguo sin identidad verificable. Crea una copia vinculada desde el panel; no se fusionarán datos por nombre.');
+    return { tournament, added, updated, warnings, issues };
+  }
+  if (!tournament.panelLink && handoff.tournamentId) {
+    issues.push('Este torneo local todavía no está vinculado. La vinculación inicial requiere una revisión explícita; crea primero una copia desde el panel.');
+    return { tournament, added, updated, warnings, issues };
+  }
   if (tournament.panelLink && tournament.panelLink.tournamentName !== handoff.tournamentName) {
     warnings.push('Este torneo se enlazó con «' + tournament.panelLink.tournamentName + '» y los datos vienen de «' + handoff.tournamentName + '».');
   }
@@ -116,15 +132,20 @@ export function mergeHandoff(tournament: TabTournament, handoff: PanelHandoff, n
   );
   const venues = merge(tournament.venues, handoff.venues, (existing, next) => ({ ...existing, name: next.name }));
   return {
-    tournament: { ...tournament, teams, speakers, judges, venues, panelLink: { tournamentName: handoff.tournamentName, linkedAt: now } },
+    tournament: { ...tournament, teams, speakers, judges, venues, panelLink: { tournamentName: handoff.tournamentName, linkedAt: now, ...(handoff.tournamentId ? { remoteId: handoff.tournamentId } : {}) } },
     added,
     updated,
     warnings,
+    issues,
   };
 }
 
 export function tournamentFromHandoff(handoff: PanelHandoff, presetId: PresetId, now = Date.now(), seed = randomSeed()): TabTournament {
-  return mergeHandoff(createTabTournament(handoff.tournamentName, presetId, now, seed), handoff, now).tournament;
+  const created = createTabTournament(handoff.tournamentName, presetId, now, seed);
+  const linked = handoff.tournamentId
+    ? { ...created, panelLink: { tournamentName: handoff.tournamentName, linkedAt: now, remoteId: handoff.tournamentId } }
+    : created;
+  return mergeHandoff(linked, handoff, now).tournament;
 }
 
 export interface OutboxResult { outbox: PanelOutbox | null; issues: string[]; warnings: string[] }
