@@ -153,9 +153,9 @@ export const readOutbox = (storage: SimpleStorage) => readJson<PanelOutbox>(stor
 export interface MergeSummary { tournament: TabTournament; added: number; updated: number; warnings: string[]; issues: string[] }
 
 /**
- * Brings the panel participants into a tabulation (same IDs). The panel owns names, institutions and
- * incompatibilities; the tabulation keeps its own judge levels, chairs, availability, swing, break eligibility
- * and active flags. Nothing is ever deleted.
+ * Reconciles panel participants through explicit local→remote IDs. The panel owns names, institutions and
+ * incompatibilities; tabulation keeps judge levels, chair eligibility, availability, swing and break eligibility.
+ * Nothing is ever deleted, and every cross-entity reference is translated through the same map.
  */
 export function mergeHandoff(
   tournament: TabTournament,
@@ -219,7 +219,6 @@ export function mergeHandoff(
   // References are translated as well as entity IDs; a cross-entity reference must never keep a remote ID.
   const remoteTeamIds = new Set(handoff.teams.map((item) => item.id));
   const remoteJudgeIds = new Set(handoff.judges.map((item) => item.id));
-  const remoteSpeakerIds = new Set(handoff.speakers.map((item) => item.id));
   const referenceIssues: string[] = [];
   for (const team of handoff.teams) for (const judgeId of team.incompatibleJudgeIds) {
     if (!remoteJudgeIds.has(judgeId)) referenceIssues.push('El equipo «' + team.name + '» referencia un juez remoto inexistente (' + judgeId + ').');
