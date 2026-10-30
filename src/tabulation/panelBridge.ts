@@ -38,7 +38,7 @@ export interface PanelEntityMatchSuggestion {
 
 /** Suggestions are deliberately advisory: callers must ask the operator to confirm every mapping. */
 export function suggestPanelEntityMatches(tournament: TabTournament, handoff: PanelHandoff): PanelEntityMatchSuggestion[] {
-  const normalize = (value: string) => value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLocaleLowerCase('es-ES').replace(/[^a-z0-9]+/g, ' ').trim();
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-ES').replace(/[^a-z0-9]+/g, ' ').trim();
   const suggestions: PanelEntityMatchSuggestion[] = [];
   const collect = <T extends { id: string; name: string }, R extends { id: string; name: string }>(
     kind: PanelEntityKind,
