@@ -66,7 +66,7 @@ FOR EACH ROW EXECUTE FUNCTION enforce_tabulation_acta_source_scorecard_assignmen
 
 -- Serialize source creation per assignment and require a linear version chain.
 CREATE OR REPLACE FUNCTION guard_tabulation_acta_source_version()
-RETURNS trigger LANGUAGE plpgsql AS $
+RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE current_source uuid;
 BEGIN
   PERFORM 1 FROM room_assignments WHERE id = NEW.assignment_id FOR UPDATE;
@@ -85,7 +85,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$;
+$$;
 DROP TRIGGER IF EXISTS tabulation_acta_source_version_guard ON tabulation_acta_sources;
 CREATE TRIGGER tabulation_acta_source_version_guard
 BEFORE INSERT ON tabulation_acta_sources
@@ -94,7 +94,7 @@ FOR EACH ROW EXECUTE FUNCTION guard_tabulation_acta_source_version();
 -- Advancing the head in the same transaction makes the accepted source and
 -- the visible current version inseparable, including under concurrent writes.
 CREATE OR REPLACE FUNCTION advance_tabulation_acta_head()
-RETURNS trigger LANGUAGE plpgsql AS $
+RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   INSERT INTO tabulation_acta_heads (assignment_id, source_id, updated_at)
   VALUES (NEW.assignment_id, NEW.id, NEW.created_at)
@@ -102,7 +102,7 @@ BEGIN
     SET source_id = EXCLUDED.source_id, updated_at = EXCLUDED.updated_at;
   RETURN NEW;
 END;
-$;
+$$;
 DROP TRIGGER IF EXISTS tabulation_acta_source_advance_head ON tabulation_acta_sources;
 CREATE TRIGGER tabulation_acta_source_advance_head
 AFTER INSERT ON tabulation_acta_sources
