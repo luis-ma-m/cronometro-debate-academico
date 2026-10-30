@@ -1,6 +1,6 @@
 import { SPEAKER_POSITIONS } from '../scoring.js';
 import { effectivePenalties, type EffectivePenalties } from './penalties.js';
-import { SPEAKER_ROLES, type SpeakerRole, type TabJointActa, type TabPenalties, type TabSettings, type TabSpeaker } from './types.js;
+import { SPEAKER_ROLES, type SpeakerRole, type TabJointActa, type TabPenalties, type TabSettings, type TabSpeaker } from './types.js';
 
 /**
  * Validation of a joint acta (ADUMA art. 23). Pure and dependency-free so the server can reuse it when judges
