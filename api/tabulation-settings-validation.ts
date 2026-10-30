@@ -53,9 +53,6 @@ export function validateTabulationSettings(value: unknown): TabSettings {
   for (const key of integerRules) {
     if (!Number.isInteger(input[key])) throw new TabulationSettingsValidationError("La regla " + key + " debe ser un número entero.");
   }
-  if ((input.groupAdvance as number) > (input.groupCount as number)) {
-    throw new TabulationSettingsValidationError("Los grupos no pueden clasificar a más equipos de los que contienen.");
-  }
   if ((input.minorsPerMajor as number) < 1) {
     throw new TabulationSettingsValidationError("Debe haber al menos una falta leve por cada bloque de faltas graves.");
   }
