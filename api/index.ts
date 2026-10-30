@@ -387,7 +387,7 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
 
 type PersistedTabulationSettings = {
   schemaVersion: number;
-  tournamentId: "default";
+  tournamentId: string;
   revision: number;
   settings: TabSettings;
   updatedAt: number | null;
@@ -407,10 +407,10 @@ function validateTabulationSettings(value: unknown): TabSettings {
   }
 }
 
-function defaultPersistedTabulationSettings(): PersistedTabulationSettings {
+function defaultPersistedTabulationSettings(tournamentId: string): PersistedTabulationSettings {
   return {
     schemaVersion: TAB_SCHEMA_VERSION,
-    tournamentId: "default",
+    tournamentId,
     revision: 0,
     settings: presetSettings(TABULATION_SETTINGS_DEFAULT_PRESET),
     updatedAt: null,
@@ -419,27 +419,28 @@ function defaultPersistedTabulationSettings(): PersistedTabulationSettings {
 }
 
 function isMissingTabulationSettingsMigration(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "42P01");
+  return Boolean(error && typeof error === "object" && "code" in error && ["42P01", "42703"].includes(String((error as { code?: unknown }).code)));
 }
 
 async function getTabulationSettings(): Promise<PersistedTabulationSettings> {
   const pool = getPool();
   let result;
   try {
-    result = await pool.query("SELECT schema_version, revision, settings, updated_at, updated_by FROM tabulation_settings WHERE id = 1");
+    result = await pool.query("SELECT schema_version, revision, settings, updated_at, updated_by, tournament_id FROM tabulation_settings WHERE id = 1");
   } catch (error) {
-    if (isMissingTabulationSettingsMigration(error)) throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0010_tabulation_settings.sql en la base de datos del entorno. No se ha modificado ningún dato.", 503);
+    if (isMissingTabulationSettingsMigration(error)) throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar las migraciones 0010_tabulation_settings.sql y 0011_tournament_identity.sql en la base de datos del entorno. No se ha modificado ningún dato.", 503);
     throw error;
   }
   const row = result.rows[0] as Record<string, unknown> | undefined;
-  if (!row || !row.settings || Object.keys(row.settings as object).length === 0) return defaultPersistedTabulationSettings();
+  if (!row || !row.tournament_id) throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0011_tournament_identity.sql en la base de datos del entorno.", 503);
+  if (!row.settings || Object.keys(row.settings as object).length === 0) return defaultPersistedTabulationSettings(str(row.tournament_id));
   const schemaVersion = num(row.schema_version);
   if (schemaVersion > TAB_SCHEMA_VERSION) {
     throw new ApiError("SCHEMA_TOO_NEW", "Las reglas fueron guardadas con una versión más reciente. Esta versión entra en solo lectura; actualiza la aplicación.", 409);
   }
   return {
     schemaVersion,
-    tournamentId: "default",
+    tournamentId: str(row.tournament_id),
     revision: num(row.revision),
     settings: validateTabulationSettings(row.settings),
     updatedAt: row.updated_at ? new Date(String(row.updated_at)).getTime() : null,
@@ -470,7 +471,7 @@ async function saveTabulationSettings(payload: Record<string, unknown>): Promise
       await client.query("COMMIT");
       return prior.response;
     }
-    const currentResult = await client.query("SELECT revision FROM tabulation_settings WHERE id = 1 FOR UPDATE");
+    const currentResult = await client.query("SELECT revision, tournament_id FROM tabulation_settings WHERE id = 1 FOR UPDATE");
     // Another request may have committed the same operation while this request waited for the row lock.
     const replayAfterLock = await client.query(
       "SELECT payload_hash, response FROM tabulation_settings_operations WHERE operation_id = $1",
@@ -482,14 +483,17 @@ async function saveTabulationSettings(payload: Record<string, unknown>): Promise
       await client.query("COMMIT");
       return prior.response;
     }
-    const currentRevision = num((currentResult.rows[0] as { revision?: unknown } | undefined)?.revision);
+    const currentRow = currentResult.rows[0] as { revision?: unknown; tournament_id?: unknown } | undefined;
+    const currentRevision = num(currentRow?.revision);
+    const tournamentId = str(currentRow?.tournament_id);
+    if (!tournamentId) throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0011_tournament_identity.sql en la base de datos del entorno.", 503);
     if (currentRevision !== expectedRevision) {
       throw new ApiError("REVISION_CONFLICT", "Las reglas han cambiado en otro dispositivo. Recarga la configuración antes de guardar.", 409);
     }
     const nextRevision = currentRevision + 1;
     const now = Date.now();
     const response: PersistedTabulationSettings = {
-      schemaVersion: TAB_SCHEMA_VERSION, tournamentId: "default", revision: nextRevision,
+      schemaVersion: TAB_SCHEMA_VERSION, tournamentId, revision: nextRevision,
       settings, updatedAt: now, updatedBy: "admin",
     };
     await client.query(
@@ -497,8 +501,8 @@ async function saveTabulationSettings(payload: Record<string, unknown>): Promise
       [TAB_SCHEMA_VERSION, nextRevision, JSON.stringify(settings), "admin"],
     );
     await client.query(
-      "INSERT INTO tabulation_settings_versions(tournament_id, revision, schema_version, settings, operation_id, updated_by) VALUES ('default', $1, $2, $3::jsonb, $4, $5)",
-      [nextRevision, TAB_SCHEMA_VERSION, JSON.stringify(settings), operationId, "admin"],
+      "INSERT INTO tabulation_settings_versions(tournament_id, revision, schema_version, settings, operation_id, updated_by) VALUES ($1, $2, $3, $4::jsonb, $5, $6)",
+      [tournamentId, nextRevision, TAB_SCHEMA_VERSION, JSON.stringify(settings), operationId, "admin"],
     );
     await client.query(
       "INSERT INTO tabulation_settings_operations(operation_id, payload_hash, response) VALUES ($1, $2, $3::jsonb)",
