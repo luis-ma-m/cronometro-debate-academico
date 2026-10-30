@@ -553,4 +553,12 @@ Reglas de seguridad aplicadas:
 - Los vínculos antiguos que solo contienen nombre no se elevan silenciosamente a una identidad remota.
 - Los hand-offs legacy/demo sin UUID conservan compatibilidad con el comportamiento anterior.
 
-**Trabajo pendiente explícito:** el flujo de vinculación de un torneo local ya existente aún necesita una pantalla de revisión y mapeo `localId → remoteId` por tipo de entidad. Hasta que exista, la implementación prefiere bloquear ese caso a fusionar por nombre o por coincidencias de IDs no verificadas. No se regeneran IDs locales, no se eliminan actas/rondas y no se publica ninguna ronda como efecto secundario de importar participantes.
+**Incremento implementado — revisión inicial de identidad:**
+- La pantalla de inicio ofrece «Vincular torneo existente con revisión» cuando hay un torneo local sin vínculo y llega un hand-off con UUID remoto.
+- La revisión permite mapear manualmente equipos, oradores, jueces y salas; las sugerencias por ID/nombre/institución son orientativas y nunca se aceptan automáticamente.
+- Las entidades que se dejan como «Crear nueva» reciben IDs locales nuevos; no se reutilizan IDs remotos como IDs locales por coincidencia accidental.
+- Se persiste `panelLink.idMap` con la dirección `localId → remoteId`; se conservan los IDs locales y se traducen también las referencias entre equipos, oradores y jueces.
+- Se bloquean IDs inexistentes, asignaciones remotas duplicadas y vínculos de oradores que cambiarían de equipo. La operación completa se valida antes de guardar y crea una copia de seguridad local.
+- Las entidades locales no emparejadas, rondas y actas no se eliminan. No se publica ninguna ronda como efecto secundario de vincular.
+
+**Trabajo pendiente:** este primer flujo revisa el hand-off compartido por el panel actual; todavía no implementa la selección/autenticación independiente de un torneo remoto ni la lectura de un snapshot API completo con `revision`, `settingsRevision` y `updatedAt`. Tampoco completa la reconciliación histórica de entidades eliminadas/tombstones. Hasta cerrar esos pasos, la vinculación y sincronización integral siguen incompletas.
