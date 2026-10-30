@@ -72,6 +72,8 @@ export interface Room {
 }
 
 export interface Tournament {
+  /** Stable server-side identity; absent only in local/demo tournaments before linking. */
+  remoteId?: string;
   tournamentName: string;
   rounds: Round[];
   scoring?: ScoringConfig;
