@@ -31,7 +31,13 @@ export function TabulationRulesPanel({ token }: { token: string }) {
     }
   };
 
-  useEffect(() => { if (!dirty) void reload(true); }, [token, dirty]);
+  useEffect(() => {
+    if (dirty) {
+      setError('La sesión ha cambiado mientras había reglas sin guardar. Se han conservado tus cambios locales.');
+      return;
+    }
+    void reload(true);
+  }, [token]);
 
   const baseTournament = useMemo(
     () => createTabTournament('Reglas oficiales del torneo', settings?.presetId ?? 'ledu-groups'),
