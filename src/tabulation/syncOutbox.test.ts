@@ -124,4 +124,16 @@ describe('durable sync outbox contract', () => {
     expect(() => serializeSyncPayload({ bad: undefined })).toThrow('no serializable');
     expect(() => serializeSyncPayload({ text: 'x'.repeat(1_048_577) })).toThrow('1 MB');
   });
+
+  it('rejects values that JSON.stringify would silently coerce or discard', () => {
+    expect(() => serializeSyncPayload({ date: new Date('2026-01-01T00:00:00Z') })).toThrow('objetos JSON planos');
+    expect(() => serializeSyncPayload({ map: new Map([['a', 1]]) })).toThrow('objetos JSON planos');
+    expect(() => serializeSyncPayload({ value: Number.NaN })).toThrow('número no finito');
+    expect(() => serializeSyncPayload({ value: Infinity })).toThrow('número no finito');
+    expect(() => serializeSyncPayload({ value: undefined })).toThrow('no serializable');
+    expect(() => serializeSyncPayload([, 'value'])).toThrow('array disperso');
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() => serializeSyncPayload(circular)).toThrow('referencia circular');
+  });
 });
