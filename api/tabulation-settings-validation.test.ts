@@ -11,6 +11,10 @@ function expectInvalid(value: unknown) {
 }
 
 describe("validateTabulationSettings", () => {
+  it.each(["ledu-groups", "uc3m-swiss", "aduma"] as const)("accepts the %s preset", (presetId) => {
+    expect(validateTabulationSettings(presetSettings(presetId))).toEqual(presetSettings(presetId));
+  });
+
   it("accepts a complete supported preset without mutating its input", () => {
     const input = validSettings();
     const before = structuredClone(input);
