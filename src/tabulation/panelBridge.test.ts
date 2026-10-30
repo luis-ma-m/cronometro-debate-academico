@@ -6,6 +6,7 @@ import { applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readH
 import { memoryStorage } from './store';
 import { qualifyingRound } from './test-fixtures';
 import { createTabTournament } from './presets';
+import { normalizeTabTournament } from './normalize';
 import type { TabTournament } from './types';
 
 const now = 1_800_000_000_000;
@@ -125,6 +126,35 @@ describe('panel → tabulation', () => {
     expect(result.tournament.judges[0]).toMatchObject({ id: 'local-judge', rating: 5, canChair: false });
     expect(result.tournament.venues.map((item) => item.id)).toEqual(['local-venue']);
     expect(result.tournament.panelLink?.idMap).toEqual(idMap);
+  });
+
+
+  it('creates new local IDs for unmapped remote entities and persists their mappings', () => {
+    const local = createTabTournament('Copia local', 'ledu-groups', now, 1);
+    local.teams = [{ id: 'local-team', name: 'Equipo local', institution: '', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] }];
+    const handoff = buildPanelHandoff({ ...panel(), remoteId: 'remote-tournament-123' }, now);
+    const result = mergeHandoff(local, handoff, now, { teams: {}, speakers: {}, judges: {}, venues: {} });
+    expect(result.issues).toEqual([]);
+    expect(result.tournament.teams).toHaveLength(5);
+    expect(result.tournament.teams.some((item) => item.id === 't1')).toBe(false);
+    expect(Object.values(result.tournament.panelLink!.idMap!.teams)).toContain('t1');
+    expect(new Set(result.tournament.teams.map((item) => item.id)).size).toBe(5);
+  });
+
+  it('refuses to map an orator onto a local speaker whose team is not mapped to the same remote team', () => {
+    const local = createTabTournament('Copia local', 'ledu-groups', now, 1);
+    local.teams = [{ id: 'local-team', name: 'Equipo local', institution: '', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] }];
+    local.speakers = [{ id: 'local-speaker', teamId: 'local-team', name: 'Ana' }];
+    const handoff = buildPanelHandoff({ ...panel(), remoteId: 'remote-tournament-123' }, now);
+    const result = mergeHandoff(local, handoff, now, { teams: {}, speakers: { 'local-speaker': 's1' }, judges: {}, venues: {} });
+    expect(result.issues.join(' ')).toContain('no pertenece al equipo local');
+    expect(result.tournament).toBe(local);
+  });
+
+  it('preserves the reviewed identity map when normalizing a local tournament', () => {
+    const source = tournamentFromHandoff(buildPanelHandoff({ ...panel(), remoteId: 'remote-tournament-123' }, now), 'ledu-groups', now, 1);
+    const normalized = normalizeTabTournament(source).tournament;
+    expect(normalized.panelLink?.idMap).toEqual(source.panelLink?.idMap);
   });
 
   it('suggests possible entity matches without accepting them', () => {
