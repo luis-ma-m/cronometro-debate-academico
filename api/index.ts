@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured, getPool } from "./db.js";
-import { readTabulationActaHistory } from "./tabulation-acta-history.js";
+import { readTabulationActaHistory, readTabulationActaVersion } from "./tabulation-acta-history.js";
 import { presetSettings } from "../src/tabulation/presets.js";
 import { validateTabulationSettings as validateTabulationSettingsPayload, TabulationSettingsValidationError } from "./tabulation-settings-validation.js";
 import { TAB_SCHEMA_VERSION, type TabSettings } from "../src/tabulation/types.js";
@@ -362,6 +362,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "getTabulationActaHistory":
       await requireSession(payload.token);
       return getTabulationActaHistory(payload);
+    case "getTabulationActaVersion":
+      await requireSession(payload.token);
+      return getTabulationActaVersion(payload);
     case "getPublicRoom":
       return publicRoomPayload(tournamentFromData(await loadSheetData()), str(payload.roomId));
     case "roomHeartbeat":
@@ -451,6 +454,30 @@ async function getTabulationSettings(): Promise<PersistedTabulationSettings> {
     updatedAt: row.updated_at ? new Date(String(row.updated_at)).getTime() : null,
     updatedBy: str(row.updated_by) || "unknown",
   };
+}
+
+async function getTabulationActaVersion(payload: Record<string, unknown>) {
+  const assignmentId = str(payload.assignmentId).trim();
+  const versionId = str(payload.versionId).trim();
+  if (!assignmentId || assignmentId.length > 128 || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(versionId)) {
+    throw new ApiError("INVALID_PAYLOAD", "La asignación o versión solicitada no es válida.");
+  }
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const version = await readTabulationActaVersion(client, assignmentId, versionId);
+    await client.query("COMMIT");
+    return version;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    if (isMissingTabulationSettingsMigration(error)) {
+      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0012_tabulation_acta_sources.sql en la base de datos de este entorno. No se ha modificado ningún dato.", 503);
+    }
+    throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido consultar el detalle de la versión del acta.", 503);
+  } finally {
+    client.release();
+  }
 }
 
 async function getTabulationActaHistory(payload: Record<string, unknown>) {
