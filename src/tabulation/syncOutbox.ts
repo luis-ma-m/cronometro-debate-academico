@@ -50,7 +50,7 @@ function stableValue(value: unknown, ancestors = new Set<object>()): unknown {
   try {
     if (Array.isArray(value)) {
       const ownKeys = Reflect.ownKeys(value);
-      if (ownKeys.some((key) => typeof key === 'symbol' || (key !== 'length' && (!/^\\d+$/.test(key) || Number(key) >= value.length)))) {
+      if (ownKeys.some((key) => typeof key === 'symbol' || (key !== 'length' && (!/^\d+$/.test(key) || Number(key) >= value.length)))) {
         throw new Error('El payload de sincronización contiene propiedades de array no serializables.');
       }
       const result: unknown[] = [];
