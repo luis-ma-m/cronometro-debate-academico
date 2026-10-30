@@ -540,3 +540,17 @@ La migración `0011_tournament_identity.sql` introduce un UUID generado y persis
 **Límite deliberado:** el gestor sigue siendo un singleton (`tournament_settings.id = 1`). Este UUID identifica ese único torneo persistido; no convierte la aplicación en multi-torneo ni autoriza a asociar datos locales por nombre. La rotación de identidad para iniciar un torneo distinto requiere un flujo explícito de ciclo de vida, con comprobación de dependencias e historial, que todavía no se implementa. No se debe reutilizar esta identidad para una nueva competición solo por cambiar el nombre.
 
 La migración no se ha ejecutado en ninguna base de datos. Antes de aplicarla debe demostrarse que el entorno Preview utiliza una rama Neon aislada de Production. Hasta entonces, los endpoints que necesitan la nueva columna informan de migración pendiente y no alteran datos.
+
+
+## Incremento: identidad remota en el hand-off local
+
+El hand-off versionado del panel incluye ahora `tournamentId` cuando el gestor dispone de la identidad canónica. Tabulación persiste esa identidad en `panelLink.remoteId` y la conserva al normalizar/recargar copias locales.
+
+Reglas de seguridad aplicadas:
+
+- Un torneo ya vinculado solo acepta hand-offs con el mismo UUID remoto. Una identidad distinta bloquea toda la operación antes de modificar equipos, oradores, jueces o salas.
+- Un torneo local sin vínculo no se fusiona automáticamente con un torneo remoto, aunque coincidan los nombres o algunos IDs. Se exige crear una copia nueva desde el hand-off autenticado; el torneo local anterior permanece intacto.
+- Los vínculos antiguos que solo contienen nombre no se elevan silenciosamente a una identidad remota.
+- Los hand-offs legacy/demo sin UUID conservan compatibilidad con el comportamiento anterior.
+
+**Trabajo pendiente explícito:** el flujo de vinculación de un torneo local ya existente aún necesita una pantalla de revisión y mapeo `localId → remoteId` por tipo de entidad. Hasta que exista, la implementación prefiere bloquear ese caso a fusionar por nombre o por coincidencias de IDs no verificadas. No se regeneran IDs locales, no se eliminan actas/rondas y no se publica ninguna ronda como efecto secundario de importar participantes.
