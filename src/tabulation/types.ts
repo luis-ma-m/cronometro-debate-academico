@@ -259,7 +259,7 @@ export interface TabTournament {
   /** Organiser order for ties left unresolved by every criterion (e.g. LEDU tie-break debates). */
   manualOrder: string[];
   /** Canonical manager identity. A name alone is never sufficient to identify a linked tournament. */
-  panelLink?: { tournamentName: string; linkedAt: number; remoteId?: string; idMap?: PanelEntityIdMap };
+  panelLink?: { tournamentName: string; linkedAt: number; remoteId?: string; remoteRevision?: number; remoteUpdatedAt?: number; idMap?: PanelEntityIdMap };
   /** Actas by WhatsApp: the desk's number and the public address of the judges' page (empty = this one). */
   whatsapp?: { deskPhone: string; baseUrl: string };
   judgeConflicts: TabJudgeConflict[];
