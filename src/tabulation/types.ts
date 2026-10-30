@@ -1,4 +1,4 @@
-import type { SpeakerPosition } from '../scoring';
+import type { SpeakerPosition } from '../scoring.js';
 
 /** Local, frontend-only tabulation model. Nothing derived (standings, byes, outcomes) is stored. */
 export const TAB_SCHEMA_VERSION = 2;

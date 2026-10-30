@@ -506,7 +506,8 @@ async function saveTabulationSettings(payload: Record<string, unknown>): Promise
   const expectedRevision = num(payload.expectedRevision);
   const operationId = str(payload.operationId);
   if (!/^[a-zA-Z0-9_-]{8,128}$/.test(operationId)) throw new ApiError("INVALID_PAYLOAD", "Falta un identificador de operación válido.");
-  const payloadHash = sha256(JSON.stringify({ schemaVersion, settings }));
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) throw new ApiError("INVALID_PAYLOAD", "La revisión esperada no es válida.");
+  const payloadHash = sha256(JSON.stringify({ schemaVersion, expectedRevision, settings }));
   const pool = getPool();
   const client = await pool.connect();
   try {
@@ -522,6 +523,17 @@ async function saveTabulationSettings(payload: Record<string, unknown>): Promise
       return prior.response;
     }
     const currentResult = await client.query("SELECT revision FROM tabulation_settings WHERE id = 1 FOR UPDATE");
+    // Another request may have committed the same operation while this request waited for the row lock.
+    const replayAfterLock = await client.query(
+      "SELECT payload_hash, response FROM tabulation_settings_operations WHERE operation_id = $1",
+      [operationId],
+    );
+    if (replayAfterLock.rows[0]) {
+      const prior = replayAfterLock.rows[0] as { payload_hash: string; response: PersistedTabulationSettings };
+      if (prior.payload_hash !== payloadHash) throw new ApiError("IDEMPOTENCY_MISMATCH", "El identificador de operación ya se utilizó con otro contenido.", 409);
+      await client.query("COMMIT");
+      return prior.response;
+    }
     const currentRevision = num((currentResult.rows[0] as { revision?: unknown } | undefined)?.revision);
     if (currentRevision !== expectedRevision) {
       throw new ApiError("REVISION_CONFLICT", "Las reglas han cambiado en otro dispositivo. Recarga la configuración antes de guardar.", 409);
