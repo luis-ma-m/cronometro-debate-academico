@@ -17,7 +17,7 @@ export function validateTabulationSettings(value: unknown): TabSettings {
   const expectedKeys = Object.keys(defaults).sort();
   const actualKeys = Object.keys(input).sort();
   if (JSON.stringify(expectedKeys) !== JSON.stringify(actualKeys)) {
-    throw new ApiError("INVALID_PAYLOAD", "La versión de las reglas no coincide con el esquema esperado. Actualiza Tabulación antes de guardar.");
+    throw new TabulationSettingsValidationError("La versión de las reglas no coincide con el esquema esperado. Actualiza Tabulación antes de guardar.");
   }
   const enums: Record<string, string[]> = {
     presetId: ["ledu-groups", "uc3m-swiss", "aduma", "custom"],
@@ -29,7 +29,7 @@ export function validateTabulationSettings(value: unknown): TabSettings {
     minorEscalation: ["blocks", "aduma"], conflictPolicy: ["hard", "lastResort"],
   };
   for (const [key, allowed] of Object.entries(enums)) {
-    if (!allowed.includes(String(input[key]))) throw new ApiError("INVALID_PAYLOAD", "Valor no válido para la regla " + key + ".");
+    if (!allowed.includes(String(input[key]))) throw new TabulationSettingsValidationError("Valor no válido para la regla " + key + ".");
   }
   const ranges: Record<string, [number, number]> = {
     groupCount: [1, 16], groupAdvance: [1, 8], swissRounds: [1, 12], breakSize: [2, 32],
@@ -41,42 +41,42 @@ export function validateTabulationSettings(value: unknown): TabSettings {
   for (const [key, [min, max]] of Object.entries(ranges)) {
     const number = input[key];
     if (typeof number !== "number" || !Number.isFinite(number) || number < min || number > max) {
-      throw new ApiError("INVALID_PAYLOAD", "El valor de " + key + " debe estar entre " + min + " y " + max + ".");
+      throw new TabulationSettingsValidationError("El valor de " + key + " debe estar entre " + min + " y " + max + ".");
     }
   }
   if ((input.scoreMax as number) <= (input.scoreMin as number) ||
       (input.speakerScoreMax as number) <= (input.speakerScoreMin as number) ||
       (input.itemMax as number) <= (input.itemMin as number)) {
-    throw new ApiError("INVALID_PAYLOAD", "Los máximos de puntuación deben ser superiores a los mínimos.");
+    throw new TabulationSettingsValidationError("Los máximos de puntuación deben ser superiores a los mínimos.");
   }
   for (const key of ["avoidSameInstitution", "scoresIncludePenalties", "trimExtremes", "speakerScores", "oddPanels", "blindQualifying"]) {
-    if (typeof input[key] !== "boolean") throw new ApiError("INVALID_PAYLOAD", "La regla " + key + " debe ser booleana.");
+    if (typeof input[key] !== "boolean") throw new TabulationSettingsValidationError("La regla " + key + " debe ser booleana.");
   }
   if (!Array.isArray(input.tiebreaks) || input.tiebreaks.length > 11 ||
       new Set(input.tiebreaks).size !== input.tiebreaks.length ||
       input.tiebreaks.some((item) => typeof item !== "string" || !["ballots","pointsTotal","pointsAverage","headToHead","headToHeadBallots","headToHeadPoints","speakerPoints","fewestPenalties","fewestMajors","fewestMinors"].includes(item))) {
-    throw new ApiError("INVALID_PAYLOAD", "La lista de desempates contiene valores no válidos o duplicados.");
+    throw new TabulationSettingsValidationError("La lista de desempates contiene valores no válidos o duplicados.");
   }
-  if (!Array.isArray(input.rubric) || input.rubric.length > 100) throw new ApiError("INVALID_PAYLOAD", "La rúbrica no puede superar 100 ítems.");
+  if (!Array.isArray(input.rubric) || input.rubric.length > 100) throw new TabulationSettingsValidationError("La rúbrica no puede superar 100 ítems.");
   const rubricIds = new Set<string>();
   for (const item of input.rubric) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) throw new ApiError("INVALID_PAYLOAD", "Hay un ítem de rúbrica no válido.");
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new TabulationSettingsValidationError("Hay un ítem de rúbrica no válido.");
     const row = item as Record<string, unknown>;
     if (typeof row.id !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(row.id) || rubricIds.has(row.id) ||
         typeof row.name !== "string" || !row.name.trim() || row.name.length > 200 ||
         typeof row.section !== "string" || row.section.length > 100 ||
         typeof row.description !== "string" || row.description.length > 1000) {
-      throw new ApiError("INVALID_PAYLOAD", "Los ítems de rúbrica necesitan IDs únicos y textos válidos.");
+      throw new TabulationSettingsValidationError("Los ítems de rúbrica necesitan IDs únicos y textos válidos.");
     }
     rubricIds.add(row.id);
   }
   if (!Array.isArray(input.bracketSeedOrder) || input.bracketSeedOrder.length > 32 ||
       input.bracketSeedOrder.some((item) => !Number.isInteger(item) || (item as number) < 1 || (item as number) > 32)) {
-    throw new ApiError("INVALID_PAYLOAD", "El orden de cabezas de serie no es válido.");
+    throw new TabulationSettingsValidationError("El orden de cabezas de serie no es válido.");
   }
   const serialized = JSON.stringify(input);
   if (new TextEncoder().encode(serialized).byteLength > MAX_BYTES) {
-    throw new ApiError("INVALID_PAYLOAD", "Las reglas superan el tamaño máximo permitido.");
+    throw new TabulationSettingsValidationError("Las reglas superan el tamaño máximo permitido.");
   }
   return structuredClone(input) as unknown as TabSettings;
 }
