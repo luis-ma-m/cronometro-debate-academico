@@ -50,7 +50,7 @@ Guía para la mesa de tabulación: qué hacer antes del torneo, en cada ronda y 
    - la ronda aparece en pantalla; pulsa «Proyectar» (Esc para salir).
 5. **Enlaces de las actas.** En la ronda, abre «Actas por WhatsApp».
    - Pulsa «Enviar enlace» en cada sala: se abre WhatsApp con el mensaje para su juez principal.
-   - O pulsa «Copiar todos los enlaces para el grupo de jueces» y pégalo en el grupo.
+   - O pulsa «Copiar todos los enlaces para el grupo de jueces» y pégalo en el grupo. Ese mensaje lleva los diez enlaces y en el móvil aparece plegado con «Leer más». En el ensayo, comprueba que al desplegarlo los enlaces se pueden pulsar; si no, usa «Enviar enlace» para cada sala.
 6. **Actas por WhatsApp.**
    - Cada juez principal rellena el acta en el móvil con el jurado y pulsa «Enviar por WhatsApp».
    - En Actas → «Actas recibidas por WhatsApp», copia los mensajes que vayan llegando (puedes pegar el chat entero) y pulsa «Aceptar» en cada una, o «Aceptar las … nuevas sin incidencias».
@@ -93,7 +93,8 @@ Las rondas son a ciegas: no proyectes la Clasificación hasta acabar la cuarta r
 | Se cae internet | La página abierta sigue funcionando: no la recargues. Las copias se guardan en local. Las actas por WhatsApp esperan a que vuelva la red: mientras, usa el papel. |
 | Un juez no puede abrir el enlace o no tiene datos | Usa el acta en papel. El enlace solo funciona si la web está publicada (no en `localhost`). |
 | «El código está dañado o incompleto» | Pide al juez que pulse otra vez «Enviar por WhatsApp»: su acta sigue guardada en el móvil. |
-| «Este código no es de ningún debate» | La ronda se volvió a sortear después de enviar los enlaces: envía los enlaces nuevos. |
+| «Este código no es de ningún debate» | O se ha copiado mal, o la ronda se volvió a sortear después de enviar los enlaces. Copia de nuevo el mensaje del juez; si persiste, envíale el enlace nuevo. |
+| «El debate ha cambiado… desde que se envió el enlace» | Cambiaron los equipos o los integrantes de ese debate después de mandar el enlace. Envía al juez el enlace nuevo; su acta en papel sigue valiendo. |
 | Llegan dos actas del mismo debate | La bandeja marca la más reciente; acepta esa. Si la mesa ya había transcrito el papel, pedirá confirmación antes de sustituirla. |
 
 ## Al cerrar cada día

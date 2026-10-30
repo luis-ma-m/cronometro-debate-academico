@@ -28,6 +28,15 @@ export function result(ballotList: TabBallot[], extra: Partial<TabDebateResult> 
   return { lineup: {}, ballots: ballotList, penalties: {}, notes: '', updatedAt: 1, ...extra };
 }
 
+/** The tournament of fixtures/acta-v1.json, whose link and code are in the first WhatsApp format. */
+export function actaV1Tournament(): TabTournament {
+  const tournament = makeTournament('aduma', ['a', 'b', 'c', 'd'], ['j1', 'j2', 'j3'], 2);
+  tournament.id = 'torneo-acta-v1';
+  tournament.whatsapp = { deskPhone: '34600999888', baseUrl: 'https://debate.example' };
+  tournament.rounds = [qualifyingRound(2, [{ ...debate('d1', 'a', 'b', ['j2', 'j1', 'j3']), chairId: 'j1', venueId: 'v1' }])];
+  return tournament;
+}
+
 export function debate(id: string, a: string, b: string, judgeIds: string[], debateResult?: TabDebateResult, extra: Partial<TabDebate> = {}): TabDebate {
   return { id, venueId: '', teamIds: [a, b], judgeIds, chairId: judgeIds[0] ?? '', result: debateResult, ...extra };
 }

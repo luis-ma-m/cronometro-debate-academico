@@ -62,6 +62,10 @@ Después de la auditoría, al revisar la nueva interfaz, se corrigieron dos caso
 - **Fallo de la aplicación entera.** Si fallaba la estructura de la tabulación, y no solo una pantalla, la página se quedaba en blanco. Ahora una protección envuelve toda la aplicación y ofrece la copia de emergencia. Se comprobó provocando un fallo a propósito.
 - **Código sin descargar.** Si se perdía la conexión justo al cargar la página, esta se quedaba en blanco. Ahora dice que no se ha podido cargar y ofrece «Recargar». Cubierto por una prueba E2E.
 
+En la revisión del pull request se encontraron y corrigieron otros dos:
+- **Tabla de oradores del acta.** Entre unos 1.600 y 1.700 px de ancho, las tablas de los dos equipos se solapaban. Ahora solo se ponen lado a lado cuando caben; el barrido E2E lo comprueba a seis anchos, de 1.280 a 2.560 px.
+- **Enlaces de WhatsApp demasiado largos.** Ocupaban unos 1.250 caracteres y la aplicación del móvil los plegaba con «Leer más» sin dejar pulsarlos. Ahora ocupan unos 350–400 y van en una línea propia; el código de vuelta baja de unos 700 a unos 170. Falta comprobarlo en un móvil real.
+
 Antes de la auditoría, las pruebas ya habían destapado y corregido estos fallos:
 - el ZIP fallaba con el reloj del ordenador mal puesto;
 - un juez podía quedar como principal de dos debates;
@@ -81,10 +85,10 @@ Antes de la auditoría, las pruebas ya habían destapado y corregido estos fallo
 
 | Tipo | Cantidad |
 |---|---|
-| Tests unitarios (vitest) | 332 en 39 archivos, 33 de ellos de la tabulación; 7 omitidos, de Neon |
+| Tests unitarios (vitest) | 341 en 39 archivos, 33 de ellos de la tabulación; 7 omitidos, de Neon |
 | Pruebas de propiedades (fast-check) | 3 propiedades con 60 casos por ejecución y semilla fija. En la auditoría, 4.500 casos más con otras semillas, sin contraejemplos |
 | E2E en Chrome (Playwright) | 10 pruebas en 4 archivos, en desarrollo y contra la compilación de producción; repetidas sin fallos intermitentes |
-| Cobertura de `src/tabulation` | 96,6 % de líneas, 87,3 % de ramas y 95,2 % de funciones. La CI exige 90 % / 80 % |
+| Cobertura de `src/tabulation` | 96,6 % de líneas, 87,4 % de ramas y 95,6 % de funciones. La CI exige 90 % / 80 % |
 | Tipos | Typecheck de la aplicación y de la API sin errores |
 
 - **CI:** un trabajo con cobertura, typecheck de la API y compilación, y otro con las E2E contra la compilación estática (`E2E_PREVIEW=1`).
