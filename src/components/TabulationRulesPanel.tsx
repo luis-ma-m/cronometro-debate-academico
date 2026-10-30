@@ -15,7 +15,8 @@ export function TabulationRulesPanel({ token }: { token: string }) {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const reload = async () => {
+  const reload = async (discardPending = false) => {
+    if (dirty && !discardPending && !window.confirm('Hay cambios locales sin guardar. Si recargas, se descartarán. ¿Quieres continuar?')) return;
     setLoading(true);
     setError('');
     try {
@@ -30,7 +31,7 @@ export function TabulationRulesPanel({ token }: { token: string }) {
     }
   };
 
-  useEffect(() => { void reload(); }, [token]);
+  useEffect(() => { if (!dirty) void reload(true); }, [token, dirty]);
 
   const baseTournament = useMemo(
     () => createTabTournament('Reglas oficiales del torneo', settings?.presetId ?? 'ledu-groups'),
