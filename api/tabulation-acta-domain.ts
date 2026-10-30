@@ -97,7 +97,7 @@ export function validateTabulationActaResult(value: unknown, context: Tabulation
   if (issues.length) throw new TabulationActaValidationError(issues);
   const result = validateResult(value.result, context);
   const outcome = computeDebateOutcome(
-    { ...context.round, name: "Ronda " + context.round.number },
+    { ...context.round },
     { ...context.debate, venueId: "", teamIds: [...context.debate.teamIds] as [string, string], judgeIds: [...context.debate.judgeIds], result } as TabDebate,
     { settings: context.settings, teams: new Map(context.teams.map((x) => [x.id, x] as [string, TabTeam])), judges: new Map(context.judges.map((x) => [x.id, x] as [string, TabJudge])), speakers: new Map(context.speakers.map((x) => [x.id, x] as [string, TabSpeaker])) },
   );
