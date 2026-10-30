@@ -33,6 +33,7 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
   const teamName = (id: string) => tournament.teams.find((team) => team.id === id)?.name ?? id;
 
   const fallenFrom = new Map(tournament.teams.filter((team) => team.fallenFromRound !== undefined).map((team) => [team.id, team.fallenFromRound!]));
+  const fallenTeams = tournament.teams.filter((team) => team.fallenFromRound !== undefined && !team.swing);
   const teamsById = new Map(tournament.teams.map((team) => [team.id, team]));
   const breakStage = eliminationRoundName(Math.max(1, Math.floor(settings.breakSize / 2))).toLowerCase();
   const firstElimination = eliminationRounds(tournament)[0];
@@ -83,7 +84,7 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
     {blindHidden && <section className="panel tab-blind"><h3>Rondas a ciegas</h3><p>La clasificación se publicará al terminar la fase clasificatoria.</p></section>}
     {projection && !blindHidden && firstSilent && visibleRounds.length < rounds.length && <p className="muted">Clasificación hasta antes de {firstSilent.name}: las rondas cerradas no se muestran.</p>}
     {blindHidden ? null : !sections.length ? <Empty text="La clasificación aparecerá cuando haya rondas clasificatorias." /> : <div className={sections.length > 1 ? 'tab-standings-grid' : ''}>
-      {sections.map((section) => {
+      {sections.map((section, sectionIndex) => {
         const visibleTeamRows = expandedTeams.includes(section.title) || projection ? section.rows : section.rows.slice(0, 5);
         const ties = tiedBlocks(section.rows);
         const manual = manualBlocks(section.rows);
@@ -93,6 +94,7 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
           <div className="panel-title"><div><h3>{section.title}</h3>{tournament.settings.stage === 'groups' && <p>Pasan los {tournament.settings.groupAdvance} primeros.</p>}
             {qualified.size > 0 && <p className="tab-cut-note">Pasan a {breakStage === 'final' ? 'la final' : breakStage} los {settings.breakSize} primeros que pueden clasificarse{provisionalCut ? ' (corte provisional)' : ''}.</p>}</div></div>
           <div className="tournament-table-wrap tab-standings">
+            {sectionIndex === 0 && fallenTeams.length > 0 && <p className="muted tab-fallen-summary">Fuera de la clasificación: {fallenTeams.map((team) => team.name + ' (caído desde la ronda ' + team.fallenFromRound + ')').join(' · ')}. Los equipos caídos no pueden clasificarse.</p>}
             <table>
               <thead><tr><th>Pos.</th><th>Equipo</th><th>V</th><th>D</th>{joint
                 ? <><th title="Ítems netos: ítems menos faltas">Ítems</th><th>Graves</th><th>Leves</th></>
