@@ -20,6 +20,9 @@ export interface PanelHandoff {
   createdAt: number;
   /** Canonical ID supplied by the authenticated manager; absent only in legacy/demo mode. */
   tournamentId?: string;
+  /** Snapshot version from the manager's persisted tournament record. */
+  revision?: number;
+  updatedAt?: number;
   tournamentName: string;
   teams: Array<Pick<Team, 'id' | 'name' | 'institution' | 'active' | 'incompatibleJudgeIds'>>;
   speakers: Speaker[];
@@ -136,6 +139,8 @@ export function buildPanelHandoff(panel: Tournament, now = Date.now()): PanelHan
     version: 1,
     createdAt: now,
     ...(panel.remoteId ? { tournamentId: panel.remoteId } : {}),
+    revision: panel.revision,
+    updatedAt: panel.updatedAt,
     tournamentName: panel.tournamentName,
     teams: panel.teams.map(({ id, name, institution, active, incompatibleJudgeIds }) => ({ id, name, institution, active, incompatibleJudgeIds: [...incompatibleJudgeIds] })),
     speakers: (panel.speakers ?? []).map((speaker) => ({ ...speaker })),
@@ -330,6 +335,8 @@ export function tournamentFromHandoff(handoff: PanelHandoff, presetId: PresetId,
       tournamentName: handoff.tournamentName,
       linkedAt: now,
       remoteId: handoff.tournamentId,
+      ...(typeof handoff.revision === 'number' ? { remoteRevision: handoff.revision } : {}),
+      ...(typeof handoff.updatedAt === 'number' ? { remoteUpdatedAt: handoff.updatedAt } : {}),
       idMap: {
         teams: Object.fromEntries(handoff.teams.map((item) => [item.id, item.id])),
         speakers: Object.fromEntries(handoff.speakers.map((item) => [item.id, item.id])),
