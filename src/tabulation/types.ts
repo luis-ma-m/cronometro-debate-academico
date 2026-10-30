@@ -230,6 +230,14 @@ export interface TabLogEntry {
   hash: string;
 }
 
+/** Stable cross-app identity map. Keys are local tabulation IDs; values are canonical manager IDs. */
+export interface PanelEntityIdMap {
+  teams: Record<string, string>;
+  speakers: Record<string, string>;
+  judges: Record<string, string>;
+  venues: Record<string, string>;
+}
+
 export interface TabTournament {
   schemaVersion: typeof TAB_SCHEMA_VERSION;
   id: string;
@@ -251,7 +259,7 @@ export interface TabTournament {
   /** Organiser order for ties left unresolved by every criterion (e.g. LEDU tie-break debates). */
   manualOrder: string[];
   /** Canonical manager identity. A name alone is never sufficient to identify a linked tournament. */
-  panelLink?: { tournamentName: string; linkedAt: number; remoteId?: string };
+  panelLink?: { tournamentName: string; linkedAt: number; remoteId?: string; idMap?: PanelEntityIdMap };
   /** Actas by WhatsApp: the desk's number and the public address of the judges' page (empty = this one). */
   whatsapp?: { deskPhone: string; baseUrl: string };
   judgeConflicts: TabJudgeConflict[];
