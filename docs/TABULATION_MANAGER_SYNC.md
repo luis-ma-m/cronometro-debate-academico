@@ -525,3 +525,18 @@ Se puede avanzar en infraestructura y UI mientras se resuelven estos puntos, per
 ## 16. Definición de terminado
 
 La integración solo está terminada cuando hay identidad/reconciliación estable, reglas en Configuración, cola offline recuperable, conversión y sustitución de actas con trazabilidad, clasificación coherente, enlaces cortos con fallback y compatibilidad histórica A1/A2, y todas las pruebas CI/Neon aislado/Preview aprobadas. La primera entrega de esta PR permanece intacta y la PR no se fusiona mientras falte cualquiera de estas condiciones.
+
+
+## Implementación incremental: identidad canónica del torneo (migración 0011)
+
+La migración `0011_tournament_identity.sql` introduce un UUID generado y persistido en PostgreSQL para identificar el torneo actualmente gestionado. La identidad:
+
+- No se deriva del nombre del torneo ni de IDs locales del navegador.
+- Se conserva al renombrar el torneo, editar entidades, recargar la aplicación o desplegar una nueva versión.
+- Se expone como `Tournament.remoteId` en el snapshot autenticado del gestor.
+- Se vincula mediante FK tanto a `tournament_settings` como a `tabulation_settings`.
+- Sustituye el sentinel histórico `default` de las versiones de reglas por el UUID canónico, preservando las versiones y respuestas idempotentes existentes.
+
+**Límite deliberado:** el gestor sigue siendo un singleton (`tournament_settings.id = 1`). Este UUID identifica ese único torneo persistido; no convierte la aplicación en multi-torneo ni autoriza a asociar datos locales por nombre. La rotación de identidad para iniciar un torneo distinto requiere un flujo explícito de ciclo de vida, con comprobación de dependencias e historial, que todavía no se implementa. No se debe reutilizar esta identidad para una nueva competición solo por cambiar el nombre.
+
+La migración no se ha ejecutado en ninguna base de datos. Antes de aplicarla debe demostrarse que el entorno Preview utiliza una rama Neon aislada de Production. Hasta entonces, los endpoints que necesitan la nueva columna informan de migración pendiente y no alteran datos.
