@@ -26,8 +26,8 @@ export interface PublishedRoundDomainContext {
   currentRevision: number;
   currentUpdatedAt: number;
   physicalRooms: Array<{ id: string; active: boolean }>;
-  teams: Array<{ id: string; active: boolean }>;
-  judges: Array<{ id: string; active: boolean }>;
+  teams: Array<{ id: string; active: boolean; name: string; institution?: string; incompatibleJudgeIds?: string[] }>;
+  judges: Array<{ id: string; active: boolean; name: string; institution?: string; incompatibleJudgeIds?: string[] }>;
   minimumJudgesPerRoom: number;
 }
 
@@ -133,10 +133,29 @@ export function validatePublishedRoundPayload(
           if (usedJudges.has(judgeId)) issues.push(prefix + "un juez aparece asignado en más de un debate de la misma ronda.");
           seenJudges.add(judgeId);
           usedJudges.add(judgeId);
-          if (!judges.get(judgeId)?.active) issues.push(prefix + "se ha asignado un juez inactivo.");
+          const judge = judges.get(judgeId);
+          if (!judge?.active) issues.push(prefix + "se ha asignado un juez inactivo.");
+          if (judge) {
+            for (const teamId of [teamFavorId, teamContraId]) {
+              if (typeof teamId !== "string") continue;
+              const team = teams.get(teamId);
+              if (!team) continue;
+              const judgeInstitution = judge.institution?.trim().toLocaleLowerCase("es-ES") ?? "";
+              const teamInstitution = team.institution?.trim().toLocaleLowerCase("es-ES") ?? "";
+              if (judgeInstitution && teamInstitution && judgeInstitution === teamInstitution) {
+                issues.push(prefix + judge.name + " y " + team.name + " comparten institución.");
+              }
+              if (team.incompatibleJudgeIds?.includes(judgeId)) {
+                issues.push(prefix + judge.name + " es incompatible con el equipo " + team.name + ".");
+              }
+            }
+          }
         }
-        if (!nonEmptyString(chairId) || !seenJudges.has(chairId)) {
+        if (seenJudges.size > 0 && (!nonEmptyString(chairId) || !seenJudges.has(chairId))) {
           issues.push(prefix + "la presidencia debe ser uno de los jueces asignados.");
+        }
+        if (seenJudges.size === 0 && chairId !== "") {
+          issues.push(prefix + "no puede indicar presidencia si no hay jueces asignados.");
         }
       }
       if (typeof sidesProvisional !== "boolean") issues.push(prefix + "el indicador de postura provisional no es válido.");
