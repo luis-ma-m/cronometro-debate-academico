@@ -85,6 +85,18 @@ export function validatePanelEntityIdMap(tournament: TabTournament, handoff: Pan
       seenRemote.add(remoteId);
     }
   }
+  const localSpeakers = new Map(tournament.speakers.map((item) => [item.id, item]));
+  const remoteSpeakers = new Map(handoff.speakers.map((item) => [item.id, item]));
+  const remoteTeamToLocal = new Map(Object.entries(idMap.teams).map(([localId, remoteId]) => [remoteId, localId]));
+  for (const [localSpeakerId, remoteSpeakerId] of Object.entries(idMap.speakers)) {
+    const localSpeaker = localSpeakers.get(localSpeakerId);
+    const remoteSpeaker = remoteSpeakers.get(remoteSpeakerId);
+    if (!localSpeaker || !remoteSpeaker) continue;
+    const mappedTeamId = remoteTeamToLocal.get(remoteSpeaker.teamId);
+    if (!mappedTeamId || mappedTeamId !== localSpeaker.teamId) {
+      errors.push('El orador «' + localSpeaker.name + '» no pertenece al equipo local correspondiente al equipo remoto de «' + remoteSpeaker.name + '». No se puede vincular sin revisar primero el equipo.');
+    }
+  }
   return [...new Set(errors)];
 }
 
