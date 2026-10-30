@@ -665,3 +665,11 @@ Se añade `api/tabulation-acta-domain.ts` como validador puro de la propuesta de
 El payload conserva identidad UUID, revisión y fecha base, ronda, debate y el `TabDebateResult` fuente completo. Se validan referencias de equipos/oradores/jueces, duplicidad de papeletas, contadores de sanciones, modo `judges` frente a `joint`, votos de eliminatorias y decisiones manuales justificadas. Para comprobar que el acta está completa y es válida se reutiliza `computeDebateOutcome`, el mismo motor de Tabulación; no se replica el cálculo de votos, sanciones, rúbricas ni ganador.
 
 El validador no proyecta a `RoundScorecard`, no agrega ni descarta papeletas, no sustituye una scorecard, no hace diff, no incrementa reescrituras y no persiste ni confirma ACK. Esos pasos requerirán una futura transacción con procedencia, historial e idempotencia. Se añaden pruebas unitarias; su ejecución queda pendiente de una ejecución real.
+
+### Endurecimiento del esquema de actas
+
+El validador de dominio de actas también rechaza ahora campos desconocidos en los objetos de papeleta, sanciones, decisión manual y resultado, así como posiciones de intervención que el motor de resultados no consume. En actas conjuntas comprueba que los equipos, ítems de rúbrica, totales y oradores pertenecen al contexto configurado y que sus estructuras y valores son válidos.
+
+Esto evita aceptar silenciosamente datos que el motor de cálculo podría ignorar y que después se perderían al proyectar o auditar el acta. Se han añadido pruebas para posiciones de intervención desconocidas, campos extra en papeletas y referencias de rúbrica ajenas a la configuración.
+
+El límite de esta capa no cambia: conserva el resultado fuente, pero no persiste procedencia ni modifica scorecards. La sustitución oficial sigue pendiente de una transacción de servidor que coordine scorecard, historial de fuentes, idempotencia, auditoría y revisión.
