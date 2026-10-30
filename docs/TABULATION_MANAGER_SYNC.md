@@ -592,3 +592,18 @@ Se añade `src/tabulation/syncOutbox.ts` como infraestructura independiente del 
 - Los conflictos (`REVISION_CONFLICT`) y errores semánticos permanecen en cola para intervención; no hay política last-write-wins.
 
 **Límite deliberado de esta entrega:** esta es la capa de almacenamiento y ciclo de vida de la cola, no un sincronizador remoto completo. Todavía no está conectada a las ediciones de actas, reglas o rondas; no hay worker HTTP, endpoint de publicación ni UI de estados. Por tanto, no se encolan ni se transmiten operaciones automáticamente y no debe mostrarse «sincronizado». Tampoco se implementan aún coalescing de upserts ni dependencias entre entidades. Esos pasos requieren contratos de API y validación de servidor antes de activar el envío.
+
+
+## Incremento: contrato de transporte validado para operaciones de sincronización
+
+Se añade `api/sync-operation-validation.ts` como frontera de validación del sobre que enviará la outbox al servidor. El contrato de transporte versión 1 exige:
+
+- `operationId` estable (8–128 caracteres permitidos), UUID canónico `tournamentId`, tipo/ID de entidad y revisión base entera no negativa.
+- Operación explícita entre `upsert`, `publish-round`, `replace-acta` y `settings`. Se comprueba que publicación de ronda, sustitución de acta y configuración apunten a su tipo de entidad correspondiente.
+- Payload JSON objeto, máximo 1 MB, sin coerciones silenciosas ni tipos no JSON.
+- Hash SHA-256 recalculado en servidor sobre JSON canónico con claves ordenadas. El servidor rechaza cualquier discrepancia entre payload y hash.
+- Canonicalización segura de claves especiales como `__proto__`; no se muta ni se interpreta el contenido como configuración de objetos.
+
+Se añaden pruebas para protocolo/versiones, UUID, IDs, revisiones, pares operación-entidad, hash alterado, payload no JSON, tamaño y claves especiales.
+
+**Límite deliberado:** esto valida únicamente el sobre de transporte. No autentica sesión, no comprueba permisos/relaciones de dominio, no consulta ni modifica PostgreSQL y no implementa endpoint ni worker HTTP. Las validaciones semánticas de cada tipo de operación y la escritura deben realizarse dentro de una transacción de servidor con identidad, revisión e idempotencia; no se debe conectar todavía el worker ni confirmar operaciones desde esta capa. El contrato tampoco convierte al gestor singleton en multi-torneo.
