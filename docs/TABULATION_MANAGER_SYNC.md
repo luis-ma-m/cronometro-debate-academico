@@ -673,3 +673,20 @@ El validador de dominio de actas también rechaza ahora campos desconocidos en l
 Esto evita aceptar silenciosamente datos que el motor de cálculo podría ignorar y que después se perderían al proyectar o auditar el acta. Se han añadido pruebas para posiciones de intervención desconocidas, campos extra en papeletas y referencias de rúbrica ajenas a la configuración.
 
 El límite de esta capa no cambia: conserva el resultado fuente, pero no persiste procedencia ni modifica scorecards. La sustitución oficial sigue pendiente de una transacción de servidor que coordine scorecard, historial de fuentes, idempotencia, auditoría y revisión.
+
+## Incremento: esquema de historial inmutable de actas
+
+Se añade la migración `0012_tabulation_acta_sources.sql`, todavía no ejecutada en ninguna base de datos. Prepara persistencia separada para conservar el payload íntegro de Tabulación y el snapshot de reglas aplicado, sin confundir esa fuente con la `RoundScorecard` del gestor.
+
+El esquema incorpora:
+
+- Historial append-only por asignación, con UUID de versión, identidad canónica del torneo, hash SHA-256, payload fuente, modo de acta, tipo de ronda, revisión base, snapshot de reglas, actor, fecha y `operationId` único.
+- Relación de sustitución entre versiones de la misma asignación. Un índice impide que una versión tenga dos sucesoras.
+- Un puntero `tabulation_acta_heads` a la versión vigente, separado del historial inmutable.
+- Triggers que serializan la creación por asignación, exigen que cada versión nueva sustituya exactamente la versión vigente y avanzan el puntero en la misma transacción.
+- Protección contra modificación o borrado de versiones históricas y comprobación de que una scorecard asociada pertenece a la misma asignación.
+- Las eliminatorias no pueden asociar una scorecard clasificatoria.
+
+El contador de reescrituras debe derivarse del historial de versiones que sustituyen otra versión; no se almacena ni incrementa desde el cliente. La primera versión no cuenta como reescritura.
+
+**Límite actual:** la migración define la estructura y las invariantes de base de datos, pero no se ha ejecutado ni existe todavía un endpoint que inserte fuentes, proyecte scorecards, haga diff, solicite confirmación o emita ACK. La integración de escritura debe coordinar validación, revisión, idempotencia, auditoría y proyección en una única transacción. No se ha tocado Neon.
