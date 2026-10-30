@@ -163,6 +163,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     scorecards,
   });
   const config: SheetRow[] = [
+    { key: "remoteId", value: str(settings?.tournament_id) },
     { key: "tournamentName", value: str(settings?.tournament_name) || "Torneo LEDU" },
     { key: "activeRoundId", value: str(settings?.active_round_id) },
     { key: "activationRevision", value: str(settings?.activation_revision ?? 0) },
