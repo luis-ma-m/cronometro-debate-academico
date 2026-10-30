@@ -3,7 +3,7 @@ import {
   canonicalSyncPayload,
   createSyncPayloadHash,
   validateSyncOperationEnvelope,
-} from "./sync-operation-validation";
+} from "./sync-operation-validation.js";
 
 const validEnvelope = (overrides: Record<string, unknown> = {}) => {
   const payload = { assignments: [{ teamIds: ["team-a", "team-b"] }] };
