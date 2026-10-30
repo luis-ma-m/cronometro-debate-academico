@@ -480,9 +480,13 @@ function defaultPersistedTabulationSettings(): PersistedTabulationSettings {
   };
 }
 
+function isMissingTabulationSettingsMigration(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "42P01");
+}
+
 async function getTabulationSettings(): Promise<PersistedTabulationSettings> {
   const pool = getPool();
-  const result = await pool.query("SELECT schema_version, revision, settings, updated_at, updated_by FROM tabulation_settings WHERE id = 1");
+  let result;\n  try {\n    result = await pool.query("SELECT schema_version, revision, settings, updated_at, updated_by FROM tabulation_settings WHERE id = 1");\n  } catch (error) {\n    if (isMissingTabulationSettingsMigration(error)) throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0010_tabulation_settings.sql en la base de datos del entorno. No se ha modificado ningún dato.", 503);\n    throw error;\n  }
   const row = result.rows[0] as Record<string, unknown> | undefined;
   if (!row || !row.settings || Object.keys(row.settings as object).length === 0) return defaultPersistedTabulationSettings();
   const schemaVersion = num(row.schema_version);
