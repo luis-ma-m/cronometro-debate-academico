@@ -70,6 +70,8 @@ describe('panel → tabulation', () => {
       tournamentName: 'Torneo de prueba',
       linkedAt: now,
       remoteId: 'remote-tournament-123',
+      remoteRevision: 1,
+      remoteUpdatedAt: now,
       idMap: {
         teams: { t1: 't1', t2: 't2', t3: 't3', t4: 't4' },
         speakers: { s1: 's1' },
@@ -77,6 +79,17 @@ describe('panel → tabulation', () => {
         venues: { 'physical-a1': 'physical-a1', 'physical-a2': 'physical-a2' },
       },
     });
+  });
+
+
+  it('rejects a stale snapshot without touching the local tournament', () => {
+    const source = { ...panel(), remoteId: 'remote-tournament-123' };
+    const linked = tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1);
+    const stale = buildPanelHandoff({ ...panel(), remoteId: 'remote-tournament-123' }, now - 1);
+    stale.revision = 0;
+    const result = mergeHandoff(linked, stale, now);
+    expect(result.issues.join(' ')).toContain('más antiguo');
+    expect(result.tournament).toBe(linked);
   });
 
   it('refuses to merge a handoff from another remote tournament, even when the name matches', () => {
@@ -155,6 +168,8 @@ describe('panel → tabulation', () => {
     const source = tournamentFromHandoff(buildPanelHandoff({ ...panel(), remoteId: 'remote-tournament-123' }, now), 'ledu-groups', now, 1);
     const normalized = normalizeTabTournament(source).tournament;
     expect(normalized.panelLink?.idMap).toEqual(source.panelLink?.idMap);
+    expect(normalized.panelLink?.remoteRevision).toBe(1);
+    expect(normalized.panelLink?.remoteUpdatedAt).toBe(now);
   });
 
   it('suggests possible entity matches without accepting them', () => {
