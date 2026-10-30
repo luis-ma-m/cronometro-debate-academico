@@ -58,6 +58,34 @@ describe('panel → tabulation', () => {
     expect(readHandoff(memoryStorage({ 'ledu-tabulacion-handoff-v1': '{"format":"otra"}' }))).toBeNull();
   });
 
+
+  it('carries the canonical manager identity into a newly created tabulation', () => {
+    const source = { ...panel(), remoteId: 'remote-tournament-123' };
+    const handoff = buildPanelHandoff(source, now);
+    expect(handoff.tournamentId).toBe('remote-tournament-123');
+    const tab = tournamentFromHandoff(handoff, 'ledu-groups', now, 1);
+    expect(tab.panelLink).toEqual({ tournamentName: 'Torneo de prueba', linkedAt: now, remoteId: 'remote-tournament-123' });
+  });
+
+  it('refuses to merge a handoff from another remote tournament, even when the name matches', () => {
+    const original = { ...panel(), remoteId: 'remote-tournament-A' };
+    const linked = tournamentFromHandoff(buildPanelHandoff(original, now), 'ledu-groups', now, 1);
+    const foreign = buildPanelHandoff({ ...panel(), remoteId: 'remote-tournament-B' }, now + 1);
+    const result = mergeHandoff(linked, foreign, now + 1);
+    expect(result.issues).toHaveLength(1);
+    expect(result.tournament).toBe(linked);
+    expect(result.added).toBe(0);
+    expect(result.updated).toBe(0);
+  });
+
+  it('does not bind an unlinked local tournament by name when the manager provides a remote identity', () => {
+    const local = createTabTournament('Torneo de prueba', 'ledu-groups', now, 1);
+    const handoff = buildPanelHandoff({ ...panel(), remoteId: 'remote-tournament-123' }, now);
+    const result = mergeHandoff(local, handoff, now);
+    expect(result.issues[0]).toContain('no está vinculado');
+    expect(result.tournament).toBe(local);
+  });
+
   it('merges idempotently and respects which side owns each field', () => {
     const source = panel();
     let tab = tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1);
