@@ -35,7 +35,7 @@ describe("readTabulationActaHistory", () => {
     });
   });
 
-  it("returns the current version, immutable payload and server-derived rewrite count", async () => {
+  it("returns current version metadata and the server-derived rewrite count", async () => {
     const { db, calls } = fakeDb({
       total: 2, rewrites: 1, head: "source-2",
       history: [{
