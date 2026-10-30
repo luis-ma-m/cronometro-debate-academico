@@ -650,6 +650,7 @@ Comprueba, entre otros puntos:
 - Una única asignación por sala y por equipo dentro de la ronda.
 - Equipos enfrentados distintos.
 - Ausencia de jueces duplicados o asignados simultáneamente en varias salas.
+- Incompatibilidades de juez-equipo, juez-juez y conflictos de institución, según la misma matriz que utiliza el gestor.
 - Tamaño mínimo del panel y pertenencia de la presidencia al panel asignado.
 
 Se añaden pruebas unitarias de casos válidos, referencias inexistentes, entidades inactivas, duplicados, paneles insuficientes, identidad y revisión obsoletas. El nuevo módulo se incluye en `npm run typecheck:api`.
