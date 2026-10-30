@@ -16,16 +16,16 @@ const context: PublishedRoundDomainContext = {
     { id: "room-off", active: false },
   ],
   teams: [
-    { id: "team-a", active: true },
-    { id: "team-b", active: true },
-    { id: "team-c", active: true },
-    { id: "team-off", active: false },
+    { id: "team-a", active: true, name: "Equipo A", institution: "Universidad A", incompatibleJudgeIds: [] },
+    { id: "team-b", active: true, name: "Equipo B", institution: "Universidad B", incompatibleJudgeIds: [] },
+    { id: "team-c", active: true, name: "Equipo C", institution: "Universidad C", incompatibleJudgeIds: [] },
+    { id: "team-off", active: false, name: "Equipo inactivo", institution: "Universidad D", incompatibleJudgeIds: [] },
   ],
   judges: [
-    { id: "judge-a", active: true },
-    { id: "judge-b", active: true },
-    { id: "judge-c", active: true },
-    { id: "judge-off", active: false },
+    { id: "judge-a", active: true, name: "Juez A", institution: "Universidad J", incompatibleJudgeIds: [] },
+    { id: "judge-b", active: true, name: "Juez B", institution: "Universidad K", incompatibleJudgeIds: [] },
+    { id: "judge-c", active: true, name: "Juez C", institution: "Universidad L", incompatibleJudgeIds: [] },
+    { id: "judge-off", active: false, name: "Juez inactivo", institution: "Universidad M", incompatibleJudgeIds: [] },
   ],
   minimumJudgesPerRoom: 1,
 };
@@ -136,6 +136,37 @@ describe("published round domain validation", () => {
       ...payload,
       debates: [{ ...payload.debates[0], judgeIds: [], chairId: "" }],
     }, context)).toThrow(/mínimo de jueces/);
+  });
+
+
+  it("rejects institutional, team-judge and judge-judge conflicts", () => {
+    const payload = validPayload();
+    const institutionContext = {
+      ...context,
+      judges: context.judges.map((judge) => judge.id === "judge-a"
+        ? { ...judge, institution: "Universidad A" }
+        : judge),
+    };
+    expect(() => validatePublishedRoundPayload(payload, institutionContext)).toThrow(/comparten institución/);
+
+    const teamConflictContext = {
+      ...context,
+      teams: context.teams.map((team) => team.id === "team-a"
+        ? { ...team, incompatibleJudgeIds: ["judge-a"] }
+        : team),
+    };
+    expect(() => validatePublishedRoundPayload(payload, teamConflictContext)).toThrow(/incompatible con el equipo/);
+
+    const judgeConflictContext = {
+      ...context,
+      judges: context.judges.map((judge) => judge.id === "judge-b"
+        ? { ...judge, incompatibleJudgeIds: ["judge-a"] }
+        : judge),
+    };
+    expect(() => validatePublishedRoundPayload({
+      ...payload,
+      debates: [{ ...payload.debates[0], judgeIds: ["judge-a", "judge-b"], chairId: "judge-a" }],
+    }, judgeConflictContext)).toThrow(/jueces incompatibles/);
   });
 
   it("rejects malformed proposals without throwing incidental runtime errors", () => {
