@@ -563,3 +563,17 @@ Reglas de seguridad aplicadas:
 - Las entidades locales no emparejadas, rondas y actas no se eliminan. No se publica ninguna ronda como efecto secundario de vincular.
 
 **Trabajo pendiente:** este primer flujo revisa el hand-off compartido por el panel actual; todavía no implementa la selección/autenticación independiente de un torneo remoto ni la lectura de un snapshot API completo. El hand-off actual no incluye `settingsRevision`, por lo que aún no puede detectar de forma independiente cambios en las reglas persistidas. Tampoco completa la reconciliación histórica de entidades eliminadas/tombstones. Hasta cerrar esos pasos, la vinculación y sincronización integral siguen incompletas.
+
+
+## Incremento: publicación segura de propuestas de ronda desde Tabulación
+
+La propuesta local de ronda que se envía al gestor incluye, cuando el torneo está vinculado, la identidad canónica del torneo y la revisión/fecha base del snapshot remoto utilizado para generarla.
+
+- Antes de construir la propuesta, Tabulación traduce los IDs locales de equipos, jueces y salas físicas a sus IDs canónicos del gestor mediante `panelLink.idMap`.
+- Si falta una correspondencia para cualquier entidad utilizada, la propuesta no se genera. No se envían IDs locales suponiendo que coinciden con los del gestor.
+- El payload incluye `tournamentId`, `basePanelRevision` y `basePanelUpdatedAt`.
+- El gestor rechaza una propuesta cuya identidad no coincida, que no tenga revisión base verificable o cuya revisión/fecha haya cambiado desde el snapshot.
+- Las propuestas legacy sin identidad siguen funcionando únicamente contra torneos legacy sin identidad; no pueden aplicarse a un torneo que ya tenga UUID canónico.
+- Esta comprobación es una precondición para la revisión/publicación: no publica ni guarda asignaciones automáticamente. El operador todavía debe revisar la propuesta, confirmarla y guardar los cambios desde el gestor.
+
+Este control evita aplicar cruces a otro torneo o sobre una revisión que cambió después de generar el sorteo. No sustituye la futura publicación remota transaccional ni la reconciliación multi-dispositivo.
