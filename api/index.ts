@@ -175,6 +175,7 @@ function tournamentFromData(data: SheetData): Tournament {
     return room;
   });
   return {
+    ...(configValue(config, "remoteId") ? { remoteId: configValue(config, "remoteId") } : {}),
     tournamentName: str(configValue(config, "tournamentName")) || "Torneo LEDU",
     rounds,
     scoring,
