@@ -86,7 +86,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   }, [tournament?.id]);
 
   useEffect(() => {
-    if (!tournament?.panelLink?.remoteId || state.readOnly || !navigator.onLine) return;
+    if (!tournament?.panelLink?.remoteId || state.readOnly) return;
     let disposed = false;
     let running = false;
     const pull = async () => {
