@@ -42,8 +42,21 @@ export function createSyncOutboxWorker(options: SyncOutboxWorkerOptions) {
     if (stopped) return;
     if (wakeTimer !== undefined) window.clearTimeout(wakeTimer);
     const rows = await refresh();
-    const next = rows.find((row) => row.status === 'pending');
-    const delay = next ? Math.max(250, (next.nextAttemptAt ?? now()) - now()) : pollIntervalMs;
+    const ordered = [...rows].sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId));
+    const eligible = ordered.filter((row, index) => {
+      if (row.status !== 'pending') return false;
+      const sameEntityBlocked = ordered.slice(0, index).some((prior) => prior.status !== 'superseded'
+        && prior.entityType === row.entityType && prior.entityId === row.entityId);
+      const dependency = row.dependsOnOperationId
+        ? ordered.find((prior) => prior.operationId === row.dependsOnOperationId) : undefined;
+      return !sameEntityBlocked && !(dependency && dependency.status !== 'superseded');
+    });
+    // A pending operation can be intentionally blocked behind a conflict/failed
+    // predecessor. Do not spin a 250ms timer while the operator must intervene.
+    const nextAttemptAt = eligible.length
+      ? Math.min(...eligible.map((row) => row.nextAttemptAt ?? now()))
+      : now() + pollIntervalMs;
+    const delay = Math.max(250, nextAttemptAt - now());
     wakeTimer = window.setTimeout(() => { void runOnce(); }, Math.min(delay, pollIntervalMs));
   };
 
