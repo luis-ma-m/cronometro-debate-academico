@@ -19,7 +19,7 @@ class MemoryOutboxRepository implements SyncOutboxRepository {
       .map((row) => structuredClone(row));
   }
   async claimNext(tournamentId: string, workerId: string, now: number, leaseMs: number) {
-    const oldest = (await this.list(tournamentId))[0];
+    const oldest = (await this.list(tournamentId)).find((row) => row.status !== 'superseded');
     if (!oldest || oldest.status !== 'pending' || (oldest.nextAttemptAt ?? 0) > now) return null;
     const claimed: PendingSyncOperation = {
       ...oldest, status: 'sending', attempts: oldest.attempts + 1,
@@ -38,6 +38,16 @@ class MemoryOutboxRepository implements SyncOutboxRepository {
     const row = this.rows.get(id);
     if (!row || row.status !== 'sending' || row.workerId !== workerId) return false;
     this.rows.delete(id);
+    return true;
+  }
+  async supersede(id: string, replacementId?: string) {
+    const current = this.rows.get(id);
+    if (!current || (current.status !== 'conflict' && current.status !== 'failed')) return false;
+    const replacement = replacementId ? this.rows.get(replacementId) : undefined;
+    if (replacementId && (!replacement || replacement.status !== 'pending'
+      || replacement.tournamentId !== current.tournamentId
+      || replacement.entityType !== current.entityType || replacement.entityId !== current.entityId)) return false;
+    this.rows.set(id, { ...current, status: 'superseded', supersededBy: replacementId });
     return true;
   }
   async recoverExpired(now: number) {
