@@ -321,6 +321,11 @@ export async function saveTabulationActa(input: SaveTabulationActaInput) {
       throw new ApiError("ACTA_REPLACEMENT_CONFIRMATION_INVALID", "No existe un acta vigente que pueda sustituirse.", 409);
     }
     if (!isRecord(input.source) || !isRecord(input.source.acta)) throw new ApiError("INVALID_ACTA_SOURCE", "La fuente del acta no tiene una estructura válida.");
+    if (input.source.acta.tournamentId !== loaded.tabTournamentId
+      || input.source.acta.roundId !== loaded.tabulationRoundId
+      || input.source.acta.debateId !== loaded.context.debate.id) {
+      throw new ApiError("ACTA_IDENTITY_MISMATCH", "El acta local no coincide con el torneo, ronda y debate vinculados a esta asignación del Gestor.", 409);
+    }
     const canonicalActa = canonicalizeTabulationActa(
       { ...input.source.acta, ...(input.source.eliminationResult === undefined ? {} : { eliminationResult: input.source.eliminationResult }) },
       loaded.idMap,
