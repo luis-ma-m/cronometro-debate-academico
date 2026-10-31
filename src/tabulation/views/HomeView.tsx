@@ -10,7 +10,7 @@ import { TabDataError } from '../normalize';
 import { buildPanelHandoff, clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, readPanelPublishAcknowledgements, removePanelPublishAcknowledgements, PANEL_PUBLISH_ACK_KEY, tournamentFromHandoff, type PanelHandoff } from '../panelBridge';
 import { getTournament } from '../../api';
 import { ApiError } from '../../api';
-import { buildLocalPanelBase, comparePanelRevisions } from '../reconciliation';
+import { buildLocalPanelBase, comparePanelRevisions, hasRemoteCursorAdvanced } from '../reconciliation';
 import { clearPendingPanelReconciliation, readPanelSyncBase, readPendingPanelReconciliation, writePanelSyncBase, writePendingPanelReconciliation } from '../panelSync';
 import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS } from '../presets';
 import { roundIsComplete, type DebateOutcome } from '../results';
@@ -248,9 +248,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           setSyncStatus('La base de sincronización pertenece a otra identidad remota. Se ha bloqueado la reconciliación.');
           return;
         }
-        const remoteRevisionAdvanced = (remote.revision ?? 0) > (base.revision ?? 0)
-          || ((remote.revision ?? 0) === (base.revision ?? 0)
-            && (remote.updatedAt ?? 0) > (base.updatedAt ?? 0));
+        const remoteRevisionAdvanced = hasRemoteCursorAdvanced(base, remote);
         const existingPending = readPendingPanelReconciliation(window.localStorage, tournament.id);
         if (existingPending) {
           setPendingReconciliation(existingPending);
