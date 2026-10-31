@@ -12,10 +12,12 @@ La rama ya contenía una primera base de F4: validación pura del resultado de T
 - Historial y tipos de API preparados para exponer sourceMode elimination y su resultado explícito.
 - Canonicalizador puro `api/tabulation-acta-identity.ts`: traduce equipos, jueces y oradores de la fuente local a IDs del Gestor usando exclusivamente el `idMap` revisado; reescribe también las claves de puntuaciones/sanciones/alineaciones, las papeletas, el acta conjunta y el resultado de eliminatoria. El ámbito torneo/ronda/asignación se toma de los objetivos resueltos por el Gestor, no de los IDs enviados por el cliente.
 - Tests de identidad: mapeo completo, IDs ausentes, destino fuera de la asignación, colisiones de mapeo, acta conjunta y progresión eliminatoria.
+- Corrección del motor de resultados: las eliminatorias siempre se evalúan mediante votos individuales, aunque las rondas clasificatorias del torneo estén configuradas con acta conjunta. Se añadieron pruebas de regresión en el validador de F4.
 
 **Todavía no implementado ni habilitado:**
 - Endpoint transaccional de guardado inicial/sustitución y recuperación idempotente.
 - Construcción de contexto remoto completo y validación server-side conectada al guardado (el canonicalizador puro existe, pero todavía no está conectado a una consulta/operación autorizada del Gestor).
+- Resolver de forma autoritativa los metadatos propios de Tabulación que no existen en el esquema actual del Gestor (por ejemplo, equipos swing/caídos y otros atributos que pueden alterar el ganador calculado). No aceptar estos flags desde el cliente como verdad: deben quedar persistidos/versionados o verificarse contra un snapshot remoto confiable antes de validar el acta.
 - Proyección compatible a scorecard cuando corresponda.
 - UI de primer guardado, diff, confirmación, historial y contador conectados al endpoint.
 - E2E y pruebas reales contra Neon Preview.
