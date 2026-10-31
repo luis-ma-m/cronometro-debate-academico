@@ -123,7 +123,7 @@ describe("transactional Tabulation round publication", () => {
     });
     expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO rounds"))).toBe(true);
     expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO room_assignments"))).toBe(true);
-    expect(query.mock.calls.some(([sql, params]) => String(sql).includes("INSERT INTO tabulation_debate_assignments") && (params as unknown[])[2] === "tab-debate-1")).toBe(true);
+    expect(query.mock.calls.some(([sql, params]) => String(sql).includes("INSERT INTO tabulation_debate_assignments") && (params as unknown[])[3] === "tab-debate-1")).toBe(true);
     expect(result).toMatchObject({ debateAssignments: [{ tabulationDebateId: "tab-debate-1", assignmentId: expect.any(String) }] });
     expect(query.mock.calls.some(([sql, params]) => String(sql).includes("INSERT INTO rounds") && (params as unknown[])[4] === "format-default")).toBe(true);
     expect(query.mock.calls.some(([sql, params]) => String(sql).includes("INSERT INTO room_assignments") && (params as unknown[])[3] === "format-default" && (params as unknown[])[6] === 240)).toBe(true);
