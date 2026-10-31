@@ -33,6 +33,18 @@ describe('durable panel reconciliation state', () => {
     expect(readPendingPanelReconciliation(storage, 'local-1')).toBeNull();
   });
 
+  it('drops a stale baseline when storage quota prevents writing the new cursor', () => {
+    const storage = memoryStorage();
+    writePanelSyncBase(storage, 'local-1', snapshot);
+    const quotaStorage = {
+      getItem: storage.getItem,
+      setItem: () => { throw new DOMException('quota', 'QuotaExceededError'); },
+      removeItem: storage.removeItem,
+    };
+    expect(writePanelSyncBase(quotaStorage, 'local-1', { ...snapshot, revision: 3, updatedAt: 20 })).toBe(false);
+    expect(readPanelSyncBase(storage, 'local-1')).toBeNull();
+  });
+
   it('ignores malformed or incompatible stored snapshots', () => {
     const storage = memoryStorage();
     storage.setItem('ledu-tabulacion-sync-base-v1:local-1', '{"format":"wrong"}');
