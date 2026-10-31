@@ -5,6 +5,22 @@ export type SyncDispatchResult =
   | { status: 'acknowledged'; response?: unknown }
   | { status: 'conflict' | 'failed' | 'retry' | 'pause'; error: SyncOperationError; retryAfterMs?: number };
 
+export function syncWorkerNextWakeDelay(rows: PendingSyncOperation[], timestamp: number, pollIntervalMs: number): number {
+  const ordered = [...rows].sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId));
+  const eligible = ordered.filter((row, index) => {
+    if (row.status !== 'pending') return false;
+    const sameEntityBlocked = ordered.slice(0, index).some((prior) => prior.status !== 'superseded'
+      && prior.entityType === row.entityType && prior.entityId === row.entityId);
+    const dependency = row.dependsOnOperationId
+      ? ordered.find((prior) => prior.operationId === row.dependsOnOperationId) : undefined;
+    return !sameEntityBlocked && !(dependency && dependency.status !== 'superseded');
+  });
+  const nextAttemptAt = eligible.length
+    ? Math.min(...eligible.map((row) => row.nextAttemptAt ?? timestamp))
+    : timestamp + pollIntervalMs;
+  return Math.min(Math.max(250, nextAttemptAt - timestamp), pollIntervalMs);
+}
+
 export interface SyncOutboxWorkerOptions {
   outbox: SyncOutbox;
   tournamentId: string;
@@ -42,22 +58,10 @@ export function createSyncOutboxWorker(options: SyncOutboxWorkerOptions) {
     if (stopped) return;
     if (wakeTimer !== undefined) window.clearTimeout(wakeTimer);
     const rows = await refresh();
-    const ordered = [...rows].sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId));
-    const eligible = ordered.filter((row, index) => {
-      if (row.status !== 'pending') return false;
-      const sameEntityBlocked = ordered.slice(0, index).some((prior) => prior.status !== 'superseded'
-        && prior.entityType === row.entityType && prior.entityId === row.entityId);
-      const dependency = row.dependsOnOperationId
-        ? ordered.find((prior) => prior.operationId === row.dependsOnOperationId) : undefined;
-      return !sameEntityBlocked && !(dependency && dependency.status !== 'superseded');
-    });
     // A pending operation can be intentionally blocked behind a conflict/failed
     // predecessor. Do not spin a 250ms timer while the operator must intervene.
-    const nextAttemptAt = eligible.length
-      ? Math.min(...eligible.map((row) => row.nextAttemptAt ?? now()))
-      : now() + pollIntervalMs;
-    const delay = Math.max(250, nextAttemptAt - now());
-    wakeTimer = window.setTimeout(() => { void runOnce(); }, Math.min(delay, pollIntervalMs));
+    const delay = syncWorkerNextWakeDelay(rows, now(), pollIntervalMs);
+    wakeTimer = window.setTimeout(() => { void runOnce(); }, delay);
   };
 
   const runOnce = (force = false): Promise<void> => {
