@@ -15,9 +15,31 @@ import { clearPendingPanelReconciliation, readPanelSyncBase, readPendingPanelRec
 import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS } from '../presets';
 import { roundIsComplete, type DebateOutcome } from '../results';
 import { createSampleTournament } from '../sample';
-import { MAX_BACKUPS, type TabStore, type TabStoreState } from '../store';
+import { INDEX_KEY, MAX_BACKUPS, tournamentKey, type TabStore, type TabStoreState } from '../store';
 import { eliminationRounds, isFallenAt, qualifyingRounds, type PresetId, type TabTournament, type PanelEntityIdMap } from '../types';
 import { BUILD_INFO, exportTournamentCopy, Field, formatNumber, IssueList, Notice, type NoticeKind } from '../ui';
+
+const MANAGER_SESSION_KEY = 'ledu-admin-session';
+
+function readManagerToken(): string | null {
+  try {
+    const session = JSON.parse(window.localStorage.getItem(MANAGER_SESSION_KEY) ?? 'null') as { token?: unknown; expiresAt?: unknown } | null;
+    return typeof session?.token === 'string' && typeof session.expiresAt === 'number' && session.expiresAt > Date.now()
+      ? session.token : null;
+  } catch { return null; }
+}
+
+function findLinkedLocalTournamentId(remoteId: string): string | null {
+  try {
+    const index = JSON.parse(window.localStorage.getItem(INDEX_KEY) ?? 'null') as { tournaments?: Array<{ id?: unknown }> } | null;
+    for (const entry of index?.tournaments ?? []) {
+      if (typeof entry.id !== 'string') continue;
+      const raw = JSON.parse(window.localStorage.getItem(tournamentKey(entry.id)) ?? 'null') as { panelLink?: { remoteId?: unknown } } | null;
+      if (raw?.panelLink?.remoteId === remoteId) return entry.id;
+    }
+  } catch { /* A damaged local entry must not block the current manager snapshot. */ }
+  return null;
+}
 
 type CreatablePreset = Exclude<PresetId, 'custom'>;
 
@@ -70,8 +92,60 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const [backupVersion, setBackupVersion] = useState(0);
   const [diagnosis, setDiagnosis] = useState<{ integrity: IntegrityReport; log: LogVerification & { issues: string[] } } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const managerBootstrapAttempt = useRef('');
   const handoff = useMemo(() => readHandoff(window.localStorage), [handoffVersion, state.tournaments]);
   const backups = useMemo(() => store.listBackups(), [store, tournament?.id, tournament?.revision, backupVersion]);
+  useEffect(() => {
+    if (state.readOnly) return;
+    const token = readManagerToken();
+    if (!token) return;
+    const attemptKey = token + ':' + handoffVersion;
+    if (managerBootstrapAttempt.current === attemptKey) return;
+    managerBootstrapAttempt.current = attemptKey;
+    let disposed = false;
+    const bootstrapFromManager = async () => {
+      try {
+        const manager = await getTournament(token);
+        if (disposed || !manager.remoteId) return;
+        const existingId = findLinkedLocalTournamentId(manager.remoteId);
+        if (existingId) {
+          if (existingId !== tournament?.id) store.open(existingId);
+          clearHandoff(window.localStorage);
+          setSyncStatus('Torneo vinculado cargado desde el Gestor. Se comprobará su revisión vigente.');
+          return;
+        }
+        const snapshot = buildPanelHandoff(manager);
+        const created = tournamentFromHandoff(snapshot, 'ledu-groups');
+        store.create(created);
+        if (!store.flush()) {
+          notify('Se ha importado el torneo del Gestor, pero no se ha podido confirmar su guardado local. No cierres esta pestaña hasta resolverlo.', 'error');
+          return;
+        }
+        writePanelSyncBase(window.localStorage, created.id, snapshot);
+        clearHandoff(window.localStorage);
+        setHandoffVersion((value) => value + 1);
+        setSyncStatus('Torneo inicial creado automáticamente con la información vigente del Gestor.');
+        notify('Tabulación ha cargado automáticamente el torneo y los participantes actuales del Gestor.');
+      } catch (error) {
+        if (!disposed) {
+          managerBootstrapAttempt.current = '';
+          setSyncStatus(error instanceof ApiError && error.code === 'UNAUTHORIZED'
+            ? 'Inicia sesión en el Gestor para cargar el torneo vigente.'
+            : 'No se pudo cargar el torneo del Gestor. Se conserva cualquier copia local y se reintentará al recuperar conexión.');
+        }
+      }
+    };
+    void bootstrapFromManager();
+    const retry = () => { managerBootstrapAttempt.current = ''; setHandoffVersion((value) => value + 1); };
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    return () => {
+      disposed = true;
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+    };
+  }, [state.readOnly, handoffVersion, tournament?.id, store, notify]);
+
   useEffect(() => {
     // The panel may send its participants while this page is open.
     const onStorage = (event: StorageEvent) => { if (event.key === HANDOFF_KEY) setHandoffVersion((value) => value + 1); };
