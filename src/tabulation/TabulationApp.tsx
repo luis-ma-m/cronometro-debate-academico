@@ -68,11 +68,22 @@ function TabulationShell() {
   const tournament = state.tournament;
 
   useEffect(() => {
+    const refreshSession = () => setManagerSessionToken(readManagerSessionToken());
     const onStorage = (event: StorageEvent) => {
-      if (event.key === MANAGER_SESSION_KEY) setManagerSessionToken(readManagerSessionToken());
+      if (event.key === MANAGER_SESSION_KEY) refreshSession();
     };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
+    window.addEventListener('focus', refreshSession);
+    document.addEventListener('visibilitychange', refreshSession);
+    // A same-tab login/refresh does not emit a StorageEvent. Re-read the
+    // session periodically so a paused outbox worker can resume without reload.
+    const interval = window.setInterval(refreshSession, 15000);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', refreshSession);
+      document.removeEventListener('visibilitychange', refreshSession);
+      window.clearInterval(interval);
+    };
   }, []);
   useEffect(() => {
     if (!apiConfigured || !managerSessionToken || !tournament?.panelLink?.remoteId || state.readOnly) {
