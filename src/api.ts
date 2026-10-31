@@ -123,10 +123,11 @@ export const updateTimer = (
 
 export interface TabulationActaHistoryVersion {
   id: string;
-  sourceMode: 'judges' | 'joint';
+  sourceMode: 'judges' | 'joint' | 'elimination';
   roundKind: 'qualifying' | 'elimination';
   baseRevision: number;
   sourceHash: string;
+  eliminationResult?: Record<string, unknown> | null;
   operationId: string;
   supersedesSourceId: string | null;
   createdBy: string;
