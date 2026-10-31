@@ -263,7 +263,7 @@ export async function previewTabulationActa(input: PreviewTabulationActaInput) {
     if (error instanceof TabulationActaValidationError) throw new ApiError("INVALID_ACTA", error.message, 422);
     if (error instanceof TabulationSettingsValidationError) throw new ApiError("ACTA_RULES_INVALID", error.message, 409);
     if (error && typeof error === "object" && "code" in error && ["42P01", "42703"].includes(String((error as { code?: unknown }).code))) {
-      throw new ApiError("MIGRATION_REQUIRED", "Faltan migraciones de Tabulación 0010–0018 en este entorno. No se ha guardado ni modificado el acta.", 503);
+      throw new ApiError("MIGRATION_REQUIRED", "Faltan migraciones de Tabulación 0010–0019 en este entorno. No se ha guardado ni modificado el acta.", 503);
     }
     throw error;
   } finally {
