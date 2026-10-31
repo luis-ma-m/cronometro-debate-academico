@@ -240,3 +240,5 @@ La migración 0017 añade una FK para garantizar que la presidencia persistida d
 
 
 La migración 0018 añade `tab_tournament_id` al puente de asignaciones. Preview y guardado verifican que el torneo, la ronda y el debate locales coincidan exactamente con la identidad persistida antes de canonicalizar; ya no basta con que el assignmentId sea válido.
+
+La migración 0019 amplía la clave natural del mapping para incluir el torneo local de Tabulación; así se evita que dos torneos locales distintos colisionen al reutilizar IDs de ronda/debate.
