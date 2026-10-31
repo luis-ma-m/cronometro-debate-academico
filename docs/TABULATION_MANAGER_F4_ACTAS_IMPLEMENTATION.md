@@ -12,7 +12,7 @@ La rama ya contenía una primera base de F4: validación pura del resultado de T
 - Historial y tipos de API preparados para exponer sourceMode elimination y su resultado explícito.
 - Canonicalizador puro `api/tabulation-acta-identity.ts`: traduce equipos, jueces y oradores de la fuente local a IDs del Gestor usando exclusivamente el `idMap` revisado; reescribe también las claves de puntuaciones/sanciones/alineaciones, las papeletas, el acta conjunta y el resultado de eliminatoria. El ámbito torneo/ronda/asignación se toma de los objetivos resueltos por el Gestor, no de los IDs enviados por el cliente.
 - Tests de identidad: mapeo completo, IDs ausentes, destino fuera de la asignación, colisiones de mapeo, acta conjunta y progresión eliminatoria.
-- Corrección del motor de resultados: las eliminatorias siempre se evalúan mediante votos individuales, aunque las rondas clasificatorias del torneo estén configuradas con acta conjunta. Se añadieron pruebas de regresión en el validador de F4.
+- Se mantiene separada la modalidad de origen persistido (`elimination`) del modo de acta configurado (`judges` o `joint`): la primera identifica la progresión de cuadro; el segundo determina la estructura del resultado. No se fuerza a ADUMA a usar papeletas individuales en eliminatorias.
 
 **Todavía no implementado ni habilitado:**
 - Endpoint transaccional de guardado inicial/sustitución y recuperación idempotente.
