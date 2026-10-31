@@ -10,7 +10,12 @@ test('sin conexión: la mesa hace una ronda entera y el juez solo necesita red p
   await confirmOpenDraft(page);
   await expect(page.locator('.tab-round-screen')).toContainText('frente a');
   await page.locator('.tab-whatsapp summary').click();
-  const actaUrl = (await page.getByRole('link', { name: /Abrir el acta de/ }).first().getAttribute('href'))!;
+  const actaPopupPromise = page.waitForEvent('popup');
+  await page.getByRole('button', { name: 'Abrir el acta' }).first().click();
+  const actaPopup = await actaPopupPromise;
+  await expect.poll(() => actaPopup.url()).toContain('/acta#A2');
+  const actaUrl = actaPopup.url();
+  await actaPopup.close();
 
   await context.setOffline(false);
   const phone = await context.newPage();
