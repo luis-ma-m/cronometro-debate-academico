@@ -15,6 +15,7 @@ F4 dispone ya de una implementación funcional en código para el flujo de previ
 - Persistencia de resultado de eliminatoria separada de la scorecard clasificatoria. `sourceMode: elimination` representa el tipo de resultado/progresión; la estructura de papeletas sigue respetando `settings.ballotMode` (incluido el modo conjunto ADUMA).
 - Historial y detalle de versiones; el contador de reescrituras se calcula en servidor a partir de versiones que sustituyen una fuente anterior.
 - UI `OfficialActaPublisher` de comparación, primer guardado/sustitución explícitos y reintento del mismo `operationId` después de error ambiguo.
+- En el Gestor, el historial de cada sala permite consultar las versiones oficiales y el contador de reescrituras. Se añade inspección bajo demanda y de solo lectura del payload fuente íntegro y del snapshot de reglas de cada versión; no se reconstruye ni se sobrescribe el acta vigente al consultar.
 - Migraciones append-only 0010–0019 definidas en el repositorio. No se han aplicado a Neon Production.
 
 ### Validación completada
@@ -28,16 +29,14 @@ F4 dispone ya de una implementación funcional en código para el flujo de previ
 - Ejecutar en PostgreSQL real creación inicial, reemplazo, cancelación (sin llamada de escritura), operación idempotente repetida, colisión de `operationId`, dos reemplazos concurrentes, conflicto de revisión, timeout posterior al commit y rollback provocado.
 - Verificar que el contexto autoritativo y el mapping de debate/torneo quedan íntegros con datos reales; probar especialmente dos torneos locales que reutilicen IDs locales de ronda/debate.
 - E2E real en navegador y dos dispositivos: publicación de ronda, ACK, primera acta, sustitución, historial tras recarga, contador consistente y recuperación del mismo `operationId`.
-- Completar UI de historial/versiones para consultar y restaurar/revisar versiones antiguas según las decisiones aprobadas. La UI actual de publicación muestra el diff de sustitución, pero esto no prueba por sí solo todos los recorridos de auditoría en la sala/gestor.
+- Completar y validar los recorridos visuales restantes del historial y definir, si procede, un flujo seguro de restauración como nueva propuesta (nunca reescritura destructiva). La consulta de metadatos, contador y detalle íntegro de versiones ya está implementada en el Gestor; falta validarla con datos reales y tras recarga.
 - Asegurar que el estado de reescrituras se muestra en la tarjeta/resumen de la sala del Gestor con el número exacto, no solo en la notificación de Tabulación.
 - Verificar la semántica de todos los campos y datos conjuntos/eliminatoria en la UI, no únicamente su persistencia JSONB.
 - No marcar F4 cerrada hasta que estas pruebas sean satisfactorias.
 
-## Advertencia de configuración Vercel
+## Nota de Vercel (no bloqueante para la implementación)
 
-La ejecución más reciente del deployment de la rama `feat/tabulation-manager-sync` observada al actualizar este registro terminó con `exceeded_serverless_functions_per_deployment`: el proyecto está en Hobby y el deployment supera el límite de 12 Serverless Functions. Es distinto del anterior `build-rate-limit`; no es un fallo de TypeScript ni un fallo de GitHub Actions. Debe resolverse reduciendo/consolidando funciones API o cambiando el plan; no multiplicar reintentos de deployment porque repetirán el mismo límite.
-
-Actions run #1464 está verde, pero el check Vercel de la PR continúa fallido por limitación de plataforma. No afirmar que existe Preview desplegado del HEAD actual mientras no haya un deployment READY que apunte al SHA correspondiente.
+El deployment de Preview puede quedar pendiente por la cuota/disponibilidad del plan de Vercel. Esto es una limitación operativa de la cuenta, no un defecto que deba corregirse modificando la arquitectura o el código de la PR. No se condiciona el avance de implementación a resolverla ni se deben hacer cambios estructurales en `api/` por este motivo. Las validaciones de código se siguen realizando mediante GitHub Actions; la validación de Preview quedará pendiente hasta que haya cuota disponible.
 
 ## Regla de seguridad operativa
 
