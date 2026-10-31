@@ -386,6 +386,11 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
 
   const publish = async () => {
     if (!token || !assignmentId || !preview || !source || !tournament.panelLink?.remoteId) return;
+    if (preview.currentSourceId && preview.changes.length === 0) {
+      setPreview(null);
+      notify('El acta ya coincide con la versión oficial del Gestor. No se ha creado una reescritura.', 'success');
+      return;
+    }
     if (preview.basePanelRevision < 0 || !Number.isFinite(preview.basePanelUpdatedAt)) {
       notify('La comparación no contiene una revisión válida. Vuelve a comparar.', 'error');
       return;
