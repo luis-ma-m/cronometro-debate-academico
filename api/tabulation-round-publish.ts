@@ -129,6 +129,13 @@ export async function publishTabulationRound(rawOperation: unknown) {
         [assignmentId, operation.entityId, debate.physicalRoomId, defaultFormatId, debate.teamFavorId, debate.teamContraId,
           firstPhaseDuration, debate.sidesProvisional ? "Posturas provisionales: revisar antes de activar la ronda." : ""],
       );
+      // Persist the exact local→remote debate identity in the same transaction as its assignment.
+      await client.query(
+        `INSERT INTO tabulation_debate_assignments
+          (tournament_id, tabulation_round_id, tabulation_debate_id, manager_round_id, assignment_id)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [canonicalTournamentId, operation.entityId, debate.tabulationDebateId, operation.entityId, assignmentId],
+      );
       for (const phase of phases) {
         await client.query(
           `INSERT INTO assignment_phases(
@@ -156,7 +163,9 @@ export async function publishTabulationRound(rawOperation: unknown) {
     await client.query("UPDATE tournament_settings SET revision = $1, updated_at = now() WHERE id = 1", [nextRevision]);
     const response = {
       tournamentId: canonicalTournamentId, roundId: operation.entityId, roundNumber: validated.roundNumber,
-      roundName: validated.roundName, roundKind, assignmentIds, revision: nextRevision, operationId: operation.operationId,
+      roundName: validated.roundName, roundKind, assignmentIds,
+      debateAssignments: validated.debates.map((debate, index) => ({ tabulationDebateId: debate.tabulationDebateId, assignmentId: assignmentIds[index] })),
+      revision: nextRevision, operationId: operation.operationId,
     };
     await client.query(
       "INSERT INTO idempotency_keys(operation_key, scope, response, completed_at) VALUES ($1, $2, $3::jsonb, now())",
