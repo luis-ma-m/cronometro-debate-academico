@@ -778,3 +778,11 @@ F4 depende de F3: no habilitar escrituras oficiales de actas hasta disponer de r
 
 El registro operativo de pruebas que requieren Vercel Preview, Neon real, navegadores y revisión final está en [TABULATION_MANAGER_FINAL_VALIDATION_CHECKLIST.md](./TABULATION_MANAGER_FINAL_VALIDATION_CHECKLIST.md). Debe completarse con el commit SHA, entorno y evidencia de cada ejecución; no sustituye los criterios funcionales de este documento.
 
+
+## Persistencia de identidad de debates y metadatos de Tabulación
+
+La publicación remota de una ronda debe incluir el ID local estable de cada debate (tabulationDebateId). El backend persiste su relación con el assignmentId del Gestor en la misma transacción que crea la asignación; la respuesta devuelve las parejas explícitas. No se permite reconstruir esa relación mediante orden de listas, sala, nombre o composición de equipos.
+
+La publicación incluye además una instantánea autenticada de sideMode y de los metadatos de equipos activos (swing, breakEligible, fallenFromRound). El servidor valida que la instantánea cubra exactamente todos los equipos activos y la persiste por ronda. La futura validación de actas debe recuperar estos valores desde la base de datos; no debe aceptar swing, caídos, postura o presidencia reenviados por el cliente como contexto de decisión del ganador.
+
+Migraciones nuevas: 0014_tabulation_debate_assignments.sql y 0015_tabulation_round_metadata.sql. Su aplicación en producción requiere validación previa y autorización independiente.
