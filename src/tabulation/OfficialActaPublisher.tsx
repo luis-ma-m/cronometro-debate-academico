@@ -113,7 +113,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
     tournament.settings.ballotMode, round.id, round.kind, debate.id, debate.teamIds, result]);
 
   useEffect(() => {
-    if (!canPublish || !token || !source || pendingSaveRef.current?.input.assignmentId === assignmentId || readPendingSave(assignmentId) || lastSaved || outcome.status !== 'complete') return;
+    if (!canPublish || !token || !source || lastSaved || outcome.status !== 'complete') return;
     const attemptKey = assignmentId + ':' + JSON.stringify(source);
     let disposed = false;
 
@@ -122,6 +122,26 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
       automaticAttemptRef.current = attemptKey;
       setBusy(true);
       try {
+        // A previously persisted operation always wins over a newly built payload.
+        // This recovers an ambiguous timeout with the same operationId and exact body.
+        const existingPending = pendingSaveRef.current?.input.assignmentId === assignmentId
+          ? pendingSaveRef.current : readPendingSave(assignmentId);
+        if (existingPending) {
+          setPendingSave(existingPending);
+          const saved = await saveTabulationActa(token, existingPending.input);
+          if (disposed) return;
+          setLastSaved(saved);
+          setPendingSave(null);
+          setPreview(null);
+          store.log({
+            type: saved.replacedSourceId ? 'acta.official.replace' : 'acta.official.save',
+            message: round.name + ' · confirmación oficial recuperada. Versión ' + saved.sourceId + '.',
+            details: { assignmentId, sourceId: saved.sourceId, operationId: saved.operationId, winnerTeamId: saved.winnerTeamId },
+          });
+          notify('Confirmación recuperada con la misma operación. El Gestor conserva la versión oficial ' + saved.sourceId + '.', 'success');
+          return;
+        }
+
         const comparison = await previewTabulationActa(token, assignmentId, source);
         if (disposed) return;
         if (comparison.assignmentId !== assignmentId || comparison.tournamentId !== tournament.panelLink?.remoteId
