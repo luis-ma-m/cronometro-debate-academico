@@ -16,7 +16,8 @@ class MemoryRepository implements SyncOutboxRepository {
       .map((row) => structuredClone(row));
   }
   async claimNext(tournamentId: string, workerId: string, now: number, leaseMs: number) {
-    const oldest = (await this.list(tournamentId))[0];
+    const oldest = [...this.rows.values()].filter((row) => row.tournamentId === tournamentId)
+      .sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId))[0];
     if (!oldest || oldest.status !== 'pending' || (oldest.nextAttemptAt ?? 0) > now) return null;
     const claimed = { ...oldest, status: 'sending' as const, attempts: oldest.attempts + 1, lastAttemptAt: now, workerId, leaseUntil: now + leaseMs };
     this.rows.set(claimed.operationId, claimed);
@@ -81,6 +82,21 @@ describe('automatic sync worker', () => {
     expect(sends).toBe(2);
     expect(await outbox.list('tournament-1')).toEqual([]);
     worker.stop();
+  });
+
+  it('uses the atomic claim as a cross-tab single-worker lease', async () => {
+    const repository = new MemoryRepository();
+    const outbox = createSyncOutbox(repository, { now: () => 700, createOperationId: () => 'single-claim' });
+    await outbox.enqueue({ tournamentId: 't', entityType: 'round', entityId: 'r1', operation: 'publish-round', baseRevision: 1, payload: {} });
+    let sends = 0;
+    const dispatch = async () => { sends++; await Promise.resolve(); return { status: 'acknowledged' as const }; };
+    const first = createSyncOutboxWorker({ outbox, tournamentId: 't', workerId: 'tab-a', dispatch });
+    const second = createSyncOutboxWorker({ outbox, tournamentId: 't', workerId: 'tab-b', dispatch });
+    await Promise.all([first.runOnce(), second.runOnce()]);
+    expect(sends).toBe(1);
+    expect(await outbox.list('t')).toEqual([]);
+    first.stop();
+    second.stop();
   });
 
   it('stops the dependent queue on a revision conflict without deleting the operation', async () => {
