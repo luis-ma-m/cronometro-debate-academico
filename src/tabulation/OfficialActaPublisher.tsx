@@ -219,14 +219,19 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
     };
 
     void attempt();
-    const onOnline = () => {
+    const onReconnect = () => {
+      if (document.visibilityState === 'hidden') return;
       automaticAttemptRef.current = '';
       void attempt();
     };
-    window.addEventListener('online', onOnline);
+    window.addEventListener('online', onReconnect);
+    window.addEventListener('focus', onReconnect);
+    document.addEventListener('visibilitychange', onReconnect);
     return () => {
       disposed = true;
-      window.removeEventListener('online', onOnline);
+      window.removeEventListener('online', onReconnect);
+      window.removeEventListener('focus', onReconnect);
+      document.removeEventListener('visibilitychange', onReconnect);
     };
   }, [assignmentId, canPublish, debate.id, lastSaved, notify, outcome.status, round.managerRoundId, round.name, source, store, token, tournament.panelLink?.remoteId]);
 
