@@ -36,17 +36,18 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
     } catch { /* Vercel can return a non-JSON platform error before the handler runs. */ }
 
     const requestId = response.headers.get('x-vercel-id');
+    const retryAfterHeader = response.headers.get('retry-after');
+    const retryAfterSeconds = retryAfterHeader && Number.isFinite(Number(retryAfterHeader)) ? Number(retryAfterHeader) : 0;
+    const retryAfterDate = retryAfterHeader && retryAfterSeconds === 0 ? Date.parse(retryAfterHeader) : Number.NaN;
+    const retryAfterMs = Math.max(0, retryAfterSeconds ? retryAfterSeconds * 1000 : Number.isFinite(retryAfterDate) ? retryAfterDate - Date.now() : 0);
     if (response.status >= 500 && (!detail.error || detail.error.code === 'INTERNAL_ERROR')) {
       const reference = requestId ? ' Referencia para localizarlo en Vercel: ' + requestId + '.' : '';
       throw new ApiError(
         'La función de Vercel ha fallado internamente (HTTP ' + response.status + '). Revisa Vercel → Logs → Runtime Logs. No se ha podido confirmar la operación.' + reference,
         'VERCEL_RUNTIME_ERROR',
+        retryAfterMs,
       );
     }
-    const retryAfterHeader = response.headers.get('retry-after');
-    const retryAfterSeconds = retryAfterHeader && Number.isFinite(Number(retryAfterHeader)) ? Number(retryAfterHeader) : 0;
-    const retryAfterDate = retryAfterHeader && retryAfterSeconds === 0 ? Date.parse(retryAfterHeader) : Number.NaN;
-    const retryAfterMs = Math.max(0, retryAfterSeconds ? retryAfterSeconds * 1000 : Number.isFinite(retryAfterDate) ? retryAfterDate - Date.now() : 0);
     throw new ApiError(
       detail.error?.message ?? ('El backend respondió HTTP ' + response.status),
       detail.error?.code ?? 'HTTP_ERROR',
