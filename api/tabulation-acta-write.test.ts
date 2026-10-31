@@ -43,6 +43,7 @@ function input(overrides: Record<string, unknown> = {}) {
     },
     expectedCurrentSourceId: null,
     confirmReplace: false,
+    expectedSettingsRevision: 4,
     ...overrides,
   };
 }
@@ -70,7 +71,7 @@ describe("authoritative transactional Tabulation acta persistence", () => {
         { id: "judge-3", name: "J3", active: true, institution: "UMA", incompatible_judge_ids: [] },
       ] };
       if (statement.startsWith("SELECT s.id, s.team_id")) return { rows: [] };
-      if (statement.startsWith("SELECT schema_version, settings")) return { rows: [{ schema_version: 2, settings: presetSettings("ledu-groups") }] };
+      if (statement.startsWith("SELECT schema_version, settings")) return { rows: [{ schema_version: 2, revision: 4, settings: presetSettings("ledu-groups") }] };
       if (statement.startsWith("SELECT scope, response FROM idempotency_keys")) return { rows: [] };
       if (statement.startsWith("INSERT INTO tabulation_acta_sources")) return { rows: [{ id: ids.source, created_at: new Date(baseUpdatedAt) }] };
       if (statement.startsWith("SELECT count(*)::int AS total_versions")) return { rows: [{ total_versions: 1, rewrite_count: 0 }] };
@@ -85,7 +86,7 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     expect(preview).toMatchObject({
       assignmentId: ids.assignment, tournamentId: ids.tournament,
       roundId: "manager-round", debateId: "local-debate",
-      basePanelRevision: 3, basePanelUpdatedAt: baseUpdatedAt,
+      basePanelRevision: 3, basePanelUpdatedAt: baseUpdatedAt, settingsRevision: 4,
       currentSourceId: null, requiresReplacementConfirmation: false,
       sourceMode: "judges",
     });
