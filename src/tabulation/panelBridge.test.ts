@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { validateTournamentInput } from '../../api/core';
 import type { Room, Tournament } from '../domain';
 import { createTimer, LEDU_PHASES } from '../timer';
-import { applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, suggestPanelEntityMatches, validatePanelEntityIdMap, tournamentFromHandoff, writeHandoff } from './panelBridge';
+import { appendPanelPublishAcknowledgement, applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, readPanelPublishAcknowledgements, removePanelPublishAcknowledgements, PANEL_PUBLISH_ACK_KEY, suggestPanelEntityMatches, validatePanelEntityIdMap, tournamentFromHandoff, writeHandoff } from './panelBridge';
 import { memoryStorage } from './store';
 import { qualifyingRound } from './test-fixtures';
 import { createTabTournament } from './presets';
@@ -374,5 +374,38 @@ describe('ADUMA rounds sent to the panel', () => {
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
     tab.rounds[0].debates[0].judgeIds = ['j1', 'j3'];
     expect(buildOutbox(tab, 'r1', now).outbox!.debates[0].judgeIds).toEqual(['j1', 'j3']);
+  });
+});
+
+
+describe('Tabulation publication acknowledgements', () => {
+  it('persists, deduplicates and consumes manager assignment mappings', () => {
+    const storage = memoryStorage();
+    const acknowledgement = {
+      version: 1 as const,
+      operationId: 'publish-op-0001',
+      tabTournamentId: 'tab-tournament-1',
+      tabulationRoundId: 'tab-round-1',
+      managerRoundId: 'manager-round-1',
+      revision: 8,
+      debateAssignments: [{ tabulationDebateId: 'tab-debate-1', assignmentId: '00000000-0000-4000-8000-000000000001' }],
+    };
+    appendPanelPublishAcknowledgement(storage, acknowledgement);
+    appendPanelPublishAcknowledgement(storage, acknowledgement);
+    expect(readPanelPublishAcknowledgements(storage)).toEqual([acknowledgement]);
+    removePanelPublishAcknowledgements(storage, ['publish-op-0001']);
+    expect(readPanelPublishAcknowledgements(storage)).toEqual([]);
+    expect(storage.getItem(PANEL_PUBLISH_ACK_KEY)).toBeNull();
+  });
+
+  it('ignores malformed or tampered assignment mappings', () => {
+    const storage = memoryStorage({
+      [PANEL_PUBLISH_ACK_KEY]: JSON.stringify([{
+        version: 1, operationId: 'bad', tabTournamentId: 'tab-tournament-1',
+        tabulationRoundId: 'tab-round-1', managerRoundId: 'manager-round-1', revision: 8,
+        debateAssignments: [{ tabulationDebateId: 'tab-debate-1', assignmentId: 'not-a-uuid' }],
+      }]),
+    });
+    expect(readPanelPublishAcknowledgements(storage)).toEqual([]);
   });
 });
