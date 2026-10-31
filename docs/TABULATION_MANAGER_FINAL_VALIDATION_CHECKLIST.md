@@ -43,6 +43,10 @@
 
 ## 3. F4 — actas oficiales: pruebas PostgreSQL/Neon y Preview
 
+- [x] Implementado: primer guardado automático si no hay versión oficial; operación persistida antes de la escritura y recuperación idempotente con el mismo `operationId` tras timeout, recarga o reconexión.
+- [x] Implementado: al expandir una sala se carga el historial automáticamente y el contador aparece en la cabecera de su tarjeta; las versiones incluyen detalle de solo lectura.
+- [ ] Validar los dos recorridos anteriores con datos reales en Neon Preview y navegador multi-dispositivo.
+
 - [ ] Aplicar la migración de fuentes de acta en Neon Preview y verificar constraints/índices.
 - [ ] Probar guardado inicial judges, conservando papeletas, votos, notas, oradores y metadatos.
 - [ ] Probar guardado joint, conservando ganador declarado, rúbrica, ítems, puntuaciones, sanciones, notas y snapshot de reglas.
