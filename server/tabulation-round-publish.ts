@@ -178,13 +178,17 @@ export async function publishTabulationRound(rawOperation: unknown) {
     }
 
     const nextRevision = currentRevision + 1;
-    await client.query("UPDATE tournament_settings SET revision = $1, updated_at = now() WHERE id = 1", [nextRevision]);
+    const revisionUpdate = await client.query(
+      "UPDATE tournament_settings SET revision = $1, updated_at = now() WHERE id = 1 RETURNING floor(extract(epoch FROM updated_at) * 1000)::bigint AS updated_at_ms",
+      [nextRevision],
+    );
+    const nextUpdatedAt = num(revisionUpdate.rows[0]?.updated_at_ms);
     const response = {
       tournamentId: canonicalTournamentId, tabTournamentId: validated.tabTournamentId, tabulationRoundId: validated.tabulationRoundId,
       roundId: operation.entityId, roundNumber: validated.roundNumber,
       roundName: validated.roundName, roundKind, assignmentIds,
       debateAssignments: validated.debates.map((debate, index) => ({ tabulationDebateId: debate.tabulationDebateId, assignmentId: assignmentIds[index] })),
-      revision: nextRevision, operationId: operation.operationId,
+      revision: nextRevision, updatedAt: nextUpdatedAt, operationId: operation.operationId,
     };
     await client.query(
       "INSERT INTO idempotency_keys(operation_key, scope, response, completed_at) VALUES ($1, $2, $3::jsonb, now())",
