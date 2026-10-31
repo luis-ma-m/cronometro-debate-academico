@@ -36,7 +36,8 @@
 - [ ] Probar cambios simultáneos sobre el mismo campo: ambas versiones deben conservarse y aparecer como conflicto, sin last-write-wins.
 - [ ] Desconectar red, crear cambios locales, recargar/cerrar y reabrir; verificar persistencia y reintento al reconectar.
 - [ ] Verificar exclusión de worker entre pestañas, leases expirados, backoff, Retry-After y recuperación tras timeout ambiguo.
-- [ ] Validar migración IndexedDB v1 → v2 en navegador con datos de prueba; registros, índices, leases y operaciones pendientes deben sobrevivir.
+- [x] Añadida prueba E2E de navegador para migración IndexedDB v1 → v2: conserva una operación pendiente antigua, crea el índice `byTournamentCreatedAt`, recupera un lease expirado y demuestra que dos repositorios/pestañas no reclaman la misma operación.
+- [ ] Ejecutar esa prueba sobre el navegador y el perfil de datos reales de operación; la prueba automatizada usa una base IndexedDB aislada de Playwright.
 - [ ] Confirmar que una respuesta remota vacía/errónea no se interpreta como borrado y no se pierden entidades históricas.
 - [ ] Verificar que operaciones sin dispatcher no se marcan como confirmadas ni se descartan.
 
@@ -53,7 +54,8 @@
 - [ ] Cancelar el diff y comprobar que no hay escritura ni cambio del acta oficial.
 - [ ] Simular dos sustituciones concurrentes sobre la misma revisión: solo una confirma; la otra recibe conflicto.
 - [ ] Simular timeout posterior al commit y recuperar con el mismo operationId; no debe crearse una segunda versión.
-- [ ] Forzar fallo durante auditoría/proyección/contador y comprobar rollback transaccional completo.
+- [x] Añadida prueba unitaria de regresión: si falla la inserción de auditoría después de insertar la fuente, la operación ejecuta `ROLLBACK`, no ejecuta `COMMIT` y no registra una clave de idempotencia incompleta (cliente PostgreSQL simulado).
+- [ ] Forzar fallo durante auditoría/proyección/contador contra PostgreSQL real y comprobar rollback transaccional completo.
 - [ ] Verificar que revisión obsoleta obliga a descargar y comparar de nuevo (409), sin sobrescribir el acta vigente.
 - [ ] Confirmar historial y contador consistentes entre dispositivos y tras recarga.
 - [ ] Verificar autorización por torneo/asignación y rechazo de IDs ajenos, payload malformado, hash incorrecto y schemaVersion no soportada.
