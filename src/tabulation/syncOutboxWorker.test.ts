@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createSyncOutbox, type PendingSyncOperation, type SyncOutboxRepository } from './syncOutbox';
-import { createSyncOutboxWorker } from './syncOutboxWorker';
+import { createSyncOutboxWorker, syncWorkerNextWakeDelay } from './syncOutboxWorker';
 
 class MemoryRepository implements SyncOutboxRepository {
   rows = new Map<string, PendingSyncOperation>();
@@ -131,6 +131,27 @@ describe('automatic sync worker', () => {
     expect(next?.operationId).toBe(unrelated.operation.operationId);
     expect((await outbox.list('t')).filter((row) => row.status === 'pending')).toHaveLength(1);
     worker.stop();
+  });
+
+  it('backs off to the normal poll interval when pending work is blocked by a conflict', () => {
+    const blocked = {
+      operationId: 'blocked-0002', tournamentId: 't', entityType: 'acta', entityId: 'a1',
+      operation: 'replace-acta' as const, baseRevision: 2, payload: {}, payloadHash: 'hash',
+      status: 'pending' as const, attempts: 0, createdAt: 2,
+    };
+    const conflict = { ...blocked, operationId: 'conflict-0001', status: 'conflict' as const, createdAt: 1 };
+    expect(syncWorkerNextWakeDelay([conflict, blocked], 10_000, 30_000)).toBe(30_000);
+  });
+
+  it('schedules the earliest eligible retry without delaying unrelated entities', () => {
+    const blocked = {
+      operationId: 'blocked-0002', tournamentId: 't', entityType: 'acta', entityId: 'a1',
+      operation: 'replace-acta' as const, baseRevision: 2, payload: {}, payloadHash: 'hash',
+      status: 'pending' as const, attempts: 0, createdAt: 2,
+    };
+    const conflict = { ...blocked, operationId: 'conflict-0001', status: 'conflict' as const, createdAt: 1 };
+    const unrelated = { ...blocked, operationId: 'other-0003', entityId: 'a2', nextAttemptAt: 12_000, createdAt: 3 };
+    expect(syncWorkerNextWakeDelay([conflict, blocked, unrelated], 10_000, 30_000)).toBe(2_000);
   });
 
 });
