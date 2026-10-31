@@ -42,9 +42,9 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("PRIMARY KEY (tournament_id, tabulation_round_id, tabulation_debate_id)");
     expect(sql).toContain("REFERENCES rounds(id)");
     expect(sql).toContain("REFERENCES room_assignments(id)");
-    expect(sql).not.toMatch(/\\bDROP\\s+TABLE\\b/i);
-    expect(sql).not.toMatch(/\\bTRUNCATE\\b/i);
-    expect(sql).not.toMatch(/\\bDELETE\\s+FROM\\b/i);
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
   });
 
   it("persists Tabulation-only outcome metadata and assignment context without destructive operations", async () => {
@@ -54,9 +54,9 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("team_metadata jsonb NOT NULL");
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS chair_judge_id");
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS sides_provisional");
-    expect(sql).not.toMatch(/\\bDROP\\s+TABLE\\b/i);
-    expect(sql).not.toMatch(/\\bTRUNCATE\\b/i);
-    expect(sql).not.toMatch(/\\bDELETE\\s+FROM\\b/i);
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
   });
 
   it("migration runner discovers ordered, versioned SQL migrations and verifies checksums", async () => {
