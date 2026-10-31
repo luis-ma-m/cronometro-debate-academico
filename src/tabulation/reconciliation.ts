@@ -130,13 +130,16 @@ export function comparePanelRevisions(
         continue;
       }
       const remoteChanged = stable(baseRow) !== stable(remoteRow);
+      const comparableFields = [...new Set([...Object.keys(baseRow), ...Object.keys(remoteRow)])].filter((field) => field !== 'id');
+      const localChanged = localValue === null || stable(comparableEntity(baseRow as Record<string, unknown>, definition.kind, remoteId, comparableFields, idMap, false))
+        !== stable(comparableEntity(localValue, definition.kind, remoteId, comparableFields, idMap, true));
       if (!remoteChanged) {
-        changes.push({ kind: definition.kind, localId, remoteId, label: remoteRow.name, change: 'unchanged', fields: [], base: baseValue, local: localValue, remote: remoteValue });
+        const localFields = localValue === null ? ['missing-local-entity'] : comparableFields.filter((field) =>
+          stable((baseRow as Record<string, unknown>)[field]) !== stable(comparableEntity(localValue, definition.kind, remoteId, [field], idMap, true)[field]));
+        changes.push({ kind: definition.kind, localId, remoteId, label: remoteRow.name, change: localChanged ? 'conflict' : 'unchanged',
+          fields: localChanged ? localFields : [], base: baseValue, local: localValue, remote: remoteValue });
         continue;
       }
-      const comparableFields = [...new Set([...Object.keys(baseRow), ...Object.keys(remoteRow)])].filter((field) => field !== 'id');
-      const localChanged = localValue !== null && stable(comparableEntity(baseRow as Record<string, unknown>, definition.kind, remoteId, comparableFields, idMap, false))
-        !== stable(comparableEntity(localValue, definition.kind, remoteId, comparableFields, idMap, true));
       const fields = [...new Set([...Object.keys(baseRow), ...Object.keys(remoteRow)])]
         .filter((field) => stable((baseRow as Record<string, unknown>)[field]) !== stable(remoteValue[field]));
       const change: ReconciliationChangeKind = localChanged
