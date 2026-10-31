@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { presetSettings } from "../src/tabulation/presets.js";
 import { ballots, result } from "../src/tabulation/test-fixtures.js";
-import { saveTabulationActa } from "./tabulation-acta-write.js";
+import { previewTabulationActa, saveTabulationActa } from "./tabulation-acta-write.js";
 
 const ids = {
   tournament: "00000000-0000-4000-8000-000000000001",
@@ -78,6 +78,23 @@ describe("authoritative transactional Tabulation acta persistence", () => {
       if (statement.startsWith("INSERT INTO idempotency_keys")) return { rows: [] };
       throw new Error("Unexpected query: " + statement + " params=" + JSON.stringify(params));
     });
+  });
+
+  it("previews the proposed acta against current server rules without persisting it", async () => {
+    const preview = await previewTabulationActa({ assignmentId: ids.assignment, source: input().source });
+    expect(preview).toMatchObject({
+      assignmentId: ids.assignment, tournamentId: ids.tournament,
+      roundId: "manager-round", debateId: "local-debate",
+      basePanelRevision: 3, basePanelUpdatedAt: baseUpdatedAt,
+      currentSourceId: null, requiresReplacementConfirmation: false,
+      sourceMode: "judges",
+    });
+    expect(preview.proposedSource).toMatchObject({
+      sourceMode: "judges",
+      acta: { tournamentId: ids.tournament, roundId: "manager-round", debateId: "local-debate", basePanelRevision: 3 },
+    });
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
+    expect(mocks.query).toHaveBeenCalledWith("COMMIT");
   });
 
   it("validates using persisted rules, team metadata, assignment judges and reviewed identity mapping", async () => {
