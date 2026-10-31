@@ -162,6 +162,8 @@ export interface PublishedTabulationRound {
   roundNumber: number;
   roundName: string;
   roundKind: 'qualifying' | 'elimination';
+  tabTournamentId: string;
+  tabulationRoundId: string;
   assignmentIds: string[];
   debateAssignments: Array<{ tabulationDebateId: string; assignmentId: string }>;
   revision: number;
