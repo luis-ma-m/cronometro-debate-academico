@@ -309,7 +309,7 @@ export function mergeHandoff(
     mappedJudges,
     (existing, next) => ({ ...existing, name: next.name, institution: next.institution, active: next.active, incompatibleJudgeIds: next.incompatibleJudgeIds }),
   );
-  const venues = merge(tournament.venues, mappedVenues, (existing, next) => ({ ...existing, name: next.name }));
+  const venues = merge(tournament.venues, mappedVenues, (existing, next) => ({ ...existing, name: next.name, active: next.active }));
   return {
     tournament: {
       ...tournament,
