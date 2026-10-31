@@ -132,6 +132,7 @@ export interface PanelOutbox {
   roundKind: 'qualifying' | 'elimination';
   sideMode: 'draw' | 'balanced';
   teamMetadata: Array<{ teamId: string; swing: boolean; breakEligible: boolean; fallenFromRound?: number }>;
+  entityIdMap: PanelEntityIdMap;
   debates: PanelOutboxDebate[];
 }
 
@@ -432,6 +433,12 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       roundKind: round.kind,
       sideMode: round.sideMode,
       teamMetadata,
+      entityIdMap: idMap ?? {
+        teams: Object.fromEntries(tournament.teams.map((item) => [item.id, item.id])),
+        judges: Object.fromEntries(tournament.judges.map((item) => [item.id, item.id])),
+        speakers: Object.fromEntries(tournament.speakers.map((item) => [item.id, item.id])),
+        venues: Object.fromEntries(tournament.venues.map((item) => [item.id, item.id])),
+      },
       debates,
     },
     issues,
