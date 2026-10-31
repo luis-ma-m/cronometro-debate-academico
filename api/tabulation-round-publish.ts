@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getPool } from "./db.js";
 import { ApiError, bool, num, str } from "./core.js";
-import { assertSyncOperationAuthorized } from "./sync-operation-policy.js";
+import { assertSyncOperationAuthorized, SyncAuthorizationError } from "./sync-operation-policy.js";
 import { validateSyncOperationEnvelope, type ValidatedSyncOperation } from "./sync-operation-validation.js";
 import { SyncDomainValidationError, validatePublishedRoundPayload } from "./tabulation-sync-domain.js";
 
@@ -144,6 +144,9 @@ export async function publishTabulationRound(rawOperation: unknown) {
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof ApiError) throw error;
+    if (error instanceof SyncAuthorizationError) {
+      throw new ApiError(error.code, error.message, error.status);
+    }
     if (error instanceof SyncDomainValidationError) {
       throw new ApiError("INVALID_RELATION", error.issues.join(" "), 422);
     }

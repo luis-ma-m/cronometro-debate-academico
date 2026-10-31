@@ -172,11 +172,14 @@ describe("published round domain validation", () => {
     }, judgeConflictContext)).toThrow(/jueces incompatibles/);
   });
 
-  it("rejects missing, invalid or non-positive round metadata", () => {
+  it("rejects missing, invalid or out-of-range round metadata and oversized names", () => {
     const payload = validPayload();
     expect(() => validatePublishedRoundPayload({ ...payload, roundNumber: 0 }, context)).toThrow(/entero positivo/);
     expect(() => validatePublishedRoundPayload({ ...payload, roundKind: "unknown" }, context)).toThrow(/tipo de ronda/);
-    expect(() => validatePublishedRoundPayload({ ...payload, roundNumber: 1.5 }, context)).toThrow(/entero positivo/);
+    expect(() => validatePublishedRoundPayload({ ...payload, roundNumber: 1.5 }, context)).toThrow(/rango admitido/);
+    expect(() => validatePublishedRoundPayload({ ...payload, roundNumber: 2_147_483_648 }, context)).toThrow(/rango admitido/);
+    expect(() => validatePublishedRoundPayload({ ...payload, roundName: "R".repeat(201) }, context)).toThrow(/200 caracteres/);
+    expect(() => validatePublishedRoundPayload({ ...payload, debates: [{ ...payload.debates[0], venueName: "S".repeat(201) }] }, context)).toThrow(/nombre de la sala/);
   });
 
   it("rejects malformed proposals without throwing incidental runtime errors", () => {

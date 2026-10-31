@@ -69,10 +69,10 @@ export function validatePublishedRoundPayload(
   if (!Number.isSafeInteger(value.createdAt) || (value.createdAt as number) < 0) {
     issues.push("La fecha de creación de la propuesta no es válida.");
   }
-  if (!nonEmptyString(value.roundName)) issues.push("La propuesta debe identificar la ronda.");
-  if (!Number.isSafeInteger(value.roundNumber) || (value.roundNumber as number) < 1) issues.push("El número de ronda debe ser un entero positivo.");
+  if (!nonEmptyString(value.roundName) || value.roundName.length > 200) issues.push("El nombre de la ronda debe contener entre 1 y 200 caracteres.");
+  if (!Number.isSafeInteger(value.roundNumber) || (value.roundNumber as number) < 1 || (value.roundNumber as number) > 2_147_483_647) issues.push("El número de ronda debe ser un entero positivo dentro del rango admitido.");
   if (value.roundKind !== 'qualifying' && value.roundKind !== 'elimination') issues.push("El tipo de ronda no es válido.");
-  if (!nonEmptyString(value.tabTournamentName)) issues.push("La propuesta debe identificar el torneo de Tabulación.");
+  if (!nonEmptyString(value.tabTournamentName) || value.tabTournamentName.length > 200) issues.push("El nombre del torneo de Tabulación debe contener entre 1 y 200 caracteres.");
   if (value.tournamentId !== context.canonicalTournamentId) {
     issues.push("La propuesta no pertenece a la identidad canónica del torneo.");
   }
@@ -110,7 +110,7 @@ export function validatePublishedRoundPayload(
       } else {
         usedRooms.add(physicalRoomId);
       }
-      if (!nonEmptyString(venueName)) issues.push(prefix + "falta el nombre de la sala.");
+      if (!nonEmptyString(venueName) || venueName.length > 200) issues.push(prefix + "el nombre de la sala debe contener entre 1 y 200 caracteres.");
       if (!nonEmptyString(teamFavorId) || !teams.has(teamFavorId)) {
         issues.push(prefix + "el equipo A favor no existe en el gestor.");
       }
