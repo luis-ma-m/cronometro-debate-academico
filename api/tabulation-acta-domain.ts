@@ -132,11 +132,18 @@ function validateResult(value: unknown, context: TabulationActaDomainContext): T
       if (!finite(ballot.totals[a]) || !finite(ballot.totals[b])) issues.push("Cada papeleta debe incluir la puntuación de ambos equipos.");
     }
   }
-  if (context.settings.ballotMode === "joint") {
+  // Elimination debates always record one vote per judge, regardless of the
+  // qualifying-round ballot mode. A joint qualifying acta must not suppress
+  // knockout votes or be coerced into a scorecard.
+  if (context.round.kind === "elimination") {
+    if (value.joint !== undefined) issues.push("Las eliminatorias registran votos individuales y no admiten acta conjunta.");
+  } else if (context.settings.ballotMode === "joint") {
     if (ballots.length) issues.push("El modo de acta conjunta no admite papeletas individuales.");
     if (!record(value.joint)) issues.push("Falta el acta conjunta configurada para este torneo.");
-  } else if (value.joint !== undefined) issues.push("El torneo está configurado para papeletas individuales, no para acta conjunta.");
-  if (value.joint !== undefined && context.settings.ballotMode === "joint") {
+  } else if (value.joint !== undefined) {
+    issues.push("El torneo está configurado para papeletas individuales, no para acta conjunta.");
+  }
+  if (value.joint !== undefined && context.round.kind !== "elimination" && context.settings.ballotMode === "joint") {
     validateJointShape(value.joint, teamIds, context.settings.rubric.map((item) => item.id), speakers, issues);
   }
   if (value.override !== undefined) {
