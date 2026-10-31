@@ -5,6 +5,7 @@ import { computeDebateOutcome, effectivePenalties, outcomeContext } from '../res
 import { SPEAKER_ROLES, type SpeakerRole, type TabDebate, type TabDebateResult, type TabRound, type TabTournament } from '../types';
 import { Empty, formatNumber, IssueList, lookups, markUnsaved, parseDecimal, STATUS_LABELS, type ViewProps } from '../ui';
 import { JointBallotsView } from './JointBallotsView';
+import { OfficialActaPublisher } from '../OfficialActaPublisher';
 
 interface RowDraft { judgeId: string; totals: Record<string, string>; speeches: Record<string, Partial<Record<SpeakerRole, string>>>; winnerTeamId: string }
 interface PenaltyDraft { warnings: string; minors: string; majors: string; disqualified: boolean }
@@ -103,7 +104,7 @@ export function BallotsView(props: ViewProps) {
   return props.tournament.settings.ballotMode === 'joint' ? <JointBallotsView {...props} /> : <JudgeBallotsView {...props} />;
 }
 
-function JudgeBallotsView({ tournament, outcomes, update, notify }: ViewProps) {
+function JudgeBallotsView({ tournament, outcomes, update, notify, store, managerSessionToken }: ViewProps) {
   const look = useMemo(() => lookups(tournament), [tournament]);
   const context = useMemo(() => outcomeContext(tournament), [tournament]);
   const [roundId, setRoundId] = useState(() => (tournament.rounds.find((round) => round.debates.some((debate) => outcomes.get(debate.id)?.status !== 'complete')) ?? tournament.rounds.at(-1))?.id ?? '');
@@ -295,6 +296,7 @@ function JudgeBallotsView({ tournament, outcomes, update, notify }: ViewProps) {
             <IssueList items={preview.warnings} />
           </div>}
 
+          {!dirty && debate.result && <OfficialActaPublisher tournament={tournament} round={round} debate={debate} result={debate.result} token={managerSessionToken} store={store} notify={notify} />}
           <div className="tab-actions">
             <button type="button" className="button primary" onClick={() => save(true)}><SkipForward size={16} /> Guardar y siguiente</button>
             <button type="button" className="button secondary" onClick={() => save(false)}><Save size={16} /> Guardar</button>
