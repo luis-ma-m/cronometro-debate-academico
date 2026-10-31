@@ -39,7 +39,7 @@ describe("readTabulationActaHistory", () => {
     const { db, calls } = fakeDb({
       total: 2, rewrites: 1, head: "source-2",
       history: [{
-        id: "source-2", source_mode: "joint", round_kind: "qualifying", base_revision: 12,
+        id: "source-2", source_mode: "elimination", elimination_result: { winnerTeamId: "team-a", loserTeamId: "team-b", advancingTeamIds: ["team-a"] }, round_kind: "qualifying", base_revision: 12,
         source_hash: "a".repeat(64), operation_id: "operation-0002",
         supersedes_source_id: "source-1", created_by: "admin", created_at: new Date("2026-10-30T12:00:00Z"),
       }],
@@ -48,7 +48,7 @@ describe("readTabulationActaHistory", () => {
     expect(history.currentVersionId).toBe("source-2");
     expect(history.rewriteCount).toBe(1);
     expect(history.versions[0]).toMatchObject({
-      id: "source-2", sourceMode: "joint", roundKind: "qualifying", baseRevision: 12,
+      id: "source-2", sourceMode: "elimination", eliminationResult: { winnerTeamId: "team-a", loserTeamId: "team-b", advancingTeamIds: ["team-a"] }, roundKind: "qualifying", baseRevision: 12,
       sourceHash: "a".repeat(64), operationId: "operation-0002",
       supersedesSourceId: "source-1", createdAt: new Date("2026-10-30T12:00:00Z").getTime(),
     });
@@ -75,7 +75,7 @@ describe("readTabulationActaHistory", () => {
       async query(sql) {
         if (sql.includes("FROM tabulation_acta_sources s JOIN tournament_identity")) return { rows: [{
           id: "source-2", assignment_id: "assignment-1", tournament_id: tournamentId,
-          source_mode: "judges", round_kind: "qualifying", base_revision: 9,
+          source_mode: "elimination", elimination_result: { winnerTeamId: "team-a", loserTeamId: "team-b", advancingTeamIds: ["team-a"] }, round_kind: "elimination", base_revision: 9,
           source_hash: "c".repeat(64), source_payload: { ballots: [{ judgeId: "judge-1" }] },
           rules_snapshot: { presetId: "ledu-groups" }, operation_id: "operation-detail",
           supersedes_source_id: "source-1", created_by: "admin", created_at: new Date("2026-10-30T13:00:00Z"),
@@ -85,6 +85,7 @@ describe("readTabulationActaHistory", () => {
     };
     const detail = await readTabulationActaVersion(db, "assignment-1", "source-2");
     expect(detail.sourcePayload).toEqual({ ballots: [{ judgeId: "judge-1" }] });
+    expect(detail.eliminationResult).toEqual({ winnerTeamId: "team-a", loserTeamId: "team-b", advancingTeamIds: ["team-a"] });
     expect(detail.rulesSnapshot).toEqual({ presetId: "ledu-groups" });
     expect(detail.supersedesSourceId).toBe("source-1");
   });
