@@ -326,23 +326,31 @@ export function encodeActaCode(link: ActaLink, entry: ActaEntry): string {
  */
 function compactActa(link: ActaLink, entry: ActaEntry): unknown[] {
   const teamIndex = (id: string) => link.teams.findIndex((team) => team.id === id);
-  const perTeam = (record: Record<string, number> | undefined) => (record ? link.teams.map((team) => record[team.id] ?? null) : 0);
+  const perTeam = (record: unknown) => (isRecord(record) ? link.teams.map((team) => record[team.id] ?? null) : 0);
   const sheet = !link.round.elimination;
   return [
     link.round.number,
     link.debate,
     teamIndex(entry.favor),
     teamIndex(entry.winner),
-    sheet ? link.teams.map((team) => link.rules.rubric.map((item) => entry.items[team.id]?.[item.id] ?? null)) : 0,
+    sheet ? link.teams.map((team) => link.rules.rubric.map((item) => entry.items?.[team.id]?.[item.id] ?? null)) : 0,
     sheet ? perTeam(entry.quickTotals) : 0,
     sheet ? perTeam(entry.writtenTotals) : 0,
     sheet ? link.teams.map((team) => {
-      const penalty = entry.penalties[team.id];
+      const penalty = entry.penalties?.[team.id];
       return [penalty?.warnings ?? 0, penalty?.minors ?? 0, penalty?.majors ?? 0];
     }) : 0,
-    sheet ? link.teams.map((team) => (entry.speakers[team.id] ?? [])
-      .map((row) => [team.members.findIndex((member) => member.id === row.speakerId), row.score, SPEAKER_ROLES.reduce((mask, role, index) => (row.roles.includes(role) ? mask | (1 << index) : mask), 0)])
-      .filter(([position]) => position >= 0)) : 0,
+    sheet ? link.teams.map((team) => {
+      const rows = entry.speakers?.[team.id];
+      if (!Array.isArray(rows)) return [];
+      return rows.flatMap((row) => {
+        if (!row || typeof row !== 'object' || !Number.isFinite(row.score) || !Array.isArray(row.roles)) return [];
+        const position = team.members.findIndex((member) => member.id === row.speakerId);
+        if (position < 0) return [];
+        const mask = SPEAKER_ROLES.reduce((value, role, index) => (row.roles.includes(role) ? value | (1 << index) : value), 0);
+        return [[position, row.score, mask]];
+      });
+    }) : 0,
     entry.notes,
     entry.signedBy,
     Math.round(entry.sentAt / 1000),

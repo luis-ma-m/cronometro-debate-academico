@@ -5,8 +5,9 @@ import { parseBackupFile } from './emergency';
 import { cyrb53 } from './hash';
 import { computeDebateOutcome, outcomeContext } from './results';
 import { createTabStore, memoryStorage, tournamentKey, type KeyValueStorage } from './store';
-import { debate, makeTournament, qualifyingRound } from './test-fixtures';
-import { applyReceivedActa, base32Encode, buildActaLink, decodeActaLink, encodeActaCode, readActaCode, type ActaEntry } from './whatsapp';
+import v1 from './fixtures/acta-v1.json';
+import { actaV1Tournament, debate, makeTournament, qualifyingRound } from './test-fixtures';
+import { applyReceivedActa, base32Encode, base62Encode, buildActaLink, decodeActaLink, encodeActaCode, readActaCode, type ActaEntry } from './whatsapp';
 import { createWriterLock, LEASE_KEY } from './writerLock';
 
 /** Storage whose writes can be made to fail for some keys, as a full or locked-down browser does. */
@@ -84,24 +85,57 @@ describe('hostile or broken input from the phones', () => {
     }
     const garbage = 'ZZZZZZZZ';
     expect(() => decodeActaLink('#A1-' + garbage + '-' + cyrb53(garbage))).toThrow('incompleto');
+    const compact = [{ version: 2 }, 'texto', [1, 2], [1, 0, '', 'ref', 'clave', 'Aula', [['Solo un equipo', []]], [], '', {}], [1, 0, '', 'ref', 'clave', 'Aula', [['A', [1]], ['B', []]], [], '', {}]];
+    for (const value of compact) {
+      const data = base62Encode(deflateSync(strToU8(JSON.stringify(value))));
+      expect(() => decodeActaLink('#A2-' + data + '-' + cyrb53(data).slice(0, 8))).toThrow('incompleto');
+    }
+    expect(() => decodeActaLink('#A2-' + garbage + '-' + cyrb53(garbage).slice(0, 8))).toThrow('incompleto');
   });
 
-  it('keeps only well-formed values of a malformed acta and never breaks the tabulation', () => {
+  it('keeps only valid rules from a link and the ADUMA ones for the rest', () => {
+    const data = base62Encode(deflateSync(strToU8(JSON.stringify([1, 0, '', 'ref', 'clave', 'Aula', [['A', ['Ana']], ['B', ['Bea']]], ['Juez'], '', { itemMin: 1, itemMax: 'cinco', pirata: true, rubric: [{ id: 'x' }] }]))));
+    const link = decodeActaLink('#A2-' + data + '-' + cyrb53(data).slice(0, 8));
+    const base = makeTournament('aduma', []).settings;
+    expect(link.rules).toMatchObject({ itemMin: 1, itemMax: base.itemMax });
+    expect(link.rules.rubric.map((item) => item.id)).toEqual(base.rubric.map((item) => item.id));
+    expect(link.rules).not.toHaveProperty('pirata');
+  });
+
+  it('keeps only well-formed values of a malformed compact acta and never breaks the tabulation', () => {
     const { tournament, link } = setup();
-    const teamA = link.teams[0];
-    const rubricId = link.rules.rubric[0].id;
+    const hostile = [1, link.debate, 7, 'x', [['x', null, 4, -1], 'nada'], 'nada', [44], [[-3, 2.7, 'x'], 'nada'], [[[0, 'x', 1], [1, 7, 8 | 64], [99, 8, 1], 'fila'], 'nada'], 'x'.repeat(5000), 42, 'ayer', 'sobra'];
+    const data = base62Encode(deflateSync(strToU8(JSON.stringify(hostile))));
+    const received = readActaCode(tournament, 'ACTA2-' + data + '-' + cyrb53(link.key + '|' + data));
+    expect(received.error).toBeNull();
+    expect(received.payload).toMatchObject({
+      favor: '', winner: '', items: { a: { evidencias: 4, preguntas: -1 } }, writtenTotals: { a: 44 }, penalties: { a: { warnings: 0, minors: 2, majors: 0, disqualified: false } },
+      speakers: { a: [{ speakerId: 'a-s2', score: 7, roles: ['concluder'] }] }, signedBy: '', sentAt: 0,
+    });
+    expect(received.payload!.notes).toHaveLength(2000);
+    expect(received.payload!.quickTotals).toBeUndefined();
+    const applied = applyReceivedActa(tournament, received);
+    const stored = applied.rounds[0].debates[0];
+    expect(Object.keys(stored.result!.joint!.items)).toEqual(['a']);
+    // An item out of range makes the acta invalid at the desk, never a crash.
+    expect(computeDebateOutcome(applied.rounds[0], stored, outcomeContext(applied)).status).toBe('invalid');
+  });
+
+  it('keeps only well-formed values of a malformed acta in the first format and never breaks the tabulation', () => {
+    const tournament = actaV1Tournament();
+    const link = decodeActaLink(v1.hash);
     const hostile = {
       favor: 5, winner: null,
-      items: { [teamA.id]: { [rubricId]: 4, coherencia: 'x', veracidad: Number.NaN }, intruso: { coherencia: 5 } },
+      items: { a: { coherencia: 'x', veracidad: Number.NaN, evidencias: 4 }, intruso: { coherencia: 5 } },
       quickTotals: 'nada',
-      penalties: { [teamA.id]: { warnings: -3, minors: 2.7, majors: 'x', disqualified: 'sí' }, [link.teams[1].id]: 'nada' },
-      speakers: { [teamA.id]: [{ speakerId: 5 }, { speakerId: teamA.members[0].id, score: 'x' }, { speakerId: teamA.members[1].id, score: 7, roles: ['pirata', 'concluder'] }], [link.teams[1].id]: 'nada' },
+      penalties: { a: { warnings: -3, minors: 2.7, majors: 'x', disqualified: 'sí' }, b: 'nada' },
+      speakers: { a: [{ speakerId: 5 }, { speakerId: 'a-s1', score: 'x' }, { speakerId: 'a-s2', score: 7, roles: ['pirata', 'concluder'] }], b: 'nada' },
       notes: 'x'.repeat(5000), signedBy: 42, sentAt: 'ayer',
     } as unknown as ActaEntry;
     const received = readActaCode(tournament, encodeActaCode(link, hostile));
     expect(received.error).toBeNull();
     expect(received.payload).toMatchObject({
-      favor: '', winner: '', items: { a: { [rubricId]: 4 } }, penalties: { a: { warnings: 0, minors: 2, majors: 0, disqualified: false } },
+      favor: '', winner: '', items: { a: { evidencias: 4 }, intruso: { coherencia: 5 } }, penalties: { a: { warnings: 0, minors: 2, majors: 0, disqualified: false } },
       speakers: { a: [{ speakerId: 'a-s2', score: 7, roles: ['concluder'] }], b: [] }, signedBy: '', sentAt: 0,
     });
     expect(received.payload!.notes).toHaveLength(2000);
@@ -114,9 +148,15 @@ describe('hostile or broken input from the phones', () => {
   });
 
   it('rejects codes of another format version', () => {
-    const { tournament, link } = setup();
-    const data = base32Encode(deflateSync(strToU8(JSON.stringify({ version: 2, debate: 'd1', round: 1 }))));
-    expect(readActaCode(tournament, 'ACTA1-' + data + '-' + cyrb53(link.key + '|' + data)).error).toContain('dañado');
+    const tournament = actaV1Tournament();
+    const v1Link = decodeActaLink(v1.hash);
+    const data = base32Encode(deflateSync(strToU8(JSON.stringify({ version: 2, debate: 'd1', round: 2 }))));
+    expect(readActaCode(tournament, 'ACTA1-' + data + '-' + cyrb53(v1Link.key + '|' + data)).error).toContain('dañado');
+    const { tournament: other, link } = setup();
+    for (const value of [{ round: 1, debate: link.debate }, [], ['1', link.debate]]) {
+      const compact = base62Encode(deflateSync(strToU8(JSON.stringify(value))));
+      expect(readActaCode(other, 'ACTA2-' + compact + '-' + cyrb53(link.key + '|' + compact)).error).toContain('dañado');
+    }
   });
 });
 

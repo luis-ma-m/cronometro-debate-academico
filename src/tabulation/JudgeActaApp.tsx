@@ -158,7 +158,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
 
   return <main className="acta-shell">
     <header className="acta-header">
-      <p className="eyebrow">{link.tournament}</p>
+      <p className="eyebrow">{link.tournament || 'Acta del jurado'}</p>
       <h1>{link.round.name}{link.venue ? ' · ' + link.venue : ''}</h1>
       <p className="acta-teams">{link.teams[0].name} <span>frente a</span> {link.teams[1].name}</p>
       {link.jury.length > 0 && <p className="muted">Jurado: {link.jury[0]} (principal){link.jury.length > 1 ? ', ' + link.jury.slice(1).join(', ') : ''}</p>}

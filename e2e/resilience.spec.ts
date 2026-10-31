@@ -20,7 +20,7 @@ test('sin conexión: la mesa hace una ronda entera y el juez solo necesita red p
   await context.setOffline(true);
   const message = await fillActaOnPhone(phone);
   await phone.reload().catch(() => undefined);
-  expect(message).toMatch(/ACTA1-/);
+  expect(message).toMatch(/ACTA2-/);
 
   await nav(page, 'Actas');
   await page.locator('.tab-whatsapp-inbox summary').click();

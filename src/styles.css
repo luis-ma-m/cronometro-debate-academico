@@ -648,7 +648,9 @@ input.tab-input-error,.tab-input-error{border-color:#c4493c!important;background
 input.tab-input-warning{border-color:#d49b36!important;background:#fffaf0!important}
 .tab-net{margin:4px 0;font-size:12px}
 .tab-winner-option{font-size:14px;font-weight:700;color:#263348;border:1px solid #dfe5ee;border-radius:8px;padding:8px 12px}
-.tab-speaker-blocks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px}
+.tab-speaker-blocks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,540px),1fr));gap:16px}
+/* Side by side only when both tables fit; a long name scrolls its own table instead of covering the other one. */
+.tab-speaker-blocks>div{min-width:0;overflow-x:auto}
 .tab-speaker-blocks td{text-align:center}
 .tab-speaker-blocks td:first-child{text-align:left;font-size:12px}
 .tab-entity.tab-fallen{border-color:#f3dfb8;background:#fffaf0}

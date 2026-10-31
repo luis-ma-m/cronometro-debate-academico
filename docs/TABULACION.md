@@ -104,20 +104,22 @@ Las actas de la tabulación no se vuelcan en «Puntuaciones» del panel: son dos
 
 Con acta conjunta, el juez principal puede rellenar el acta en el móvil y mandarla a la mesa por WhatsApp. **No usa ningún servidor, ni la API ni Neon:** solo hace falta que la web esté publicada para que los móviles abran la página del acta (`/acta`, estática como la tabulación).
 
-1. **Enlace.** En Rondas, cada ronda confirmada tiene el apartado «Actas por WhatsApp», con un botón por sala que abre WhatsApp con el enlace de su debate dirigido al móvil del juez principal (Participantes → Jueces → «Móvil»), y otro que copia todos los enlaces para el grupo de jueces. El enlace (`/acta#A1-…`) lleva dentro todo lo que necesita la página: equipos, integrantes, jurado, rúbrica, reglas y una clave del debate. Una suma de comprobación detecta los enlaces cortados.
+1. **Enlace.** En Rondas, cada ronda confirmada tiene el apartado «Actas por WhatsApp», con un botón por sala que abre WhatsApp con el enlace de su debate dirigido al móvil del juez principal (Participantes → Jueces → «Móvil»), y otro que copia todos los enlaces para el grupo de jueces. El enlace (`/acta#A2-…`) lleva dentro lo que la página no puede saber por sí misma: los nombres de los equipos, de sus integrantes y del jurado, la clave del debate y solo las reglas que difieran del reglamento ADUMA. Equipos, integrantes e ítems van por su posición, sin identificadores, y el texto solo usa letras y cifras. Así ocupa unos 350–400 caracteres y va en una línea propia, justo después de la primera, para que WhatsApp lo muestre entero y como enlace también en el móvil. Antes ocupaba unos 1.250 y la aplicación del móvil lo cortaba con «Leer más». Una suma de comprobación detecta los enlaces cortados.
 2. **Acta en el móvil.** La página sigue la hoja de ítems:
    - postura e ítems, o solo los totales;
    - faltas, con el neto calculado;
    - total escrito, ganador, nota y posiciones de cada integrante, notas y firma.
 
    Valida con el mismo `acta.ts` que la mesa y guarda el borrador en el propio teléfono, así que se puede cerrar y volver.
-3. **Envío.** «Enviar por WhatsApp» abre el chat de la mesa (Reglas → «Móvil de la mesa») con un resumen legible y un código `ACTA1-…-…`. El código solo usa cifras y mayúsculas, que WhatsApp nunca convierte en cursivas ni en enlaces, y va firmado con la clave del debate (cyrb53 sobre el id y la semilla del torneo, que los jueces no ven).
+3. **Envío.** «Enviar por WhatsApp» abre el chat de la mesa (Reglas → «Móvil de la mesa») con un resumen legible y un código `ACTA2-…-…` de unos 200–250 caracteres. Solo usa letras y cifras, que WhatsApp nunca convierte en cursivas, negritas ni tachados. Va firmado con la clave del debate: cyrb53 sobre el id y la semilla del torneo, que los jueces no ven, y sobre el orden de los equipos, sus integrantes y los ítems.
 4. **Recepción.** En Actas → «Actas recibidas por WhatsApp» se pegan los mensajes: varios a la vez o el chat entero. Cada código se comprueba:
    - **Formato:** si está dañado o incompleto, se avisa y se pide reenviarlo.
    - **Debate:** debe ser de un debate de este torneo; si la ronda se volvió a sortear, el código no encaja con ninguno.
-   - **Firma:** detecta un código alterado o de otro torneo.
+   - **Firma:** detecta un código alterado o de otro torneo. También rechaza un código rellenado antes de que cambiaran los equipos, los integrantes o la hoja de ítems de su debate, para que ninguna nota caiga en otra persona: en ese caso hay que reenviar el enlace.
 
    Después se muestra el resultado con sus incidencias y se acepta una a una (o todas las nuevas sin incidencias). Al aceptarla se conservan la decisión manual y las notas que ya hubiera; si sustituye un acta distinta, se pide confirmación. Todo queda en el registro: el envío del enlace y la recepción, con la firma del juez y la hora.
 5. **Alternativa.** El papel firmado sigue siendo el acta oficial y la alternativa si no hay datos en el móvil. El «total escrito» permite cruzar ambos.
+
+La mesa sigue leyendo los enlaces y códigos del primer formato (`A1`, `ACTA1`), así que los enviados antes del cambio siguen funcionando. Para acortar el enlace a 15–20 caracteres, sus datos tendrían que guardarse en un servidor y el móvil descargarlos de allí; eso dependería del back.
 
 Código: `whatsapp.ts` (enlace, código, firma y lectura de mensajes) y `JudgeActaApp.tsx` (la página del móvil). En la dirección local (`localhost`) los móviles no pueden abrir el enlace: Reglas → «Dirección pública de la página del acta» permite apuntar a la web publicada.
