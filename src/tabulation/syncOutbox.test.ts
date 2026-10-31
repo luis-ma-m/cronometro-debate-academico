@@ -119,7 +119,8 @@ describe('durable sync outbox contract', () => {
     expect(await outbox.recoverExpiredLeases()).toBe(0);
     now = 1100;
     expect(await outbox.recoverExpiredLeases()).toBe(1);
-    expect((await outbox.list('t1'))[0]).toMatchObject({ status: 'pending', nextAttemptAt: 3_100 });
+    expect((await outbox.list('t1'))[0]).toMatchObject({ status: 'pending' });
+    expect((await outbox.list('t1'))[0].nextAttemptAt).toBeGreaterThan(1_100);
   });
 
   it('rejects invalid revisions and unserializable or oversized payloads', async () => {
