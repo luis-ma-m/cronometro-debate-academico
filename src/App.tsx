@@ -1530,7 +1530,8 @@ export default function App() {
                    {actaHistories[room.id].versions.length > 0 ? <ol className="room-acta-history-list">
                      {actaHistories[room.id].versions.map((version) => <li key={version.id}>
                        <div><b>{version.id === actaHistories[room.id].currentVersionId ? 'Versión vigente' : 'Versión anterior'}</b><span>{new Date(version.createdAt).toLocaleString('es-ES')}</span></div>
-                       <small>{version.sourceMode === 'joint' ? 'Acta conjunta' : 'Papeletas individuales'} · {version.roundKind === 'elimination' ? 'Eliminatoria' : 'Clasificatoria'} · {version.createdBy}</small>
+                       <small>{version.sourceMode === 'elimination' ? 'Resultado de eliminatoria' : version.sourceMode === 'joint' ? 'Acta conjunta' : 'Papeletas individuales'} · {version.roundKind === 'elimination' ? 'Eliminatoria' : 'Clasificatoria'} · {version.createdBy}</small>
+                       {version.eliminationResult && <small>Ganador: {data.teams.find((team) => team.id === version.eliminationResult?.winnerTeamId)?.name ?? String(version.eliminationResult.winnerTeamId)} · Perdedor: {data.teams.find((team) => team.id === version.eliminationResult?.loserTeamId)?.name ?? String(version.eliminationResult.loserTeamId)} · Avanzan: {(Array.isArray(version.eliminationResult.advancingTeamIds) ? version.eliminationResult.advancingTeamIds : []).map((teamId) => data.teams.find((team) => team.id === teamId)?.name ?? String(teamId)).join(', ')}</small>}
                        <code title={version.sourceHash}>{version.sourceHash.slice(0, 12)}…</code>
                      </li>)}
                    </ol> : <p className="muted">Todavía no hay actas oficiales sincronizadas.</p>}
