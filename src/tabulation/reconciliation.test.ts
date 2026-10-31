@@ -38,6 +38,14 @@ describe('three-way panel reconciliation', () => {
     expect(result.changes[0]).toMatchObject({ change: 'independent', fields: ['name'], localId: 'local-team-1' });
   });
 
+  it('detects a local-only edit even when the remote entity is unchanged', () => {
+    const local = linkedTournament();
+    local.teams[0].name = 'Nombre editado solo en local';
+    const result = comparePanelRevisions(local, base, base);
+    expect(result.hasConflicts).toBe(true);
+    expect(result.changes[0]).toMatchObject({ change: 'conflict', fields: ['name'] });
+  });
+
   it('preserves a simultaneous incompatible local and remote edit as a conflict', () => {
     const local = linkedTournament();
     local.teams[0].name = 'Nombre local';
