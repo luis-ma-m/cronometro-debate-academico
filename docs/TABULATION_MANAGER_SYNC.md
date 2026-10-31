@@ -799,3 +799,5 @@ Esto acredita implementación de código, no validación operativa completa. Que
 La migración 0017 añade la integridad referencial de la presidencia persistida hacia `judges(id)` con `ON DELETE RESTRICT`.
 
 La migración 0018 conserva también el ID local del torneo de Tabulación. Tanto el preview como el guardado rechazan si el torneo, ronda o debate de la fuente local no coinciden con el mapping persistido para esa asignación.
+
+La migración 0019 amplía la clave natural del mapping para incluir el torneo local de Tabulación; así se evita que dos torneos locales distintos colisionen al reutilizar IDs de ronda/debate.
