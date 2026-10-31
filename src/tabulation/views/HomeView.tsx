@@ -7,7 +7,7 @@ import { downloadEmergencyCopy } from '../ErrorBoundary';
 import { checkIntegrity, type IntegrityReport } from '../integrity';
 import { type LogVerification } from '../log';
 import { TabDataError } from '../normalize';
-import { buildPanelHandoff, clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, tournamentFromHandoff, type PanelHandoff } from '../panelBridge';
+import { buildPanelHandoff, clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, readPanelPublishAcknowledgements, removePanelPublishAcknowledgements, PANEL_PUBLISH_ACK_KEY, tournamentFromHandoff, type PanelHandoff } from '../panelBridge';
 import { getTournament } from '../../api';
 import { ApiError } from '../../api';
 import { buildLocalPanelBase, comparePanelRevisions } from '../reconciliation';
@@ -84,6 +84,51 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       ? readPendingPanelReconciliation(window.localStorage, tournament.id) : null);
     setSyncStatus('');
   }, [tournament?.id]);
+
+  useEffect(() => {
+    if (!tournament || state.readOnly) return;
+    const applyAcknowledgements = () => {
+      const pending = readPanelPublishAcknowledgements(window.localStorage)
+        .filter((ack) => ack.tabTournamentId === tournament.id);
+      if (!pending.length) return;
+      const applied: string[] = [];
+      const updates = pending.filter((ack) => tournament.rounds.some((round) => round.id === ack.tabulationRoundId));
+      if (!updates.length) return;
+      const changed = store.update((current) => ({
+        ...current,
+        rounds: current.rounds.map((round) => {
+          const ack = updates.find((item) => item.tabulationRoundId === round.id);
+          if (!ack) return round;
+          const assignmentMap = new Map(ack.debateAssignments.map((item) => [item.tabulationDebateId, item.assignmentId]));
+          return {
+            ...round,
+            managerRoundId: ack.managerRoundId,
+            debates: round.debates.map((debate) => {
+              const assignmentId = assignmentMap.get(debate.id);
+              return assignmentId ? { ...debate, managerAssignmentId: assignmentId } : debate;
+            }),
+          };
+        }),
+        panelLink: current.panelLink ? {
+          ...current.panelLink,
+          remoteRevision: Math.max(current.panelLink.remoteRevision ?? 0, ...updates.map((ack) => ack.revision)),
+        } : current.panelLink,
+      }), { type: 'panel.round.ack', message: 'Correspondencias de debates confirmadas por el Gestor y guardadas en Tabulación.' });
+      if (changed && store.flush()) {
+        applied.push(...updates.map((ack) => ack.operationId));
+        removePanelPublishAcknowledgements(window.localStorage, applied);
+        setSyncStatus('Publicación confirmada: se han vinculado los debates con sus asignaciones del Gestor.');
+      } else {
+        setSyncStatus('El Gestor confirmó la publicación, pero no se pudo guardar el mapping local. La confirmación se conserva para reintentar.');
+      }
+    };
+    applyAcknowledgements();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PANEL_PUBLISH_ACK_KEY) applyAcknowledgements();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [tournament, state.readOnly, store]);
 
   useEffect(() => {
     if (!tournament || !tournament.panelLink?.remoteId || state.readOnly) return;
