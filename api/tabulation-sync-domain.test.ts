@@ -46,7 +46,7 @@ const validPayload = (): PublishedRoundPayload => ({
   roundKind: "qualifying",
   sideMode: "balanced",
     entityIdMap: {
-      teams: { "local-a": "team-a", "local-b": "team-b" },
+      teams: { "local-a": "team-a", "local-b": "team-b", "local-c": "team-c" },
       judges: { "local-judge": "judge-a" },
       speakers: { "local-speaker": "speaker-a" },
       venues: { "local-room": "room-a" },
