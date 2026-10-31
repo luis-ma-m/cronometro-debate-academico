@@ -572,6 +572,7 @@ export interface PanelPublishAcknowledgement {
   tabulationRoundId: string;
   managerRoundId: string;
   revision: number;
+  updatedAt: number;
   debateAssignments: Array<{ tabulationDebateId: string; assignmentId: string }>;
 }
 export function readPanelPublishAcknowledgements(storage: SimpleStorage): PanelPublishAcknowledgement[] {
@@ -585,6 +586,7 @@ export function readPanelPublishAcknowledgements(storage: SimpleStorage): PanelP
       && typeof (item as PanelPublishAcknowledgement).tabulationRoundId === 'string'
       && typeof (item as PanelPublishAcknowledgement).managerRoundId === 'string'
       && Number.isSafeInteger((item as PanelPublishAcknowledgement).revision)
+      && Number.isSafeInteger((item as PanelPublishAcknowledgement).updatedAt)
       && Array.isArray((item as PanelPublishAcknowledgement).debateAssignments)
       && (item as PanelPublishAcknowledgement).revision >= 1
       && (item as PanelPublishAcknowledgement).debateAssignments.every((mapping) => Boolean(mapping
