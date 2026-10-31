@@ -1330,7 +1330,39 @@ async function createActaShortLink(p:Record<string,unknown>):Promise<unknown>{
 async function listActaShortLinks(p:Record<string,unknown>):Promise<unknown>{const id=str(p.tournamentId).trim();if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id))throw new ApiError("INVALID_TOURNAMENT","Torneo no válido.");const r=await getPool().query("SELECT l.id,l.tournament_id,l.debate_id,l.created_at,l.expires_at,l.revoked_at,COALESCE((SELECT json_agg(json_build_object('eventType',e.event_type,'actor',e.actor,'occurredAt',e.occurred_at,'details',e.details) ORDER BY e.occurred_at) FROM acta_short_link_events e WHERE e.link_id=l.id),'[]'::json) AS events FROM acta_short_links l WHERE l.tournament_id=$1 ORDER BY l.created_at DESC LIMIT 1000",[id]);return r.rows.map((x)=>({...shortLinkPublic(x as ShortLinkRow),events:Array.isArray(x.events)?x.events:[]}));}
 async function updateActaShortLinkExpiry(p:Record<string,unknown>):Promise<unknown>{const tournamentId=str(p.tournamentId),id=str(p.id).toUpperCase(),expires=expiryDate(p.expiryDays);if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("INVALID_SHORT_LINK","Identificador no válido.");const c=await getPool().connect();try{await c.query("BEGIN");const r=await c.query("UPDATE acta_short_links SET expires_at=$3,updated_at=now() WHERE id=$1 AND tournament_id=$2 AND revoked_at IS NULL RETURNING *",[id,tournamentId,expires]);if(!r.rows[0])throw new ApiError("SHORT_LINK_NOT_FOUND","No existe un enlace activo.",404);await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'expiry_updated','manager',$2::jsonb)",[id,JSON.stringify({expiresAt:expires.toISOString()})]);await c.query("COMMIT");return shortLinkPublic(r.rows[0] as ShortLinkRow);}catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}}
 async function revokeActaShortLinks(p:Record<string,unknown>):Promise<unknown>{const tid=str(p.tournamentId),all=p.all===true,ids=Array.isArray(p.ids)?Array.from(new Set(p.ids.filter(x=>typeof x==="string").map(x=>(x as string).toUpperCase()))):[];if(!all&&(!ids.length||ids.length>200||ids.some(x=>!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(x))))throw new ApiError("INVALID_SHORT_LINKS","Selecciona entre 1 y 200 enlaces válidos.");const reason=str(p.reason).trim().slice(0,300),c=await getPool().connect();try{await c.query("BEGIN");const r=await c.query(all?"SELECT id FROM acta_short_links WHERE tournament_id=$1 AND revoked_at IS NULL":"SELECT id FROM acta_short_links WHERE tournament_id=$1 AND revoked_at IS NULL AND id=ANY($2::text[])",all?[tid]:[tid,ids]);const affected=r.rows.map(x=>String(x.id));if(affected.length){await c.query("UPDATE acta_short_links SET revoked_at=now(),updated_at=now() WHERE tournament_id=$1 AND id=ANY($2::text[]) AND revoked_at IS NULL",[tid,affected]);for(const id of affected)await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'revoked','manager',$2::jsonb)",[id,JSON.stringify({reason,bulk:all})]);}await c.query("COMMIT");return{revoked:affected.length,ids:affected};}catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}}
-async function resolveActaShortLink(req:RequestLike):Promise<unknown>{ensureConfigured();const key="ledu:acta-short-link:resolve:"+sha256(requestIp(req)),count=num(await redisCommand(["INCR",key]));if(count===1)await redisCommand(["EXPIRE",key,60]);if(count>60)throw new ApiError("RATE_LIMITED","Demasiadas consultas de enlaces. Espera un minuto.",429);const raw=Array.isArray(req.query?.id)?req.query?.id[0]:req.query?.id,id=str(raw).toUpperCase();if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);const r=await getPool().query("SELECT * FROM acta_short_links WHERE id=$1",[id]),row=r.rows[0] as ShortLinkRow|undefined;if(!row)throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);if(row.revoked_at)throw new ApiError("SHORT_LINK_REVOKED","Este enlace ha sido revocado por la mesa.",410);if(row.expires_at&&new Date(row.expires_at).getTime()<=Date.now())throw new ApiError("SHORT_LINK_EXPIRED","Este enlace ha caducado. Pide a la mesa que genere uno nuevo.",410);if(!validActaSnapshot(row.snapshot)||sha256(canonicalShortLinkJson(row.snapshot))!==row.snapshot_sha256)throw new ApiError("SHORT_LINK_CORRUPT","El contenido del enlace no supera la comprobación de integridad.",500);return{snapshot:row.snapshot,expiresAt:row.expires_at?new Date(row.expires_at).getTime():null};}
+async function resolveActaShortLink(req:RequestLike):Promise<unknown>{
+ if(!databaseConfigured())throw new ApiError("NOT_CONFIGURED","La base de datos de enlaces no está configurada.",503);
+ const ipHash=sha256(requestIp(req));
+ const pool=getPool();
+ let limit;
+ try {
+  limit=await pool.query(
+   `INSERT INTO acta_short_link_resolution_limits(ip_hash,window_started_at,request_count)
+    VALUES($1,date_trunc('minute',now()),1)
+    ON CONFLICT(ip_hash) DO UPDATE SET
+      request_count=CASE WHEN acta_short_link_resolution_limits.window_started_at < date_trunc('minute',now()) THEN 1 ELSE acta_short_link_resolution_limits.request_count+1 END,
+      window_started_at=CASE WHEN acta_short_link_resolution_limits.window_started_at < date_trunc('minute',now()) THEN date_trunc('minute',now()) ELSE acta_short_link_resolution_limits.window_started_at END
+    RETURNING request_count`,
+   [ipHash],
+  );
+ } catch(error) {
+  if(error&&typeof error==="object"&&"code" in error&&String((error as {code?:unknown}).code)==="42P01")
+   throw new ApiError("MIGRATION_REQUIRED","Falta aplicar la migración 0021_acta_short_link_rate_limits.sql.",503);
+  throw error;
+ }
+ if(num(limit.rows[0]?.request_count)>60)throw new ApiError("RATE_LIMITED","Demasiadas consultas de enlaces. Espera al siguiente minuto.",429);
+ const raw=Array.isArray(req.query?.id)?req.query?.id[0]:req.query?.id;
+ const id=str(raw).toUpperCase();
+ if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);
+ const r=await pool.query("SELECT * FROM acta_short_links WHERE id=$1",[id]);
+ const row=r.rows[0] as ShortLinkRow|undefined;
+ if(!row)throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);
+ if(row.revoked_at)throw new ApiError("SHORT_LINK_REVOKED","Este enlace ha sido revocado por la mesa.",410);
+ if(row.expires_at&&new Date(row.expires_at).getTime()<=Date.now())throw new ApiError("SHORT_LINK_EXPIRED","Este enlace ha caducado. Pide a la mesa que genere uno nuevo.",410);
+ if(!validActaSnapshot(row.snapshot)||sha256(canonicalShortLinkJson(row.snapshot))!==row.snapshot_sha256)
+  throw new ApiError("SHORT_LINK_CORRUPT","El contenido del enlace no supera la comprobación de integridad.",500);
+ return{snapshot:row.snapshot,expiresAt:row.expires_at?new Date(row.expires_at).getTime():null};
+}
 
 async function health(): Promise<unknown> {
   ensureConfigured();
