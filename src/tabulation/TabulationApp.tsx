@@ -8,6 +8,14 @@ import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt } from './types';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
+
+const MANAGER_SESSION_KEY = 'ledu-admin-session';
+function readManagerSessionToken(): string | undefined {
+  try {
+    const session = JSON.parse(window.localStorage.getItem(MANAGER_SESSION_KEY) ?? 'null') as { token?: unknown; expiresAt?: unknown } | null;
+    return typeof session?.token === 'string' && typeof session.expiresAt === 'number' && session.expiresAt > Date.now() ? session.token : undefined;
+  } catch { return undefined; }
+}
 import { BallotsView } from './views/BallotsView';
 import { HomeView } from './views/HomeView';
 import { LogView } from './views/LogView';
@@ -49,9 +57,17 @@ function TabulationShell() {
   const [projection, setProjection] = useState(false);
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [managerSessionToken, setManagerSessionToken] = useState(readManagerSessionToken);
   const [managerConnection, setManagerConnection] = useState<{ connected: boolean; checkedAt: number | null; lastSuccessAt: number | null }>({ connected: false, checkedAt: null, lastSuccessAt: null });
   const tournament = state.tournament;
 
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === MANAGER_SESSION_KEY) setManagerSessionToken(readManagerSessionToken());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   useEffect(() => {
     const onHashChange = () => setViewState(readHashView());
     window.addEventListener('hashchange', onHashChange);
@@ -197,7 +213,7 @@ function TabulationShell() {
           : state.lastSavedAt ? 'Guardado en este navegador · hace ' + Math.max(0, Math.round((now - state.lastSavedAt) / 1000)) + ' s'
             : tournament ? 'Guardado en este navegador' : 'Sin torneo abierto';
 
-  const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store } : null;
+  const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store, managerSessionToken } : null;
 
   return <div className={'app-shell tab-shell' + (projection ? ' tab-projection' : '')}>
     <aside className="sidebar">
