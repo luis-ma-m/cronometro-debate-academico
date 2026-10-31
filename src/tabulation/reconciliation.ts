@@ -88,6 +88,41 @@ function historicalIds(tournament: TabTournament, kind: PanelEntityKind): Set<st
   return ids;
 }
 
+/** Reconstruct a conservative base for linked tournaments created before durable snapshots existed. */
+export function buildLocalPanelBase(tournament: TabTournament): PanelHandoff | null {
+  const link = tournament.panelLink;
+  if (!link?.remoteId) return null;
+  const remoteId = link.remoteId;
+  const map = link.idMap ?? {
+    teams: Object.fromEntries(tournament.teams.map((item) => [item.id, item.id])),
+    speakers: Object.fromEntries(tournament.speakers.map((item) => [item.id, item.id])),
+    judges: Object.fromEntries(tournament.judges.map((item) => [item.id, item.id])),
+    venues: Object.fromEntries(tournament.venues.map((item) => [item.id, item.id])),
+  };
+  const id = (kind: PanelEntityKind, localId: string) => map[kind][localId] ?? localId;
+  return {
+    format: 'ledu-tabulacion-handoff',
+    version: 1,
+    createdAt: link.remoteUpdatedAt ?? tournament.updatedAt,
+    tournamentId: remoteId,
+    revision: link.remoteRevision ?? 0,
+    updatedAt: link.remoteUpdatedAt ?? tournament.updatedAt,
+    tournamentName: link.tournamentName,
+    teams: tournament.teams.map((team) => ({
+      id: id('teams', team.id), name: team.name, institution: team.institution, active: team.active,
+      incompatibleJudgeIds: team.incompatibleJudgeIds.map((judgeId) => id('judges', judgeId)),
+    })),
+    speakers: tournament.speakers.map((speaker) => ({
+      id: id('speakers', speaker.id), name: speaker.name, teamId: id('teams', speaker.teamId),
+    })),
+    judges: tournament.judges.map((judge) => ({
+      id: id('judges', judge.id), name: judge.name, institution: judge.institution, active: judge.active,
+      incompatibleJudgeIds: judge.incompatibleJudgeIds.map((judgeId) => id('judges', judgeId)),
+    })),
+    venues: tournament.venues.map((venue) => ({ id: id('venues', venue.id), name: venue.name, active: venue.active })),
+  };
+}
+
 /**
  * Three-way comparison for a linked tournament. The base is the last remote snapshot
  * acknowledged locally; local edits are never treated as the new base. A simultaneous
