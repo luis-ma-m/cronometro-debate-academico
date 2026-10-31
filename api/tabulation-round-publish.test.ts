@@ -129,7 +129,7 @@ describe("transactional Tabulation round publication", () => {
   });
 
   it("refuses to publish when the manager has no valid timer format", async () => {
-    query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+    query.mockImplementation(async (sql: string, _params: unknown[] = []) => {
       const statement = String(sql).replace(/\\s+/g, " ").trim();
       if (statement.startsWith("SELECT ti.tournament_id")) return { rows: [{
         tournament_id: tournamentId, revision: 7, updated_at_ms: baseUpdatedAt, minimum_judges_per_room: 1,
