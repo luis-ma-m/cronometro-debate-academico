@@ -1331,7 +1331,31 @@ async function createActaShortLink(p:Record<string,unknown>):Promise<unknown>{
 }
 async function listActaShortLinks(p:Record<string,unknown>):Promise<unknown>{const id=str(p.tournamentId).trim();if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id))throw new ApiError("INVALID_TOURNAMENT","Torneo no válido.");const r=await getPool().query("SELECT l.id,l.tournament_id,l.debate_id,l.created_at,l.expires_at,l.revoked_at,COALESCE((SELECT json_agg(json_build_object('eventType',e.event_type,'actor',e.actor,'occurredAt',e.occurred_at,'details',e.details) ORDER BY e.occurred_at) FROM acta_short_link_events e WHERE e.link_id=l.id),'[]'::json) AS events FROM acta_short_links l WHERE l.tournament_id=$1 ORDER BY l.created_at DESC LIMIT 1000",[id]);return r.rows.map((x)=>({...shortLinkPublic(x as ShortLinkRow),events:Array.isArray(x.events)?x.events:[]}));}
 async function updateActaShortLinkExpiry(p:Record<string,unknown>):Promise<unknown>{const tournamentId=str(p.tournamentId),id=str(p.id).toUpperCase(),expires=expiryDate(p.expiryDays);if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("INVALID_SHORT_LINK","Identificador no válido.");const c=await getPool().connect();try{await c.query("BEGIN");const r=await c.query("UPDATE acta_short_links SET expires_at=$3,updated_at=now() WHERE id=$1 AND tournament_id=$2 AND revoked_at IS NULL RETURNING *",[id,tournamentId,expires]);if(!r.rows[0])throw new ApiError("SHORT_LINK_NOT_FOUND","No existe un enlace activo.",404);await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'expiry_updated','manager',$2::jsonb)",[id,JSON.stringify({expiresAt:expires.toISOString()})]);await c.query("COMMIT");return shortLinkPublic(r.rows[0] as ShortLinkRow);}catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}}
-async function revokeActaShortLinks(p:Record<string,unknown>):Promise<unknown>{const tid=str(p.tournamentId),all=p.all===true,ids=Array.isArray(p.ids)?Array.from(new Set(p.ids.filter(x=>typeof x==="string").map(x=>(x as string).toUpperCase()))):[];if(!all&&(!ids.length||ids.length>200||ids.some(x=>!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(x))))throw new ApiError("INVALID_SHORT_LINKS","Selecciona entre 1 y 200 enlaces válidos.");const reason=str(p.reason).trim().slice(0,300),c=await getPool().connect();try{await c.query("BEGIN");const r=await c.query(all?"SELECT id FROM acta_short_links WHERE tournament_id=$1 AND revoked_at IS NULL":"SELECT id FROM acta_short_links WHERE tournament_id=$1 AND revoked_at IS NULL AND id=ANY($2::text[])",all?[tid]:[tid,ids]);const affected=r.rows.map(x=>String(x.id));if(affected.length){await c.query("UPDATE acta_short_links SET revoked_at=now(),updated_at=now() WHERE tournament_id=$1 AND id=ANY($2::text[]) AND revoked_at IS NULL",[tid,affected]);for(const id of affected)await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'revoked','manager',$2::jsonb)",[id,JSON.stringify({reason,bulk:all})]);}await c.query("COMMIT");return{revoked:affected.length,ids:affected};}catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}}
+async function revokeActaShortLinks(p:Record<string,unknown>):Promise<unknown>{
+ const tid=str(p.tournamentId).trim(),all=p.all===true;
+ const ids=Array.isArray(p.ids)?Array.from(new Set(p.ids.filter(x=>typeof x==="string").map(x=>(x as string).toUpperCase()))):[];
+ if(!/^[a-zA-Z0-9_-]{1,128}$/.test(tid))throw new ApiError("INVALID_TOURNAMENT","Torneo no válido.");
+ if(!all&&(!ids.length||ids.length>200||ids.some(x=>!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(x))))
+  throw new ApiError("INVALID_SHORT_LINKS","Selecciona entre 1 y 200 enlaces válidos.");
+ const reason=str(p.reason).trim().slice(0,300),c=await getPool().connect();
+ try{
+  await c.query("BEGIN");
+  // UPDATE ... RETURNING is the serialization point: concurrent revocations
+  // cannot both emit a revocation event for the same link.
+  const updated=await c.query(
+   all
+    ? "UPDATE acta_short_links SET revoked_at=now(),updated_at=now() WHERE tournament_id=$1 AND revoked_at IS NULL RETURNING id"
+    : "UPDATE acta_short_links SET revoked_at=now(),updated_at=now() WHERE tournament_id=$1 AND revoked_at IS NULL AND id=ANY($2::text[]) RETURNING id",
+   all?[tid]:[tid,ids],
+  );
+  const affected=updated.rows.map(x=>String(x.id));
+  for(const id of affected){
+   await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'revoked','manager',$2::jsonb)",[id,JSON.stringify({reason,bulk:all})]);
+  }
+  await c.query("COMMIT");
+  return{revoked:affected.length,ids:affected};
+ }catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}
+}
 async function resolveActaShortLink(req:RequestLike):Promise<unknown>{
  if(!databaseConfigured())throw new ApiError("NOT_CONFIGURED","La base de datos de enlaces no está configurada.",503);
  const ipHash=sha256(requestIp(req));
