@@ -134,6 +134,18 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
         }
         const changed = diff.changes.some((item) => item.change !== 'unchanged');
         if (!changed) {
+          const metadataUpdated = store.update((current) => ({
+            ...current,
+            panelLink: current.panelLink ? {
+              ...current.panelLink,
+              remoteRevision: remote.revision ?? current.panelLink.remoteRevision,
+              remoteUpdatedAt: remote.updatedAt ?? current.panelLink.remoteUpdatedAt,
+            } : current.panelLink,
+          }), { type: 'panel.sync.cursor', message: 'Revisión remota confirmada sin cambios de entidades.' });
+          if (!metadataUpdated || !store.flush()) {
+            setSyncStatus('No se pudo guardar la revisión remota confirmada; se volverá a consultar.');
+            return;
+          }
           writePanelSyncBase(window.localStorage, tournament.id, remote);
           setSyncStatus('Al día · revisión remota ' + (remote.revision ?? 0));
           return;
