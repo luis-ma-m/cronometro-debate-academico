@@ -121,6 +121,8 @@ describe("transactional Tabulation round publication", () => {
       tournamentId, roundId: "tab-round-1", roundNumber: 1, roundName: "Ronda 1",
       roundKind: "qualifying", revision: 8, operationId: "publish-operation-0001",
     });
+    expect(query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT t.id, t.name") && String(sql).includes("team_judge_incompatibilities"))).toBe(true);
+    expect(query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT j.id, j.name") && String(sql).includes("judge_incompatibilities"))).toBe(true);
     expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO rounds"))).toBe(true);
     expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO room_assignments"))).toBe(true);
     expect(query.mock.calls.some(([sql, params]) => String(sql).includes("INSERT INTO tabulation_debate_assignments") && (params as unknown[])[3] === "tab-debate-1")).toBe(true);
