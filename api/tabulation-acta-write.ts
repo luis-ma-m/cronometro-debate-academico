@@ -344,12 +344,14 @@ export async function saveTabulationActa(input: SaveTabulationActaInput) {
     const inserted = await client.query(
       `INSERT INTO tabulation_acta_sources
         (tournament_id, assignment_id, source_mode, round_kind, base_revision, source_hash,
-         source_payload, rules_snapshot, operation_id, supersedes_source_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, 'admin')
+         source_payload, rules_snapshot, elimination_result, operation_id, supersedes_source_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11, 'admin')
        RETURNING id::text AS id, created_at`,
       [loaded.tournamentId, input.assignmentId, validated.sourceMode, validated.roundKind,
         validated.acta.basePanelRevision, sourceHash, JSON.stringify(sourcePayload),
-        JSON.stringify(loaded.rulesSnapshot), input.operationId, loaded.currentSourceId],
+        JSON.stringify(loaded.rulesSnapshot),
+        validated.eliminationResult ? JSON.stringify(validated.eliminationResult) : null,
+        input.operationId, loaded.currentSourceId],
     );
     const sourceId = str(inserted.rows[0]?.id);
     const count = await client.query(
