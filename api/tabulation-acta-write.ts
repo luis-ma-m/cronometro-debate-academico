@@ -6,6 +6,7 @@ import { canonicalizeTabulationActa, type TabulationActaIdMap } from "./tabulati
 import { validateTabulationActaSource } from "./tabulation-acta-source.js";
 import { TabulationActaValidationError, type TabulationActaDomainContext } from "./tabulation-acta-domain.js";
 import type { TabJudge, TabSettings, TabSpeaker, TabTeam } from "../src/tabulation/types.js";
+import { presetSettings } from "../src/tabulation/presets.js";
 
 type Db = { query(sql: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> };
 
@@ -46,7 +47,7 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
        JOIN tournament_settings ts ON ts.id = 1
        LEFT JOIN tabulation_acta_heads h ON h.assignment_id = b.assignment_id
       WHERE b.assignment_id = $1
-      FOR UPDATE OF ra`,
+      FOR UPDATE OF ra FOR SHARE OF ts`,
     [assignmentId],
   );
   const row = assignmentResult.rows[0];
@@ -75,12 +76,13 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
              FROM judges j LEFT JOIN institutions i ON i.id = j.institution_id
              JOIN assignment_judges aj ON aj.judge_id = j.id WHERE aj.assignment_id = $1`, [assignmentId]),
     db.query(`SELECT s.id, s.team_id, s.name FROM speakers s WHERE s.team_id = ANY($1::text[])`, [[teamFavorId, teamContraId]]),
-    db.query("SELECT schema_version, settings FROM tabulation_settings WHERE id = 1"),
+    db.query("SELECT schema_version, settings FROM tabulation_settings WHERE id = 1 FOR SHARE"),
   ]);
   const settingsRow = settingsResult.rows[0];
-  if (!settingsRow || !settingsRow.settings) throw new ApiError("MIGRATION_REQUIRED", "Falta la configuración persistida de Tabulación. No se puede validar un acta sin sus reglas.", 503);
+  if (!settingsRow) throw new ApiError("MIGRATION_REQUIRED", "Falta la configuración persistida de Tabulación. No se puede validar un acta sin sus reglas.", 503);
   let settings: TabSettings;
-  try { settings = validateSettings(settingsRow.settings); }
+  try { settings = !settingsRow.settings || (isRecord(settingsRow.settings) && Object.keys(settingsRow.settings).length === 0)
+    ? presetSettings("ledu-groups") : validateSettings(settingsRow.settings); }
   catch (error) {
     if (error instanceof TabulationSettingsValidationError) throw new ApiError("ACTA_RULES_INVALID", "Las reglas persistidas de Tabulación no son válidas: " + error.message, 409);
     throw error;
