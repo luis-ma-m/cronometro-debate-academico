@@ -86,7 +86,8 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   }, [tournament?.id]);
 
   useEffect(() => {
-    if (!tournament?.panelLink?.remoteId || state.readOnly) return;
+    if (!tournament || !tournament.panelLink?.remoteId || state.readOnly) return;
+    const linkedRemoteId = tournament.panelLink.remoteId;
     let disposed = false;
     let running = false;
     let activeController: AbortController | null = null;
@@ -111,7 +112,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       try {
         const remoteTournament = await getTournament(token, controller.signal);
         if (disposed) return;
-        if (remoteTournament.remoteId !== tournament.panelLink.remoteId) {
+        if (remoteTournament.remoteId !== linkedRemoteId) {
           setSyncStatus('La identidad remota del Gestor ha cambiado. Se ha bloqueado la sincronización para evitar mezclar torneos. Revisa el vínculo manualmente.');
           return;
         }
@@ -123,7 +124,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           setSyncStatus('No se puede reconstruir la base de comparación. Vuelve a vincular el torneo mediante revisión manual.');
           return;
         }
-        if (base.tournamentId !== tournament.panelLink.remoteId) {
+        if (base.tournamentId !== linkedRemoteId) {
           setSyncStatus('La base de sincronización pertenece a otra identidad remota. Se ha bloqueado la reconciliación.');
           return;
         }
