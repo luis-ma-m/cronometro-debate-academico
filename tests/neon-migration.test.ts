@@ -74,6 +74,15 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("ON DELETE RESTRICT");
   });
 
+  it("binds each manager assignment to the originating local Tabulation tournament", async () => {
+    const sql = await readFile(resolve("db/migrations/0018_tabulation_tournament_identity.sql"), "utf8");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS tab_tournament_id text NOT NULL");
+    expect(sql).toContain("tab_tournament_id");
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
   it("migration runner discovers ordered, versioned SQL migrations and verifies checksums", async () => {
     const runner = await readFile(resolve("scripts/migrate-db.mjs"), "utf8");
     expect(runner).toContain('readdir(directory)');
