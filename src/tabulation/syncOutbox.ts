@@ -45,6 +45,7 @@ const RETRY_BASE_MS = 2_000;
 const RETRY_MAX_MS = 5 * 60_000;
 const RETRY_AFTER_MAX_MS = 24 * 60 * 60_000;
 export const SYNC_OUTBOX_UPDATED_EVENT = 'ledu:sync-outbox-updated';
+export const SYNC_OUTBOX_STATE_EVENT = 'ledu:sync-outbox-state';
 
 export function syncRetryDelayMs(attempts: number, random = Math.random, retryAfterMs = 0): number {
   const exponent = Math.min(8, Math.max(0, Math.trunc(attempts) - 1));

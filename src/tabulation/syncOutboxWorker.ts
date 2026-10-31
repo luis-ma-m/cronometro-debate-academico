@@ -1,5 +1,5 @@
 import type { PendingSyncOperation, SyncOperationError, SyncOutbox } from './syncOutbox';
-import { SYNC_OUTBOX_UPDATED_EVENT } from './syncOutbox';
+import { SYNC_OUTBOX_STATE_EVENT, SYNC_OUTBOX_UPDATED_EVENT } from './syncOutbox';
 
 export type SyncDispatchResult =
   | { status: 'acknowledged'; response?: unknown }
@@ -34,6 +34,7 @@ export function createSyncOutboxWorker(options: SyncOutboxWorkerOptions) {
   const refresh = async () => {
     const rows = await options.outbox.list(options.tournamentId);
     options.onQueueChange?.(rows);
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(SYNC_OUTBOX_STATE_EVENT, { detail: rows }));
     return rows;
   };
 
