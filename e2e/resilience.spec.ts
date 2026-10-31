@@ -128,8 +128,10 @@ test('F3: IndexedDB v1 migra a v2 sin perder la outbox y mantiene exclusión ent
         baseRevision: 7,
         payload: { roundName: 'Ronda conservada' },
         payloadHash: 'a'.repeat(64),
-        status: 'pending',
-        attempts: 0,
+        status: 'sending',
+        attempts: 1,
+        workerId: 'stale-worker',
+        leaseUntil: 1,
         createdAt: 100,
       });
       transaction.oncomplete = () => resolve();
@@ -143,6 +145,7 @@ test('F3: IndexedDB v1 migra a v2 sin perder la outbox y mantiene exclusión ent
     const migratedRows = await firstRepository.list('legacy-tournament');
     const firstOutbox = module.createSyncOutbox(firstRepository);
     const secondOutbox = module.createSyncOutbox(module.createIndexedDbSyncOutboxRepository());
+    const recoveredLeases = await firstOutbox.recoverExpiredLeases();
     const [firstClaim, secondClaim] = await Promise.all([
       firstOutbox.claimNext('legacy-tournament', 'browser-tab-a'),
       secondOutbox.claimNext('legacy-tournament', 'browser-tab-b'),
@@ -164,6 +167,7 @@ test('F3: IndexedDB v1 migra a v2 sin perder la outbox y mantiene exclusión ent
       migratedCount: migratedRows.length,
       migratedOperationId: migratedRows[0]?.operationId,
       migratedPayload: migratedRows[0]?.payload,
+      recoveredLeases,
       claimCount: Number(Boolean(firstClaim)) + Number(Boolean(secondClaim)),
       upgraded,
     };
@@ -172,6 +176,7 @@ test('F3: IndexedDB v1 migra a v2 sin perder la outbox y mantiene exclusión ent
   expect(result.migratedCount).toBe(1);
   expect(result.migratedOperationId).toBe('legacy-pending-operation');
   expect(result.migratedPayload).toEqual({ roundName: 'Ronda conservada' });
+  expect(result.recoveredLeases).toBe(1);
   expect(result.claimCount).toBe(1);
   expect(result.upgraded.version).toBe(2);
   expect(result.upgraded.indexes).toContain('byTournamentCreatedAt');
