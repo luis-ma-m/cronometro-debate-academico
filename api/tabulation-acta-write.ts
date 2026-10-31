@@ -140,6 +140,10 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
     id: str(speaker.id), teamId: str(speaker.team_id), name: str(speaker.name),
   }));
   const judgeIds = judges.map((judge) => judge.id);
+  const persistedChairId = str(row.chair_judge_id);
+  if (persistedChairId && !judgeIds.includes(persistedChairId)) {
+    throw new ApiError("ACTA_CONTEXT_INVALID", "La presidencia guardada al publicar la ronda ya no pertenece al panel de jueces actual. Revisa y vuelve a publicar la asignación antes de enviar el acta.", 409);
+  }
   const allowedTeams = new Set(teams.map((team) => team.id));
   const allowedJudges = new Set(judgeIds);
   const allowedSpeakers = new Set(speakers.map((speaker) => speaker.id));
@@ -161,7 +165,7 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
       id: str(row.tabulation_debate_id),
       teamIds: [teamFavorId, teamContraId],
       judgeIds,
-      chairId: str(row.chair_judge_id),
+      chairId: persistedChairId,
       favorTeamId: teamFavorId,
     },
     teams, judges, speakers,
