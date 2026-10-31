@@ -118,6 +118,11 @@ export async function publishTabulationRound(rawOperation: unknown) {
       "INSERT INTO rounds(id, number, name, score_type, default_format_id, is_active) VALUES ($1, $2, $3, $4, $5, false)",
       [operation.entityId, validated.roundNumber, validated.roundName, roundKind, defaultFormatId],
     );
+    await client.query(
+      `INSERT INTO tabulation_round_metadata (tournament_id, manager_round_id, side_mode, team_metadata, updated_by)
+       VALUES ($1, $2, $3, $4::jsonb, 'admin')`,
+      [canonicalTournamentId, operation.entityId, validated.sideMode, JSON.stringify(validated.teamMetadata)],
+    );
 
     const assignmentIds: string[] = [];
     for (const debate of validated.debates) {
@@ -132,9 +137,9 @@ export async function publishTabulationRound(rawOperation: unknown) {
       // Persist the exact local→remote debate identity in the same transaction as its assignment.
       await client.query(
         `INSERT INTO tabulation_debate_assignments
-          (tournament_id, tabulation_round_id, tabulation_debate_id, manager_round_id, assignment_id)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [canonicalTournamentId, operation.entityId, debate.tabulationDebateId, operation.entityId, assignmentId],
+          (tournament_id, tabulation_round_id, tabulation_debate_id, manager_round_id, assignment_id, chair_judge_id, sides_provisional)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [canonicalTournamentId, operation.entityId, debate.tabulationDebateId, operation.entityId, assignmentId, debate.chairId || null, debate.sidesProvisional],
       );
       for (const phase of phases) {
         await client.query(
@@ -175,7 +180,7 @@ export async function publishTabulationRound(rawOperation: unknown) {
       "INSERT INTO audit_events(event_key, event_type, round_id, details) VALUES ($1, $2, $3, $4::jsonb)",
       ["tabulation-round-published:" + operation.operationId, "tabulation_round_published", operation.entityId,
         JSON.stringify({ operationId: operation.operationId, tournamentId: canonicalTournamentId, roundNumber: validated.roundNumber,
-          roundKind, assignmentCount: assignmentIds.length, revision: nextRevision, payloadHash: operation.payloadHash })],
+          roundKind, sideMode: validated.sideMode, teamMetadataCount: validated.teamMetadata.length, assignmentCount: assignmentIds.length, revision: nextRevision, payloadHash: operation.payloadHash })],
     );
     await client.query("COMMIT");
     return response;
