@@ -116,6 +116,8 @@ export interface PanelOutboxDebate {
 }
 
 export interface PanelOutbox {
+  tabTournamentId: string;
+  tabulationRoundId: string;
   format: 'ledu-tabulacion-outbox';
   version: 1;
   createdAt: number;
@@ -417,6 +419,8 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
     outbox: {
       format: 'ledu-tabulacion-outbox',
       version: 1,
+      tabTournamentId: tournament.id,
+      tabulationRoundId: round.id,
       createdAt: now,
       ...(tournament.panelLink?.remoteId ? { tournamentId: tournament.panelLink.remoteId } : {}),
       ...(typeof tournament.panelLink?.remoteRevision === 'number' ? { basePanelRevision: tournament.panelLink.remoteRevision } : {}),
@@ -540,4 +544,40 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
     + debate.judgeIds.length + (debate.judgeIds.length === 1 ? ' juez' : ' jueces') + (debate.sidesProvisional ? ' · postura provisional' : ''));
   return { rooms, issues: [], summary, changed };
+}
+
+
+export const PANEL_PUBLISH_ACK_KEY = 'ledu-tabulation-publish-acks-v1';
+export interface PanelPublishAcknowledgement {
+  version: 1;
+  operationId: string;
+  tabTournamentId: string;
+  tabulationRoundId: string;
+  managerRoundId: string;
+  revision: number;
+  debateAssignments: Array<{ tabulationDebateId: string; assignmentId: string }>;
+}
+export function readPanelPublishAcknowledgements(storage: SimpleStorage): PanelPublishAcknowledgement[] {
+  try {
+    const raw = JSON.parse(storage.getItem(PANEL_PUBLISH_ACK_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((item): item is PanelPublishAcknowledgement => Boolean(item && typeof item === 'object'
+      && (item as PanelPublishAcknowledgement).version === 1
+      && typeof (item as PanelPublishAcknowledgement).operationId === 'string'
+      && typeof (item as PanelPublishAcknowledgement).tabTournamentId === 'string'
+      && typeof (item as PanelPublishAcknowledgement).tabulationRoundId === 'string'
+      && typeof (item as PanelPublishAcknowledgement).managerRoundId === 'string'
+      && Number.isSafeInteger((item as PanelPublishAcknowledgement).revision)
+      && Array.isArray((item as PanelPublishAcknowledgement).debateAssignments)));
+  } catch { return []; }
+}
+export function appendPanelPublishAcknowledgement(storage: SimpleStorage, acknowledgement: PanelPublishAcknowledgement): void {
+  const current = readPanelPublishAcknowledgements(storage).filter((item) => item.operationId !== acknowledgement.operationId);
+  storage.setItem(PANEL_PUBLISH_ACK_KEY, JSON.stringify([...current, acknowledgement].slice(-100)));
+}
+export function removePanelPublishAcknowledgements(storage: SimpleStorage, operationIds: string[]): void {
+  const removed = new Set(operationIds);
+  const remaining = readPanelPublishAcknowledgements(storage).filter((item) => !removed.has(item.operationId));
+  if (remaining.length) storage.setItem(PANEL_PUBLISH_ACK_KEY, JSON.stringify(remaining));
+  else storage.removeItem(PANEL_PUBLISH_ACK_KEY);
 }
