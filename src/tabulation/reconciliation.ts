@@ -80,8 +80,9 @@ function historicalIds(tournament: TabTournament, kind: PanelEntityKind): Set<st
     for (const speaker of tournament.speakers) {
       if (tournament.rounds.some((round) => round.debates.some((debate) => {
         const lineupUsesSpeaker = Object.values(debate.result?.lineup ?? {}).some((roles) => Object.values(roles).includes(speaker.id));
-        const ballotUsesSpeaker = debate.result?.ballots.some((ballot) => Object.keys(ballot.speeches ?? {}).includes(speaker.id));
-        return lineupUsesSpeaker || ballotUsesSpeaker;
+        const jointUsesSpeaker = Object.values(debate.result?.joint?.speakers ?? {}).some((entries) =>
+          entries.some((entry) => entry.speakerId === speaker.id));
+        return lineupUsesSpeaker || jointUsesSpeaker;
       }))) ids.add(speaker.id);
     }
   }
