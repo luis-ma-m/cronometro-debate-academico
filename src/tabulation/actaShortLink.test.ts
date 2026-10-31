@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { isActaLinkSnapshot } from './actaShortLink';
-import type { ActaLink } from './whatsapp';
+import { actaRules, type ActaLink } from './whatsapp';
+import { presetSettings } from './presets';
 
 const valid: ActaLink = {
   version: 2,
@@ -14,12 +15,7 @@ const valid: ActaLink = {
     { id: 'B', name: 'Equipo B', members: [{ id: 'B0', name: 'Orador B' }] },
   ],
   jury: ['Juez principal'],
-  rules: {
-    rubric: [{ id: 'item-1', name: 'Argumentación', section: 'Fondo', description: '' }],
-    itemMin: 1, itemMax: 5, speakerScores: true, speakerScoreMin: 1,
-    speakerScoreMax: 10, speakerScoreStep: 0.5, warningConversion: 0,
-    minorEscalation: 0, minorPoints: 0, minorsPerMajor: 1, majorMode: 'fixed', majorPoints: 0,
-  },
+  rules: actaRules(presetSettings('aduma')),
   desk: '',
 };
 
