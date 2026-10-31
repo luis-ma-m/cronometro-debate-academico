@@ -151,7 +151,7 @@ describe("authoritative transactional Tabulation acta persistence", () => {
       const statement = String(sql).replace(/\\s+/g, " ").trim();
       if (statement === "BEGIN" || statement === "ROLLBACK") return { rows: [] };
       if (statement.startsWith("SELECT b.tournament_id")) return { rows: [{
-        tournament_id: ids.tournament, tabulation_round_id: "local-round", tabulation_debate_id: "local-debate",
+        tournament_id: ids.tournament, tab_tournament_id: "local-tournament", tabulation_round_id: "local-round", tabulation_debate_id: "local-debate",
         manager_round_id: "manager-round", assignment_id: ids.assignment, chair_judge_id: "judge-1",
         sides_provisional: false, round_number: 1, round_kind: "qualifying", team_favor_id: "team-a",
         team_contra_id: "team-b", side_mode: "balanced", team_metadata: metadata, entity_id_map: entityIdMap,
