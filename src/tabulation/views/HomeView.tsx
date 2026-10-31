@@ -248,7 +248,9 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           setSyncStatus('La base de sincronización pertenece a otra identidad remota. Se ha bloqueado la reconciliación.');
           return;
         }
-        const remoteRevisionAdvanced = (remote.revision ?? 0) > (base.revision ?? 0);
+        const remoteRevisionAdvanced = (remote.revision ?? 0) > (base.revision ?? 0)
+          || ((remote.revision ?? 0) === (base.revision ?? 0)
+            && (remote.updatedAt ?? 0) > (base.updatedAt ?? 0));
         const existingPending = readPendingPanelReconciliation(window.localStorage, tournament.id);
         if (existingPending) {
           setPendingReconciliation(existingPending);
