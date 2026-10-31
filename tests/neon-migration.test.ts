@@ -59,6 +59,15 @@ describe("Neon migration artifacts", () => {
     expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
   });
 
+  it("persists the reviewed Tabulation entity identity map", async () => {
+    const sql = await readFile(resolve("db/migrations/0016_tabulation_entity_identity_map.sql"), "utf8");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS entity_id_map jsonb");
+    expect(sql).toContain("jsonb_typeof(entity_id_map) = 'object'");
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
   it("migration runner discovers ordered, versioned SQL migrations and verifies checksums", async () => {
     const runner = await readFile(resolve("scripts/migrate-db.mjs"), "utf8");
     expect(runner).toContain('readdir(directory)');
