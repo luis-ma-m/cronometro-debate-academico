@@ -104,6 +104,12 @@ describe("published round domain validation", () => {
     }, context)).toThrow(/identificador local del debate está duplicado/);
   });
 
+  it("rejects identity maps that swap the local teams behind an assignment", () => {
+    const payload = validPayload();
+    payload.entityIdMap.teams = { "local-a": "team-c", "local-b": "team-b", "local-c": "team-a" };
+    expect(() => validatePublishedRoundPayload(payload, context)).toThrow(/correspondencias de equipos locales/);
+  });
+
   it("rejects incomplete or malformed Tabulation-only outcome metadata", () => {
     const payload = validPayload();
     expect(() => validatePublishedRoundPayload({ ...payload, sideMode: "unknown" }, context)).toThrow(/modo de posturas/);
