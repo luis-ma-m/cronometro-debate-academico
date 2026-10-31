@@ -34,10 +34,85 @@ function emptyDraft(link: ActaLink): PhoneDraft {
 }
 
 /** The draft survives closing the browser or losing the connection: it lives on the phone until it is sent. */
+function sanitizeDraft(value: unknown, link: ActaLink): PhoneDraft {
+  const empty = emptyDraft(link);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return empty;
+  const raw = value as Record<string, unknown>;
+  const teamIds = new Set(link.teams.map((team) => team.id));
+  const speakerIds = new Set(link.teams.flatMap((team) => team.members.map((member) => member.id)));
+  const rubricIds = new Set(link.rules.rubric.map((item) => item.id));
+  const stringRecord = (input: unknown, allowed: Set<string>, nested?: Set<string>): Record<string, Record<string, string>> | Record<string, string> => {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+    const output: Record<string, string | Record<string, string>> = {};
+    for (const [key, item] of Object.entries(input as Record<string, unknown>)) {
+      if (!allowed.has(key)) continue;
+      if (nested) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+        const values: Record<string, string> = {};
+        for (const [childKey, childValue] of Object.entries(item as Record<string, unknown>)) {
+          if (nested.has(childKey) && typeof childValue === 'string') values[childKey] = childValue.slice(0, 40);
+        }
+        output[key] = values;
+      } else if (typeof item === 'string') output[key] = item.slice(0, 40);
+    }
+    return output;
+  };
+  const penalties: PhoneDraft['penalties'] = {};
+  if (raw.penalties && typeof raw.penalties === 'object' && !Array.isArray(raw.penalties)) {
+    for (const [teamId, entry] of Object.entries(raw.penalties as Record<string, unknown>)) {
+      if (!teamIds.has(teamId) || !entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const row = entry as Record<string, unknown>;
+      penalties[teamId] = {
+        warnings: typeof row.warnings === 'string' ? row.warnings.slice(0, 8) : '',
+        minors: typeof row.minors === 'string' ? row.minors.slice(0, 8) : '',
+        majors: typeof row.majors === 'string' ? row.majors.slice(0, 8) : '',
+      };
+    }
+  }
+  const speakers: PhoneDraft['speakers'] = {};
+  if (raw.speakers && typeof raw.speakers === 'object' && !Array.isArray(raw.speakers)) {
+    for (const [teamId, entries] of Object.entries(raw.speakers as Record<string, unknown>)) {
+      if (!teamIds.has(teamId) || !entries || typeof entries !== 'object' || Array.isArray(entries)) continue;
+      const teamEntries: PhoneDraft['speakers'][string] = {};
+      for (const [speakerId, rawEntry] of Object.entries(entries as Record<string, unknown>)) {
+        if (!speakerIds.has(speakerId) || !rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) continue;
+        const entry = rawEntry as Record<string, unknown>;
+        teamEntries[speakerId] = {
+          score: typeof entry.score === 'string' ? entry.score.slice(0, 20) : '',
+          roles: Array.isArray(entry.roles) ? SPEAKER_ROLES.filter((role) => entry.roles?.includes(role)) : [],
+        };
+      }
+      speakers[teamId] = teamEntries;
+    }
+  }
+  return {
+    ...empty,
+    favor: typeof raw.favor === 'string' && teamIds.has(raw.favor) ? raw.favor : '',
+    winner: typeof raw.winner === 'string' && teamIds.has(raw.winner) ? raw.winner : '',
+    quick: raw.quick === true,
+    items: stringRecord(raw.items, teamIds, rubricIds) as PhoneDraft['items'],
+    quickTotals: stringRecord(raw.quickTotals, teamIds) as PhoneDraft['quickTotals'],
+    writtenTotals: stringRecord(raw.writtenTotals, teamIds) as PhoneDraft['writtenTotals'],
+    penalties, speakers,
+    notes: typeof raw.notes === 'string' ? raw.notes.slice(0, 5000) : '',
+    signedBy: typeof raw.signedBy === 'string' && link.jury.includes(raw.signedBy) ? raw.signedBy : empty.signedBy,
+    sentAt: typeof raw.sentAt === 'number' && Number.isFinite(raw.sentAt) ? raw.sentAt : null,
+  };
+}
+
 function loadDraft(link: ActaLink): PhoneDraft {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(draftKey(link)) ?? 'null') as Partial<PhoneDraft> | null;
-    return stored && typeof stored === 'object' ? { ...emptyDraft(link), ...stored } : emptyDraft(link);
+    const current = window.localStorage.getItem(draftKey(link));
+    if (current) return sanitizeDraft(JSON.parse(current) as unknown, link);
+    // Migrate a compatible draft from the old debate-only key. Values tied to
+    // removed teams, speakers or rubric items are discarded rather than misapplied.
+    const legacy = window.localStorage.getItem('ledu-acta-borrador-v1:' + link.debate);
+    if (legacy) {
+      const migrated = sanitizeDraft(JSON.parse(legacy) as unknown, link);
+      window.localStorage.setItem(draftKey(link), JSON.stringify(migrated));
+      return migrated;
+    }
+    return emptyDraft(link);
   } catch {
     return emptyDraft(link);
   }
