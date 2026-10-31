@@ -1,4 +1,6 @@
 export interface PublishedRoundDebate {
+  /** Stable Tabulation-local debate identity; never inferred from room/team ordering. */
+  tabulationDebateId: string;
   physicalRoomId: string;
   venueName: string;
   teamFavorId: string;
@@ -89,6 +91,7 @@ export function validatePublishedRoundPayload(
   const rooms = new Map(context.physicalRooms.map((item) => [item.id, item]));
   const teams = new Map(context.teams.map((item) => [item.id, item]));
   const judges = new Map(context.judges.map((item) => [item.id, item]));
+  const usedDebateIds = new Set<string>();
   const usedRooms = new Set<string>();
   const usedTeams = new Set<string>();
   const usedJudges = new Set<string>();
@@ -100,7 +103,14 @@ export function validatePublishedRoundPayload(
         issues.push(prefix + "el elemento no es válido.");
         continue;
       }
-      const { physicalRoomId, venueName, teamFavorId, teamContraId, judgeIds, chairId, sidesProvisional } = raw;
+      const { tabulationDebateId, physicalRoomId, venueName, teamFavorId, teamContraId, judgeIds, chairId, sidesProvisional } = raw;
+      if (!nonEmptyString(tabulationDebateId) || tabulationDebateId.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(tabulationDebateId)) {
+        issues.push(prefix + "el identificador local del debate no es válido.");
+      } else if (usedDebateIds.has(tabulationDebateId)) {
+        issues.push(prefix + "el identificador local del debate está duplicado.");
+      } else {
+        usedDebateIds.add(tabulationDebateId);
+      }
       if (!nonEmptyString(physicalRoomId) || !rooms.has(physicalRoomId)) {
         issues.push(prefix + "la sala física no existe en el gestor.");
       } else if (!rooms.get(physicalRoomId)?.active) {
@@ -189,6 +199,7 @@ export function validatePublishedRoundPayload(
     roundNumber: value.roundNumber as number,
     roundKind: value.roundKind as 'qualifying' | 'elimination',
     debates: (value.debates as Record<string, unknown>[]).map((item) => ({
+      tabulationDebateId: item.tabulationDebateId as string,
       physicalRoomId: item.physicalRoomId as string,
       venueName: item.venueName as string,
       teamFavorId: item.teamFavorId as string,
