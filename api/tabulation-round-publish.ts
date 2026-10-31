@@ -34,7 +34,7 @@ export async function publishTabulationRound(rawOperation: unknown) {
     await client.query("BEGIN");
     const settingsResult = await client.query(
       `SELECT ti.tournament_id::text AS tournament_id, ts.revision,
-              (extract(epoch FROM ts.updated_at) * 1000)::bigint AS updated_at_ms,
+              floor(extract(epoch FROM ts.updated_at) * 1000)::bigint AS updated_at_ms,
               ts.minimum_judges_per_room
          FROM tournament_settings ts
          JOIN tournament_identity ti ON ti.id = 1
