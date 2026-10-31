@@ -3,6 +3,11 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import './styles.css';
 
+// The E2E-only harness is tree-shaken from normal builds and never ships in production deployments.
+if (import.meta.env.VITE_E2E_PREVIEW === '1') {
+  void import('./e2e/syncOutboxHarness').then(({ installSyncOutboxE2EHarness }) => installSyncOutboxE2EHarness());
+}
+
 /** If the code of a page cannot be downloaded (no connection while loading), say so instead of a blank page. */
 function loadFailed(what: string) {
   return {
