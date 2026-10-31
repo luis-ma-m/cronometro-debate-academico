@@ -8,6 +8,14 @@ import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt } from './types';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
+
+const MANAGER_SESSION_KEY = 'ledu-admin-session';
+function readManagerSessionToken(): string | undefined {
+  try {
+    const session = JSON.parse(window.localStorage.getItem(MANAGER_SESSION_KEY) ?? 'null') as { token?: unknown; expiresAt?: unknown } | null;
+    return typeof session?.token === 'string' && typeof session.expiresAt === 'number' && session.expiresAt > Date.now() ? session.token : undefined;
+  } catch { return undefined; }
+}
 import { BallotsView } from './views/BallotsView';
 import { HomeView } from './views/HomeView';
 import { LogView } from './views/LogView';
@@ -49,13 +57,76 @@ function TabulationShell() {
   const [projection, setProjection] = useState(false);
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [managerSessionToken, setManagerSessionToken] = useState(readManagerSessionToken);
+  const [managerConnection, setManagerConnection] = useState<{ connected: boolean; checkedAt: number | null; lastSuccessAt: number | null }>({ connected: false, checkedAt: null, lastSuccessAt: null });
   const tournament = state.tournament;
 
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === MANAGER_SESSION_KEY) setManagerSessionToken(readManagerSessionToken());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   useEffect(() => {
     const onHashChange = () => setViewState(readHashView());
     window.addEventListener('hashchange', onHashChange);
     const timer = window.setInterval(() => setNow(Date.now()), 5000);
     return () => { window.removeEventListener('hashchange', onHashChange); window.clearInterval(timer); };
+  }, []);
+  useEffect(() => {
+    let disposed = false;
+    let checking = false;
+    let activeController: AbortController | null = null;
+    const checkManagerConnection = async () => {
+      // Do not overlap polls or let a slow response overwrite a newer result.
+      if (disposed || checking || document.visibilityState === 'hidden') return;
+      checking = true;
+      const controller = new AbortController();
+      activeController = controller;
+      const timeout = window.setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch('/api?action=health', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('Health check failed');
+        const body: unknown = await response.json();
+        if (!body || typeof body !== 'object' || !('ok' in body) || (body as { ok?: unknown }).ok !== true) {
+          throw new Error('Health check failed');
+        }
+        const at = Date.now();
+        if (!disposed && activeController === controller) {
+          setManagerConnection({ connected: true, checkedAt: at, lastSuccessAt: at });
+        }
+      } catch {
+        if (!disposed && activeController === controller) {
+          setManagerConnection((current) => ({ ...current, connected: false, checkedAt: Date.now() }));
+        }
+      } finally {
+        window.clearTimeout(timeout);
+        if (activeController === controller) activeController = null;
+        checking = false;
+      }
+    };
+    void checkManagerConnection();
+    const interval = window.setInterval(() => void checkManagerConnection(), 15000);
+    const onOnline = () => void checkManagerConnection();
+    const onFocus = () => void checkManagerConnection();
+    const onVisibilityChange = () => { if (document.visibilityState === 'visible') void checkManagerConnection(); };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      disposed = true;
+      activeController?.abort();
+      window.clearInterval(interval);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, []);
   useEffect(() => {
     // Every unexpected error is kept in the log (once per message); none of them stops the page.
@@ -142,7 +213,7 @@ function TabulationShell() {
           : state.lastSavedAt ? 'Guardado en este navegador · hace ' + Math.max(0, Math.round((now - state.lastSavedAt) / 1000)) + ' s'
             : tournament ? 'Guardado en este navegador' : 'Sin torneo abierto';
 
-  const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store } : null;
+  const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store, managerSessionToken } : null;
 
   return <div className={'app-shell tab-shell' + (projection ? ' tab-projection' : '')}>
     <aside className="sidebar">
@@ -156,6 +227,10 @@ function TabulationShell() {
         </button>;
       })}</nav>
       <div className="sidebar-bottom">
+        <div className={'tab-manager-connection ' + (managerConnection.connected ? 'is-connected' : 'is-disconnected')} role="status" aria-live="polite">
+          <span><span className="tab-manager-connection-dot" />{managerConnection.connected ? 'API, Neon y Redis disponibles' : 'Sin conexión con el servidor'}</span>
+          <small>{managerConnection.lastSuccessAt ? 'Último health correcto hace ' + Math.max(0, Math.floor((now - managerConnection.lastSuccessAt) / 1000)) + ' s' : managerConnection.checkedAt ? 'Sin conexión confirmada' : 'Comprobando disponibilidad…'}</small>
+        </div>
         <span className={'connection-dot' + (state.status === 'conflict' || state.status === 'error' || state.readOnly ? ' tab-dot-error' : '')} />
         <span>{saveLabel}</span>
         <span className="tab-operator">Operador: {state.operator || 'sin nombre'}</span>

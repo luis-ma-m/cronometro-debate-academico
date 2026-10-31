@@ -3,7 +3,7 @@ import { createTimer, resolvePhases, validateAssignments, withRoomStatus } from 
 import { pickChair } from './adjudication';
 import { createTabTournament } from './presets';
 import { randomSeed } from './random';
-import { isFallenAt, sameInstitution, type PresetId, type TabDebate, type TabJudge, type TabTeam, type TabTournament } from './types';
+import { isFallenAt, sameInstitution, type PresetId, type TabDebate, type TabJudge, type TabTeam, type TabTournament, type PanelEntityIdMap, makeTabId } from './types';
 
 /**
  * Versioned hand-offs between the admin panel and the local tabulation. Each side only reads the other's
@@ -18,6 +18,11 @@ export interface PanelHandoff {
   format: 'ledu-tabulacion-handoff';
   version: 1;
   createdAt: number;
+  /** Canonical ID supplied by the authenticated manager; absent only in legacy/demo mode. */
+  tournamentId?: string;
+  /** Snapshot version from the manager's persisted tournament record. */
+  revision?: number;
+  updatedAt?: number;
   tournamentName: string;
   teams: Array<Pick<Team, 'id' | 'name' | 'institution' | 'active' | 'incompatibleJudgeIds'>>;
   speakers: Speaker[];
@@ -25,7 +30,86 @@ export interface PanelHandoff {
   venues: Array<{ id: string; name: string; active: boolean }>;
 }
 
+
+export type PanelEntityKind = 'teams' | 'speakers' | 'judges' | 'venues';
+export interface PanelEntityMatchSuggestion {
+  kind: PanelEntityKind;
+  localId: string;
+  remoteId: string;
+  reason: 'same-id' | 'name-and-institution' | 'name';
+}
+
+/** Suggestions are deliberately advisory: callers must ask the operator to confirm every mapping. */
+export function suggestPanelEntityMatches(tournament: TabTournament, handoff: PanelHandoff): PanelEntityMatchSuggestion[] {
+  const normalize = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-ES').replace(/[^a-z0-9]+/g, ' ').trim();
+  const suggestions: PanelEntityMatchSuggestion[] = [];
+  const collect = <T extends { id: string; name: string }, R extends { id: string; name: string }>(
+    kind: PanelEntityKind,
+    local: T[],
+    remote: R[],
+    institution?: (item: T | R) => string,
+  ) => {
+    for (const incoming of remote) {
+      const sameId = local.find((item) => item.id === incoming.id);
+      if (sameId) {
+        suggestions.push({ kind, localId: sameId.id, remoteId: incoming.id, reason: 'same-id' });
+        continue;
+      }
+      const name = normalize(incoming.name);
+      const candidates = local.filter((item) => normalize(item.name) === name && (!institution
+        || normalize(institution(item)) === normalize(institution(incoming))));
+      for (const candidate of candidates) {
+        suggestions.push({ kind, localId: candidate.id, remoteId: incoming.id, reason: institution ? 'name-and-institution' : 'name' });
+      }
+    }
+  };
+  collect('teams', tournament.teams, handoff.teams, (item) => 'institution' in item ? String(item.institution ?? '') : '');
+  collect('speakers', tournament.speakers, handoff.speakers);
+  collect('judges', tournament.judges, handoff.judges, (item) => 'institution' in item ? String(item.institution ?? '') : '');
+  collect('venues', tournament.venues, handoff.venues);
+  return suggestions;
+}
+
+/** Rejects stale, cross-type and many-to-one mappings before any local data can be changed. */
+export function validatePanelEntityIdMap(tournament: TabTournament, handoff: PanelHandoff, idMap: PanelEntityIdMap, allowLinkedSpeakerMoves = false): string[] {
+  const errors: string[] = [];
+  const definitions: Array<{ kind: PanelEntityKind; localIds: Set<string>; remoteIds: Set<string> }> = [
+    { kind: 'teams', localIds: new Set(tournament.teams.map((item) => item.id)), remoteIds: new Set(handoff.teams.map((item) => item.id)) },
+    { kind: 'speakers', localIds: new Set(tournament.speakers.map((item) => item.id)), remoteIds: new Set(handoff.speakers.map((item) => item.id)) },
+    { kind: 'judges', localIds: new Set(tournament.judges.map((item) => item.id)), remoteIds: new Set(handoff.judges.map((item) => item.id)) },
+    { kind: 'venues', localIds: new Set(tournament.venues.map((item) => item.id)), remoteIds: new Set(handoff.venues.map((item) => item.id)) },
+  ];
+  for (const definition of definitions) {
+    const seenRemote = new Set<string>();
+    for (const [localId, remoteId] of Object.entries(idMap[definition.kind] ?? {})) {
+      if (!definition.localIds.has(localId)) errors.push('El ID local «' + localId + '» no existe en ' + definition.kind + '.');
+      if (!definition.remoteIds.has(remoteId)) errors.push('El ID remoto «' + remoteId + '» no existe en ' + definition.kind + '.');
+      if (seenRemote.has(remoteId)) errors.push('El ID remoto «' + remoteId + '» está asignado a más de una entidad local en ' + definition.kind + '.');
+      seenRemote.add(remoteId);
+    }
+  }
+  const localSpeakers = new Map(tournament.speakers.map((item) => [item.id, item]));
+  const remoteSpeakers = new Map(handoff.speakers.map((item) => [item.id, item]));
+  const remoteTeamToLocal = new Map(Object.entries(idMap.teams).map(([localId, remoteId]) => [remoteId, localId]));
+  for (const [localSpeakerId, remoteSpeakerId] of Object.entries(idMap.speakers)) {
+    const localSpeaker = localSpeakers.get(localSpeakerId);
+    const remoteSpeaker = remoteSpeakers.get(remoteSpeakerId);
+    if (!localSpeaker || !remoteSpeaker) continue;
+    const mappedTeamId = remoteTeamToLocal.get(remoteSpeaker.teamId);
+    if (!allowLinkedSpeakerMoves && (!mappedTeamId || mappedTeamId !== localSpeaker.teamId)) {
+      errors.push('El orador «' + localSpeaker.name + '» no pertenece al equipo local correspondiente al equipo remoto de «' + remoteSpeaker.name + '». No se puede vincular sin revisar primero el equipo.');
+    }
+  }
+  return [...new Set(errors)];
+}
+
 export interface PanelOutboxDebate {
+  tabulationDebateId: string;
+  tabulationVenueId: string;
+  tabulationTeamFavorId: string;
+  tabulationTeamContraId: string;
+  tabulationJudgeIds: string[];
+  tabulationChairId: string;
   physicalRoomId: string;
   venueName: string;
   teamFavorId: string;
@@ -37,12 +121,23 @@ export interface PanelOutboxDebate {
 }
 
 export interface PanelOutbox {
+  tabTournamentId: string;
+  tabulationRoundId: string;
   format: 'ledu-tabulacion-outbox';
   version: 1;
   createdAt: number;
+  /** Canonical identity and base revision of the manager snapshot used to create this proposal. */
+  tournamentId?: string;
+  basePanelRevision?: number;
+  basePanelUpdatedAt?: number;
   tabTournamentName: string;
   panelTournamentName: string | null;
   roundName: string;
+  roundNumber: number;
+  roundKind: 'qualifying' | 'elimination';
+  sideMode: 'draw' | 'balanced';
+  teamMetadata: Array<{ teamId: string; swing: boolean; breakEligible: boolean; fallenFromRound?: number }>;
+  entityIdMap: PanelEntityIdMap;
   debates: PanelOutboxDebate[];
 }
 
@@ -60,6 +155,9 @@ export function buildPanelHandoff(panel: Tournament, now = Date.now()): PanelHan
     format: 'ledu-tabulacion-handoff',
     version: 1,
     createdAt: now,
+    ...(panel.remoteId ? { tournamentId: panel.remoteId } : {}),
+    revision: panel.revision,
+    updatedAt: panel.updatedAt,
     tournamentName: panel.tournamentName,
     teams: panel.teams.map(({ id, name, institution, active, incompatibleJudgeIds }) => ({ id, name, institution, active, incompatibleJudgeIds: [...incompatibleJudgeIds] })),
     speakers: (panel.speakers ?? []).map((speaker) => ({ ...speaker })),
@@ -74,20 +172,129 @@ export const clearHandoff = (storage: SimpleStorage) => storage.removeItem(HANDO
 export const writeOutbox = (storage: SimpleStorage, outbox: PanelOutbox) => storage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
 export const readOutbox = (storage: SimpleStorage) => readJson<PanelOutbox>(storage, OUTBOX_KEY, 'ledu-tabulacion-outbox');
 
-export interface MergeSummary { tournament: TabTournament; added: number; updated: number; warnings: string[] }
+export interface MergeSummary { tournament: TabTournament; added: number; updated: number; warnings: string[]; issues: string[] }
 
 /**
- * Brings the panel participants into a tabulation (same IDs). The panel owns names, institutions and
- * incompatibilities; the tabulation keeps its own judge levels, chairs, availability, swing, break eligibility
- * and active flags. Nothing is ever deleted.
+ * Reconciles panel participants through explicit local→remote IDs. The panel owns names, institutions and
+ * incompatibilities; tabulation keeps judge levels, chair eligibility, availability, swing and break eligibility.
+ * Nothing is ever deleted, and every cross-entity reference is translated through the same map.
  */
-export function mergeHandoff(tournament: TabTournament, handoff: PanelHandoff, now = Date.now()): MergeSummary {
+export function mergeHandoff(
+  tournament: TabTournament,
+  handoff: PanelHandoff,
+  now = Date.now(),
+  reviewedIdMap?: PanelEntityIdMap,
+): MergeSummary {
   let added = 0;
   let updated = 0;
   const warnings: string[] = [];
+  const issues: string[] = [];
+  if (tournament.panelLink?.remoteId && handoff.tournamentId !== tournament.panelLink.remoteId) {
+    issues.push('El torneo local está vinculado a otra identidad remota. No se han aplicado cambios.');
+    return { tournament, added, updated, warnings, issues };
+  }
+  if (tournament.panelLink && handoff.tournamentId && !tournament.panelLink.remoteId) {
+    issues.push('Este torneo tiene un vínculo antiguo sin identidad verificable. Crea una copia vinculada desde el panel; no se fusionarán datos por nombre.');
+    return { tournament, added, updated, warnings, issues };
+  }
+  if (!tournament.panelLink && handoff.tournamentId && !reviewedIdMap) {
+    issues.push('Este torneo local todavía no está vinculado. La vinculación inicial requiere una revisión explícita de las correspondencias.');
+    return { tournament, added, updated, warnings, issues };
+  }
+  if (tournament.panelLink?.remoteId && tournament.panelLink.remoteRevision !== undefined) {
+    if (handoff.revision === undefined || handoff.updatedAt === undefined) {
+      issues.push('El snapshot recibido no incluye revisión y fecha de actualización; no se puede comprobar si está obsoleto.');
+      return { tournament, added, updated, warnings, issues };
+    }
+    if (handoff.revision < tournament.panelLink.remoteRevision
+      || (handoff.revision === tournament.panelLink.remoteRevision && tournament.panelLink.remoteUpdatedAt !== undefined && handoff.updatedAt < tournament.panelLink.remoteUpdatedAt)) {
+      issues.push('El snapshot recibido es más antiguo que la última versión aplicada. No se han modificado datos locales.');
+      return { tournament, added, updated, warnings, issues };
+    }
+  }
   if (tournament.panelLink && tournament.panelLink.tournamentName !== handoff.tournamentName) {
     warnings.push('Este torneo se enlazó con «' + tournament.panelLink.tournamentName + '» y los datos vienen de «' + handoff.tournamentName + '».');
   }
+
+  const emptyMap = (): PanelEntityIdMap => ({ teams: {}, speakers: {}, judges: {}, venues: {} });
+  const idMap: PanelEntityIdMap = structuredClone(reviewedIdMap ?? tournament.panelLink?.idMap ?? emptyMap());
+  if (!reviewedIdMap && tournament.panelLink?.remoteId && !tournament.panelLink.idMap) {
+    // Older copies were created from a hand-off that reused the manager IDs. Recover only exact ID matches.
+    for (const kind of ['teams', 'speakers', 'judges', 'venues'] as const) {
+      const localItems = kind === 'teams' ? tournament.teams : kind === 'speakers' ? tournament.speakers : kind === 'judges' ? tournament.judges : tournament.venues;
+      const remoteItems = kind === 'teams' ? handoff.teams : kind === 'speakers' ? handoff.speakers : kind === 'judges' ? handoff.judges : handoff.venues;
+      const remoteIds = new Set(remoteItems.map((item) => item.id));
+      for (const item of localItems) if (remoteIds.has(item.id)) idMap[kind][item.id] = item.id;
+    }
+  }
+  if (!handoff.tournamentId) {
+    // Legacy/demo hand-offs keep their historical same-ID behavior; they do not claim a canonical remote identity.
+    for (const kind of ['teams', 'speakers', 'judges', 'venues'] as const) {
+      const remoteItems = kind === 'teams' ? handoff.teams : kind === 'speakers' ? handoff.speakers : kind === 'judges' ? handoff.judges : handoff.venues;
+      for (const item of remoteItems) idMap[kind][item.id] = item.id;
+    }
+  }
+
+  if (handoff.tournamentId) {
+    const mapIssues = validatePanelEntityIdMap(tournament, handoff, idMap, Boolean(tournament.panelLink?.remoteId));
+    if (mapIssues.length) return { tournament, added, updated, warnings, issues: mapIssues };
+  }
+
+  const localIds = {
+    teams: new Set(tournament.teams.map((item) => item.id)),
+    speakers: new Set(tournament.speakers.map((item) => item.id)),
+    judges: new Set(tournament.judges.map((item) => item.id)),
+    venues: new Set(tournament.venues.map((item) => item.id)),
+  };
+  const mapRemote = (kind: PanelEntityKind, remoteId: string): string => {
+    const existing = Object.entries(idMap[kind]).find(([, value]) => value === remoteId)?.[0];
+    if (existing) return existing;
+    let localId = '';
+    do { localId = makeTabId(kind.slice(0, -1)); } while (localIds[kind].has(localId));
+    localIds[kind].add(localId);
+    idMap[kind][localId] = remoteId;
+    return localId;
+  };
+
+  // References are translated as well as entity IDs; a cross-entity reference must never keep a remote ID.
+  const remoteTeamIds = new Set(handoff.teams.map((item) => item.id));
+  const remoteJudgeIds = new Set(handoff.judges.map((item) => item.id));
+  const referenceIssues: string[] = [];
+  for (const team of handoff.teams) for (const judgeId of team.incompatibleJudgeIds) {
+    if (!remoteJudgeIds.has(judgeId)) referenceIssues.push('El equipo «' + team.name + '» referencia un juez remoto inexistente (' + judgeId + ').');
+  }
+  for (const judge of handoff.judges) for (const judgeId of judge.incompatibleJudgeIds) {
+    if (!remoteJudgeIds.has(judgeId)) referenceIssues.push('El juez «' + judge.name + '» referencia un juez remoto inexistente (' + judgeId + ').');
+  }
+  for (const speaker of handoff.speakers) if (!remoteTeamIds.has(speaker.teamId)) {
+    referenceIssues.push('El orador «' + speaker.name + '» referencia un equipo remoto inexistente (' + speaker.teamId + ').');
+  }
+  if (referenceIssues.length) return { tournament, added, updated, warnings, issues: referenceIssues };
+
+  const judgeId = (id: string) => mapRemote('judges', id);
+  const teamId = (id: string) => mapRemote('teams', id);
+  const mappedTeams: TabTeam[] = handoff.teams.map((team) => ({
+    ...team,
+    id: teamId(team.id),
+    incompatibleJudgeIds: team.incompatibleJudgeIds.map(judgeId),
+    swing: false,
+    breakEligible: true,
+  }));
+  const mappedSpeakers = handoff.speakers.map((speaker) => ({
+    ...speaker,
+    id: mapRemote('speakers', speaker.id),
+    teamId: teamId(speaker.teamId),
+  }));
+  const mappedJudges: TabJudge[] = handoff.judges.map((judge) => ({
+    ...judge,
+    id: judgeId(judge.id),
+    incompatibleJudgeIds: judge.incompatibleJudgeIds.map(judgeId),
+    rating: 3,
+    canChair: true,
+    unavailableRoundIds: [],
+  }));
+  const mappedVenues = handoff.venues.map((venue) => ({ ...venue, id: mapRemote('venues', venue.id) }));
+
   const merge = <T extends { id: string }>(current: T[], incoming: T[], update: (existing: T, next: T) => T) => {
     const result = [...current];
     for (const item of incoming) {
@@ -100,31 +307,61 @@ export function mergeHandoff(tournament: TabTournament, handoff: PanelHandoff, n
   };
   const teams = merge<TabTeam>(
     tournament.teams,
-    handoff.teams.map((team) => ({ ...team, swing: false, breakEligible: true })),
-    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, incompatibleJudgeIds: next.incompatibleJudgeIds }),
+    mappedTeams,
+    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, active: next.active, incompatibleJudgeIds: next.incompatibleJudgeIds }),
   );
-  const teamIds = new Set(teams.map((team) => team.id));
   const speakers = merge(
     tournament.speakers,
-    handoff.speakers.filter((speaker) => teamIds.has(speaker.teamId)),
+    mappedSpeakers,
     (existing, next) => ({ ...existing, name: next.name, teamId: next.teamId }),
   );
   const judges = merge<TabJudge>(
     tournament.judges,
-    handoff.judges.map((judge) => ({ ...judge, rating: 3, canChair: true, unavailableRoundIds: [] })),
-    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, incompatibleJudgeIds: next.incompatibleJudgeIds }),
+    mappedJudges,
+    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, active: next.active, incompatibleJudgeIds: next.incompatibleJudgeIds }),
   );
-  const venues = merge(tournament.venues, handoff.venues, (existing, next) => ({ ...existing, name: next.name }));
+  const venues = merge(tournament.venues, mappedVenues, (existing, next) => ({ ...existing, name: next.name, active: next.active }));
   return {
-    tournament: { ...tournament, teams, speakers, judges, venues, panelLink: { tournamentName: handoff.tournamentName, linkedAt: now } },
+    tournament: {
+      ...tournament,
+      teams,
+      speakers,
+      judges,
+      venues,
+      panelLink: {
+        tournamentName: handoff.tournamentName,
+        linkedAt: tournament.panelLink?.linkedAt ?? now,
+        ...(handoff.tournamentId ? { remoteId: handoff.tournamentId, ...(typeof handoff.revision === 'number' ? { remoteRevision: handoff.revision } : {}), ...(typeof handoff.updatedAt === 'number' ? { remoteUpdatedAt: handoff.updatedAt } : {}), idMap } : {}),
+      },
+    },
     added,
     updated,
     warnings,
+    issues,
   };
 }
 
 export function tournamentFromHandoff(handoff: PanelHandoff, presetId: PresetId, now = Date.now(), seed = randomSeed()): TabTournament {
-  return mergeHandoff(createTabTournament(handoff.tournamentName, presetId, now, seed), handoff, now).tournament;
+  const created = createTabTournament(handoff.tournamentName, presetId, now, seed);
+  // Import through the legacy same-ID path first, then attach the canonical identity and its exact map.
+  const imported = mergeHandoff(created, { ...handoff, tournamentId: undefined }, now).tournament;
+  if (!handoff.tournamentId) return imported;
+  return {
+    ...imported,
+    panelLink: {
+      tournamentName: handoff.tournamentName,
+      linkedAt: now,
+      remoteId: handoff.tournamentId,
+      ...(typeof handoff.revision === 'number' ? { remoteRevision: handoff.revision } : {}),
+      ...(typeof handoff.updatedAt === 'number' ? { remoteUpdatedAt: handoff.updatedAt } : {}),
+      idMap: {
+        teams: Object.fromEntries(handoff.teams.map((item) => [item.id, item.id])),
+        speakers: Object.fromEntries(handoff.speakers.map((item) => [item.id, item.id])),
+        judges: Object.fromEntries(handoff.judges.map((item) => [item.id, item.id])),
+        venues: Object.fromEntries(handoff.venues.map((item) => [item.id, item.id])),
+      },
+    },
+  };
 }
 
 export interface OutboxResult { outbox: PanelOutbox | null; issues: string[]; warnings: string[] }
@@ -137,6 +374,13 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   const venues = new Map(tournament.venues.map((venue) => [venue.id, venue.name]));
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
   const debates: PanelOutboxDebate[] = [];
+  const idMap = tournament.panelLink?.idMap;
+  const remoteId = (kind: keyof PanelEntityIdMap, localId: string): string | null => {
+    if (!tournament.panelLink?.remoteId) return localId;
+    // Early linked copies used identical local/manager IDs before the explicit map existed.
+    if (!idMap) return localId;
+    return idMap[kind][localId] ?? null;
+  };
   let fallen = 0;
   for (const debate of round.debates) {
     const [a, b] = debate.teamIds;
@@ -146,13 +390,28 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
     if (!a || !b) { issues.push(venueName + ': faltan equipos.'); continue; }
     const favor = debate.favorTeamId ?? a;
     const panel = tournament.settings.conflictPolicy === 'lastResort' ? panelAcceptedJudges(tournament, debate, venueName, warnings) : debate;
+    const physicalRoomId = remoteId('venues', debate.venueId);
+    const teamFavorId = remoteId('teams', favor);
+    const teamContraId = remoteId('teams', favor === a ? b : a);
+    const judgeIds = panel.judgeIds.map((id) => remoteId('judges', id));
+    const chairId = panel.chairId ? remoteId('judges', panel.chairId) : '';
+    if (!physicalRoomId) issues.push(venueName + ': la sala local «' + debate.venueId + '» no tiene correspondencia con una sala del gestor.');
+    if (!teamFavorId || !teamContraId) issues.push(venueName + ': algún equipo no tiene correspondencia con el gestor.');
+    if (judgeIds.some((id) => !id)) issues.push(venueName + ': algún juez no tiene correspondencia con el gestor.');
+    if (panel.chairId && !chairId) issues.push(venueName + ': la presidencia no tiene correspondencia con el gestor.');
     debates.push({
-      physicalRoomId: debate.venueId,
+      tabulationDebateId: debate.id,
+      tabulationVenueId: debate.venueId,
+      tabulationTeamFavorId: favor,
+      tabulationTeamContraId: favor === a ? b : a,
+      tabulationJudgeIds: panel.judgeIds,
+      tabulationChairId: panel.chairId,
+      physicalRoomId: physicalRoomId ?? debate.venueId,
       venueName,
-      teamFavorId: favor,
-      teamContraId: favor === a ? b : a,
-      judgeIds: [...panel.judgeIds].sort(),
-      chairId: panel.chairId,
+      teamFavorId: teamFavorId ?? favor,
+      teamContraId: teamContraId ?? (favor === a ? b : a),
+      judgeIds: judgeIds.filter((id): id is string => Boolean(id)).sort(),
+      chairId: chairId ?? '',
       sidesProvisional: !debate.favorTeamId,
     });
   }
@@ -160,15 +419,36 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   const provisional = debates.filter((debate) => debate.sidesProvisional).length;
   if (provisional) warnings.push(provisional + ' debate(s) sin postura sorteada: se enviarán con una postura provisional que podrás intercambiar en el panel.');
   if (debates.some((debate) => !debate.judgeIds.length)) warnings.push('Hay debates sin jueces.');
+  const teamMetadata = tournament.teams.filter((team) => team.active).map((team) => {
+    const teamId = remoteId('teams', team.id);
+    if (!teamId) issues.push('El equipo «' + team.name + '» no tiene correspondencia con el gestor; no se pueden sincronizar sus metadatos de resultado.');
+    return { teamId: teamId ?? team.id, swing: team.swing, breakEligible: team.breakEligible,
+      ...(typeof team.fallenFromRound === 'number' ? { fallenFromRound: team.fallenFromRound } : {}) };
+  });
   if (issues.length) return { outbox: null, issues: [...new Set(issues)], warnings };
   return {
     outbox: {
       format: 'ledu-tabulacion-outbox',
       version: 1,
+      tabTournamentId: tournament.id,
+      tabulationRoundId: round.id,
       createdAt: now,
+      ...(tournament.panelLink?.remoteId ? { tournamentId: tournament.panelLink.remoteId } : {}),
+      ...(typeof tournament.panelLink?.remoteRevision === 'number' ? { basePanelRevision: tournament.panelLink.remoteRevision } : {}),
+      ...(typeof tournament.panelLink?.remoteUpdatedAt === 'number' ? { basePanelUpdatedAt: tournament.panelLink.remoteUpdatedAt } : {}),
       tabTournamentName: tournament.name,
       panelTournamentName: tournament.panelLink?.tournamentName ?? null,
       roundName: round.name,
+      roundNumber: round.number,
+      roundKind: round.kind,
+      sideMode: round.sideMode,
+      teamMetadata,
+      entityIdMap: idMap ?? {
+        teams: Object.fromEntries(tournament.teams.map((item) => [item.id, item.id])),
+        judges: Object.fromEntries(tournament.judges.map((item) => [item.id, item.id])),
+        speakers: Object.fromEntries(tournament.speakers.map((item) => [item.id, item.id])),
+        venues: Object.fromEntries(tournament.venues.map((item) => [item.id, item.id])),
+      },
       debates,
     },
     issues,
@@ -215,6 +495,23 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const issues: string[] = [];
   const round = panel.rounds.find((item) => item.id === panelRoundId);
   if (!round) return { rooms: null, issues: ['Selecciona una ronda del panel.'], summary: [], changed: 0 };
+  if (outbox.tournamentId && panel.remoteId !== outbox.tournamentId) {
+    return { rooms: null, issues: ['La propuesta pertenece a otra identidad de torneo o el gestor no tiene una identidad verificable. No se ha aplicado ningún cambio.'], summary: [], changed: 0 };
+  }
+  if (!outbox.tournamentId && panel.remoteId) {
+    return { rooms: null, issues: ['La propuesta no contiene identidad canónica del torneo. Vuelve a sincronizar Tabulación con el gestor antes de cargar la ronda.'], summary: [], changed: 0 };
+  }
+  if (outbox.tournamentId) {
+    if (!Number.isInteger(outbox.basePanelRevision)) {
+      return { rooms: null, issues: ['La propuesta no contiene la revisión base del gestor. Actualiza Tabulación antes de publicar la ronda.'], summary: [], changed: 0 };
+    }
+    if (panel.revision !== outbox.basePanelRevision) {
+      return { rooms: null, issues: ['El gestor ha cambiado desde que se generó esta ronda (revisión ' + outbox.basePanelRevision + ' → ' + panel.revision + '). Actualiza Tabulación, revisa los cambios y genera/publica de nuevo la propuesta.'], summary: [], changed: 0 };
+    }
+    if (outbox.basePanelUpdatedAt !== undefined && panel.updatedAt !== outbox.basePanelUpdatedAt) {
+      return { rooms: null, issues: ['La fecha de actualización del gestor no coincide con la revisión base de la propuesta. Actualiza Tabulación antes de continuar.'], summary: [], changed: 0 };
+    }
+  }
   const physicalRooms = new Map(panel.physicalRooms.map((physical) => [physical.id, physical]));
   const teams = new Map(panel.teams.map((team) => [team.id, team]));
   const judges = new Set(panel.judges.map((judge) => judge.id));
@@ -264,4 +561,46 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
     + debate.judgeIds.length + (debate.judgeIds.length === 1 ? ' juez' : ' jueces') + (debate.sidesProvisional ? ' · postura provisional' : ''));
   return { rooms, issues: [], summary, changed };
+}
+
+
+export const PANEL_PUBLISH_ACK_KEY = 'ledu-tabulation-publish-acks-v1';
+export interface PanelPublishAcknowledgement {
+  version: 1;
+  operationId: string;
+  tabTournamentId: string;
+  tabulationRoundId: string;
+  managerRoundId: string;
+  revision: number;
+  debateAssignments: Array<{ tabulationDebateId: string; assignmentId: string }>;
+}
+export function readPanelPublishAcknowledgements(storage: SimpleStorage): PanelPublishAcknowledgement[] {
+  try {
+    const raw = JSON.parse(storage.getItem(PANEL_PUBLISH_ACK_KEY) ?? '[]') as unknown;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((item): item is PanelPublishAcknowledgement => Boolean(item && typeof item === 'object'
+      && (item as PanelPublishAcknowledgement).version === 1
+      && typeof (item as PanelPublishAcknowledgement).operationId === 'string'
+      && typeof (item as PanelPublishAcknowledgement).tabTournamentId === 'string'
+      && typeof (item as PanelPublishAcknowledgement).tabulationRoundId === 'string'
+      && typeof (item as PanelPublishAcknowledgement).managerRoundId === 'string'
+      && Number.isSafeInteger((item as PanelPublishAcknowledgement).revision)
+      && Array.isArray((item as PanelPublishAcknowledgement).debateAssignments)
+      && (item as PanelPublishAcknowledgement).revision >= 1
+      && (item as PanelPublishAcknowledgement).debateAssignments.every((mapping) => Boolean(mapping
+        && typeof mapping.tabulationDebateId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(mapping.tabulationDebateId)
+        && typeof mapping.assignmentId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(mapping.assignmentId)))
+      && new Set((item as PanelPublishAcknowledgement).debateAssignments.map((mapping) => mapping.tabulationDebateId)).size
+        === (item as PanelPublishAcknowledgement).debateAssignments.length));
+  } catch { return []; }
+}
+export function appendPanelPublishAcknowledgement(storage: SimpleStorage, acknowledgement: PanelPublishAcknowledgement): void {
+  const current = readPanelPublishAcknowledgements(storage).filter((item) => item.operationId !== acknowledgement.operationId);
+  storage.setItem(PANEL_PUBLISH_ACK_KEY, JSON.stringify([...current, acknowledgement].slice(-100)));
+}
+export function removePanelPublishAcknowledgements(storage: SimpleStorage, operationIds: string[]): void {
+  const removed = new Set(operationIds);
+  const remaining = readPanelPublishAcknowledgements(storage).filter((item) => !removed.has(item.operationId));
+  if (remaining.length) storage.setItem(PANEL_PUBLISH_ACK_KEY, JSON.stringify(remaining));
+  else storage.removeItem(PANEL_PUBLISH_ACK_KEY);
 }

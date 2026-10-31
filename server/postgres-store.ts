@@ -163,6 +163,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     scorecards,
   });
   const config: SheetRow[] = [
+    { key: "remoteId", value: str(settings?.tournament_id) },
     { key: "tournamentName", value: str(settings?.tournament_name) || "Torneo LEDU" },
     { key: "activeRoundId", value: str(settings?.active_round_id) },
     { key: "activationRevision", value: str(settings?.activation_revision ?? 0) },
@@ -190,7 +191,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
       allowOvertimeDisplay: bool(phase.allow_overtime_display),
     }));
     return {
-      id: str(row.id), name: str(physicalRoomsById.get(str(row.physical_room_id))?.name),
+      id: str(row.id), assignmentId: str(row.id), name: str(physicalRoomsById.get(str(row.physical_room_id))?.name),
       roundId: str(row.round_id), teamFavorId: str(row.team_favor_id), teamContraId: str(row.team_contra_id),
       judgeIds: JSON.stringify((assignmentJudgesByAssignment.get(str(row.id)) || []).map((item) => str(item.judge_id))),
       status: str(row.timer_status), phases: JSON.stringify(phaseRows), notes: str(row.notes),

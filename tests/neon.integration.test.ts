@@ -17,7 +17,7 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await client.connect();
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}"`);
-    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql", "0005_normalize_assignment_claims.sql", "0006_scorecard_judge_consistency.sql", "0007_scope_judge_consistency_checks.sql", "0008_preserve_scored_assignment_snapshots.sql", "0009_scorecard_team_score_consistency.sql"]) {
+    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql", "0005_normalize_assignment_claims.sql", "0006_scorecard_judge_consistency.sql", "0007_scope_judge_consistency_checks.sql", "0008_preserve_scored_assignment_snapshots.sql", "0009_scorecard_team_score_consistency.sql", "0020_acta_short_links.sql"]) {
       await client.query(await readFile(resolve("db/migrations", file), "utf8"));
     }
     await client.query("INSERT INTO tournament_settings(id) VALUES(1)");
@@ -131,4 +131,36 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     expect(Number(state.rows[0].timer_revision)).toBe(1);
     expect(event.rowCount).toBe(0);
   });
+
+  it("persists eight-character acta short links with idempotency, expiry and revocation audit", async () => {
+    const snapshot = { version: 2, tournament: "", round: { number: 1, name: "Ronda 1", elimination: false }, debate: "debate-ref", key: "secret-context", venue: "Aula", teams: [{ id: "A", name: "Equipo A", members: [] }, { id: "B", name: "Equipo B", members: [] }], jury: ["Juez"], rules: { rubric: [] }, desk: "" };
+    const hash = "a".repeat(64);
+    const idem = "b".repeat(64);
+    await client!.query(
+      "INSERT INTO acta_short_links(id,tournament_id,debate_id,snapshot,snapshot_sha256,idempotency_key,created_by,expires_at) VALUES('ABCDEFGH','tournament-1','debate-1',$1::jsonb,$2,$3,'manager',now()+interval '30 days')",
+      [JSON.stringify(snapshot), hash, idem],
+    );
+    const stored = await client!.query("SELECT id,snapshot,expires_at,revoked_at FROM acta_short_links WHERE id='ABCDEFGH'");
+    expect(stored.rows[0].id).toBe("ABCDEFGH");
+    expect(stored.rows[0].snapshot).toEqual(snapshot);
+    expect(stored.rows[0].expires_at).not.toBeNull();
+    await expect(client!.query(
+      "INSERT INTO acta_short_links(id,tournament_id,debate_id,snapshot,snapshot_sha256,idempotency_key,created_by) VALUES('ABCDEFGH','tournament-1','debate-1',$1::jsonb,$2,$3,'manager')",
+      [JSON.stringify(snapshot), hash, "c".repeat(64)],
+    )).rejects.toMatchObject({ code: "23505" });
+    await expect(client!.query(
+      "INSERT INTO acta_short_links(id,tournament_id,debate_id,snapshot,snapshot_sha256,idempotency_key,created_by) VALUES('BCDEFGHJ','tournament-1','debate-2',$1::jsonb,$2,$3,'manager')",
+      [JSON.stringify(snapshot), hash, idem],
+    )).rejects.toMatchObject({ code: "23505" });
+    await client!.query("UPDATE acta_short_links SET expires_at=now()+interval '7 days' WHERE id='ABCDEFGH'");
+    await client!.query("UPDATE acta_short_links SET revoked_at=now() WHERE id='ABCDEFGH'");
+    await client!.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES('ABCDEFGH','created','manager','{}'),('ABCDEFGH','expiry_updated','manager','{}'),('ABCDEFGH','revoked','manager','{}')");
+    const events = await client!.query("SELECT event_type FROM acta_short_link_events WHERE link_id='ABCDEFGH' ORDER BY id");
+    expect(events.rows.map((row) => row.event_type)).toEqual(["created", "expiry_updated", "revoked"]);
+    await expect(client!.query(
+      "INSERT INTO acta_short_links(id,tournament_id,debate_id,snapshot,snapshot_sha256,idempotency_key,created_by) VALUES('IIIIIIII','tournament-1','debate-3',$1::jsonb,$2,$3,'manager')",
+      [JSON.stringify(snapshot), hash, "d".repeat(64)],
+    )).rejects.toMatchObject({ code: "23514" });
+  });
+
 });

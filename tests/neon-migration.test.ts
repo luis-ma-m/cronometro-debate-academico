@@ -36,6 +36,59 @@ describe("Neon migration artifacts", () => {
     expect(sql).not.toMatch(/\bDELETE\s+FROM\s+(teams|judges|speakers|rounds|room_assignments|scorecards)\b/i);
   });
 
+  it("adds a stable Tabulation debate-to-manager assignment bridge without destructive operations", async () => {
+    const sql = await readFile(resolve("db/migrations/0014_tabulation_debate_assignments.sql"), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS tabulation_debate_assignments");
+    expect(sql).toContain("PRIMARY KEY (tournament_id, tabulation_round_id, tabulation_debate_id)");
+    expect(sql).toContain("REFERENCES rounds(id)");
+    expect(sql).toContain("REFERENCES room_assignments(id)");
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
+  it("persists Tabulation-only outcome metadata and assignment context without destructive operations", async () => {
+    const sql = await readFile(resolve("db/migrations/0015_tabulation_round_metadata.sql"), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS tabulation_round_metadata");
+    expect(sql).toContain("side_mode text NOT NULL CHECK (side_mode IN ('draw', 'balanced'))");
+    expect(sql).toContain("team_metadata jsonb NOT NULL");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS chair_judge_id");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS sides_provisional");
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
+  it("persists the reviewed Tabulation entity identity map", async () => {
+    const sql = await readFile(resolve("db/migrations/0016_tabulation_entity_identity_map.sql"), "utf8");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS entity_id_map jsonb");
+    expect(sql).toContain("jsonb_typeof(entity_id_map) = 'object'");
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
+  it("constrains persisted Tabulation chairs to manager judges", async () => {
+    const sql = await readFile(resolve("db/migrations/0017_tabulation_chair_judge_fk.sql"), "utf8");
+    expect(sql).toContain("FOREIGN KEY (chair_judge_id) REFERENCES judges(id)");
+    expect(sql).toContain("ON DELETE RESTRICT");
+  });
+
+  it("binds each manager assignment to the originating local Tabulation tournament", async () => {
+    const sql = await readFile(resolve("db/migrations/0018_tabulation_tournament_identity.sql"), "utf8");
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS tab_tournament_id text NOT NULL");
+    expect(sql).toContain("tab_tournament_id");
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
+  it("scopes the local debate identity key by its originating Tabulation tournament", async () => {
+    const sql = await readFile(resolve("db/migrations/0019_tabulation_debate_mapping_scope.sql"), "utf8");
+    expect(sql).toContain("DROP CONSTRAINT tabulation_debate_assignments_pkey");
+    expect(sql).toContain("PRIMARY KEY (tournament_id, tab_tournament_id, tabulation_round_id, tabulation_debate_id)");
+  });
+
   it("migration runner discovers ordered, versioned SQL migrations and verifies checksums", async () => {
     const runner = await readFile(resolve("scripts/migrate-db.mjs"), "utf8");
     expect(runner).toContain('readdir(directory)');
@@ -47,7 +100,7 @@ describe("Neon migration artifacts", () => {
 
   it("routes operational API persistence through PostgreSQL without a Sheets dependency", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(api).toContain("loadPostgresSheetData");
     expect(api).toContain("writePostgresTables");
     expect(api).not.toMatch(/GOOGLE_SERVICE_ACCOUNT_JSON|sheets\\.googleapis\\.com|googleAccessToken|batchUpdateSpreadsheet/);
@@ -58,7 +111,7 @@ describe("Neon migration artifacts", () => {
 
   it("limits tournament writes to changed entity sets and batches relation inserts", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(api).toContain("const candidateReplacements");
     expect(api).toContain("if (roomsChanged) replacements.Salas");
     expect(api).toContain("if (formatsChanged) replacements.Formatos");
@@ -71,7 +124,7 @@ describe("Neon migration artifacts", () => {
 
   it("persists timer audit and idempotency in the same write transaction", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(api).toContain("readIdempotentResponse(idempotencyKey, idempotencyScope)");
     expect(api).toContain("idempotencyResponse: response");
     expect(store).toContain("INSERT INTO audit_events");
@@ -83,7 +136,7 @@ describe("Neon migration artifacts", () => {
 
   it("normalizes incompatibilities into foreign-key-backed relationships", async () => {
     const sql = await readFile(resolve("db/migrations/0003_normalize_incompatibilities.sql"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS team_judge_incompatibilities");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS judge_incompatibilities");
     expect(sql).toContain("ALTER TABLE teams DROP COLUMN incompatible_judge_ids");
@@ -105,7 +158,7 @@ describe("Neon migration artifacts", () => {
 
   it("normalizes room claims so full saves can swap physical rooms atomically", async () => {
     const sql = await readFile(resolve("db/migrations/0005_normalize_assignment_claims.sql"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS round_room_claims");
     expect(sql).toContain("DROP CONSTRAINT IF EXISTS room_assignments_round_id_physical_room_id_key");
     expect(sql).toContain("DROP INDEX IF EXISTS room_assignments_team_favor_round_uq");
@@ -154,7 +207,7 @@ describe("Neon migration artifacts", () => {
 
   it("protects scored assignment judges and phase snapshots from mutation", async () => {
     const sql = await readFile(resolve("db/migrations/0008_preserve_scored_assignment_snapshots.sql"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(sql).toContain("scored_assignment_judges_immutable");
     expect(sql).toContain("scored_assignment_phases_immutable");
     expect(store).toContain("SCORED_ASSIGNMENT_PHASES_IMMUTABLE");
@@ -168,6 +221,38 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("scorecards_both_team_scores_check");
     expect(sql).toContain("score_count <> 2");
     expect(sql).toContain("favor_count <> 1 OR contra_count <> 1");
+  });
+
+
+  it("creates append-only acta short-link storage with expiry, revocation and audit events", async () => {
+    const sql = await readFile(resolve("db/migrations/0020_acta_short_links.sql"), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS acta_short_links");
+    expect(sql).toContain("varchar(8) PRIMARY KEY");
+    expect(sql).toContain("snapshot_sha256 char(64)");
+    expect(sql).toContain("UNIQUE (tournament_id, idempotency_key)");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS acta_short_link_events");
+    expect(sql).toContain("CHECK (event_type IN ('created','expiry_updated','revoked'))");
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
+  it("exposes authenticated short-link management and a public integrity-checked resolver", async () => {
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    const client = await readFile(resolve("src/api.ts"), "utf8");
+    const view = await readFile(resolve("src/tabulation/views/RoundsView.tsx"), "utf8");
+    expect(api).toContain('case "createActaShortLink"');
+    expect(api).toContain('case "listActaShortLinks"');
+    expect(api).toContain('case "updateActaShortLinkExpiry"');
+    expect(api).toContain('case "revokeActaShortLinks"');
+    expect(api).toContain('action === "resolveActaShortLink"');
+    expect(api).toContain("randomBytes(5)");
+    expect(api).toContain("snapshot_sha256");
+    expect(api).toContain('["INCR",key]');
+    expect(api).toContain("SHORT_LINK_REVOKED");
+    expect(api).toContain("SHORT_LINK_EXPIRED");
+    expect(view).toContain("#S8-");
+    expect(client).toContain("resolveActaShortLink");
   });
 
 });

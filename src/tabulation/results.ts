@@ -1,5 +1,5 @@
-import { validateJointActa } from './acta';
-import { effectivePenalties, type EffectivePenalties } from './penalties';
+import { validateJointActa } from './acta.js';
+import { effectivePenalties, type EffectivePenalties } from './penalties.js';
 import {
   isFallenAt,
   SPEAKER_ROLES,
@@ -11,9 +11,9 @@ import {
   type TabSpeaker,
   type TabTeam,
   type TabTournament,
-} from './types';
+} from './types.js';
 
-export { effectivePenalties, minorsFromWarnings, penaltyConversionWarning, type EffectivePenalties } from './penalties';
+export { effectivePenalties, minorsFromWarnings, penaltyConversionWarning, type EffectivePenalties } from './penalties.js';
 
 export interface OutcomeContext {
   settings: TabSettings;
@@ -267,6 +267,7 @@ export function computeDebateOutcome(round: RoundInfo, debate: TabDebate, contex
   if (!a || !b || a === b) return { ...base, status: 'invalid', issues: ['El debate necesita dos equipos distintos.'] };
   const elimination = round.kind === 'elimination';
   const result = debate.result;
+  // El acta de eliminatoria conserva el modo oficial del torneo: judges o joint.
   const joint = settings.ballotMode === 'joint';
   const penalties = { [a]: effectivePenalties(result?.penalties[a], settings), [b]: effectivePenalties(result?.penalties[b], settings) };
   const side = (teamId: string) => (debate.favorTeamId ? (debate.favorTeamId === teamId ? 'favor' : 'contra') : null);

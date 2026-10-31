@@ -7,6 +7,7 @@ import { ADUMA_RUBRIC, presetSettings } from './presets';
 import { SPEAKER_ROLES, type SpeakerRole, type TabJointActa, type TabPenalties, type TabSettings, type TabSpeaker } from './types';
 import { copyText, formatNumber, parseDecimal } from './ui';
 import { actaCodeMessage, decodeActaLink, whatsAppUrl, type ActaEntry, type ActaLink } from './whatsapp';
+import { resolveActaShortLink } from '../api';
 
 interface PhoneDraft {
   favor: string;
@@ -76,25 +77,21 @@ function Step({ number, done }: { number: number; done: boolean }) {
 
 /** Page opened from the WhatsApp link: one debate's acta, filled on the phone and sent back by WhatsApp. */
 export default function JudgeActaApp() {
-  // Opening another link in the same tab only changes the hash: the page must follow it, or the judge would fill
-  // the previous debate's acta.
-  const [hash, setHash] = useState(() => window.location.hash);
-  useEffect(() => {
-    const onHashChange = () => setHash(window.location.hash);
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
-  const parsed = useMemo(() => {
-    try {
-      return { link: decodeActaLink(hash), error: null };
-    } catch (error) {
-      return { link: null, error: error instanceof Error ? error.message : 'El enlace no es válido.' };
-    }
-  }, [hash]);
-  if (!parsed.link) {
-    return <main className="acta-shell"><section className="acta-card acta-error" role="alert"><TriangleAlert size={22} /><h1>No se puede abrir el acta</h1><p>{parsed.error}</p></section></main>;
-  }
-  return <JudgeActa key={parsed.link.debate} link={parsed.link} />;
+  const [hash,setHash]=useState(()=>window.location.hash);
+  const [parsed,setParsed]=useState<{link:ActaLink|null;error:string|null;loading:boolean}>({link:null,error:null,loading:true});
+  useEffect(()=>{const onHashChange=()=>setHash(window.location.hash);window.addEventListener('hashchange',onHashChange);return()=>window.removeEventListener('hashchange',onHashChange);},[]);
+  useEffect(()=>{
+    let active=true;
+    const load=async()=>{
+      const short=/^#S8-([0-9A-HJKMNP-TV-Z]{8})$/i.exec(hash.trim());
+      if(short){setParsed({link:null,error:null,loading:true});try{const resolved=await resolveActaShortLink(short[1].toUpperCase());if(active)setParsed({link:resolved.snapshot as ActaLink,error:null,loading:false});}catch(error){if(active)setParsed({link:null,error:error instanceof Error?error.message:'No se ha podido recuperar el acta.',loading:false});}return;}
+      try{setParsed({link:decodeActaLink(hash),error:null,loading:false});}catch(error){setParsed({link:null,error:error instanceof Error?error.message:'El enlace no es válido.',loading:false});}
+    };
+    void load();return()=>{active=false;};
+  },[hash]);
+  if(parsed.loading)return <main className="acta-shell"><section className="acta-card"><h1>Recuperando el acta…</h1><p>Consultando el snapshot original del enlace.</p></section></main>;
+  if(!parsed.link)return <main className="acta-shell"><section className="acta-card acta-error" role="alert"><TriangleAlert size={22}/><h1>No se puede abrir el acta</h1><p>{parsed.error}</p></section></main>;
+  return <JudgeActa key={parsed.link.debate} link={parsed.link}/>;
 }
 
 function JudgeActa({ link }: { link: ActaLink }) {

@@ -1,5 +1,5 @@
-import { randomSeed } from './random';
-import { makeTabId, TAB_SCHEMA_VERSION, type PresetId, type TabRubricItem, type TabSettings, type TabTournament } from './types';
+import { randomSeed } from './random.js';
+import { makeTabId, TAB_SCHEMA_VERSION, type PresetId, type TabRubricItem, type TabSettings, type TabTournament } from './types.js';
 
 export const PRESET_OPTIONS: Array<{ id: Exclude<PresetId, 'custom'>; label: string; description: string }> = [
   {

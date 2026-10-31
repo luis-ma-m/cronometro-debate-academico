@@ -32,6 +32,8 @@ function fullAduma(): TabTournament {
       },
     },
   }], { silent: true });
+  round.managerRoundId = 'manager-round-1';
+  round.debates[0].managerAssignmentId = '00000000-0000-4000-8000-000000000001';
   tournament.rounds = [round];
   tournament.draftRound = {
     round: { ...round, id: 'r2', number: 2, name: 'Ronda 2' }, generated: { ...round, id: 'r2', number: 2, name: 'Ronda 2' },

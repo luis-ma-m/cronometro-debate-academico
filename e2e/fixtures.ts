@@ -1,29 +1,47 @@
 import { expect, test as base, type BrowserContext, type Page } from '@playwright/test';
 
 /**
- * Blocks and records every request to the API or to any server other than the one serving the static files: the
- * tabulation and the judges' page must work with no backend at all. Returns the list of blocked requests.
+ * Blocks API/data traffic and external servers. The health probe is stubbed as
+ * unavailable: it is expected control-plane traffic, not a dependency for
+ * offline operation. This keeps offline tests deterministic without hiding
+ * accidental reads or writes to the backend.
  */
 export async function guardNetwork(context: BrowserContext, baseURL: string): Promise<string[]> {
   const origin = new URL(baseURL).origin;
   const forbidden: string[] = [];
-  await context.route('**/*', (route) => {
+  await context.route('**/*', async (route) => {
     const url = new URL(route.request().url());
+    if (url.origin === origin && url.pathname === '/api' && url.searchParams.get('action') === 'health' && route.request().method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: { code: 'NOT_CONFIGURED', message: 'Backend intentionally unavailable in this offline test.' } }),
+      });
+      return;
+    }
+    // The desk intentionally opens WhatsApp as a top-level navigation. Keep that
+    // navigation local to the test runner (no real WhatsApp request), while still
+    // blocking external data/subresource traffic.
+    if (url.hostname === 'wa.me' && route.request().resourceType() === 'document' && route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>WhatsApp navigation stub</title>' });
+      return;
+    }
     if (url.origin !== origin || url.pathname.startsWith('/api')) {
       forbidden.push(route.request().method() + ' ' + url.href.slice(0, 120));
-      return route.abort();
+      await route.abort();
+      return;
     }
-    return route.continue();
+    await route.continue();
   });
   return forbidden;
 }
 
-/** Every test fails if a page of its context tries to reach the API or another server. */
+/** Every test fails if a page tries to access backend data or another server. */
 export const test = base.extend<{ noBackend: void }>({
   noBackend: [async ({ context, baseURL }, use) => {
     const forbidden = await guardNetwork(context, baseURL!);
     await use();
-    expect(forbidden, 'peticiones a la API o a otros servidores').toEqual([]);
+    expect(forbidden, 'peticiones de datos a la API o a otros servidores').toEqual([]);
   }, { auto: true }],
 });
 

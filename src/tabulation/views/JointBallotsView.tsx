@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import { applyReceivedActa, findActaCodes, readActaCode, receivedIsRegistered } from '../whatsapp';
+import { OfficialActaPublisher } from '../OfficialActaPublisher';
 import { CheckCheck, MessageCircle, Save, SkipForward, Star, Trash2 } from 'lucide-react';
 import { SPEAKER_POSITIONS } from '../../scoring';
 import { compactActaWarnings, validateJointActa } from '../acta';
@@ -101,7 +102,7 @@ function applyJoint(debate: TabDebate, draft: JointDraft, elimination: boolean):
 }
 
 /** Joint acta (ADUMA art. 23): the jury declares the winner; items, faults and speaker scores follow the paper. */
-export function JointBallotsView({ tournament, outcomes, update, notify }: ViewProps) {
+export function JointBallotsView({ tournament, outcomes, update, notify, store, managerSessionToken }: ViewProps) {
   const look = useMemo(() => lookups(tournament), [tournament]);
   const context = useMemo(() => outcomeContext(tournament), [tournament]);
   const { settings } = tournament;
@@ -351,6 +352,7 @@ export function JointBallotsView({ tournament, outcomes, update, notify }: ViewP
               {preview?.status === 'complete' && (preview.noWinner ? <span>Los dos equipos pierden sin ítems.</span> : <span>Gana <b>{look.teamName(preview.winnerTeamId ?? '')}</b>{!elimination && preview.lines.length ? ' · ítems netos ' + preview.lines.map((line) => (line.points === null ? 'media de la ronda' : formatNumber(line.points))).join(' – ') : ''}</span>)}
               {dirty && <span className="tab-unsaved">Cambios sin guardar</span>}
             </div>
+            {!dirty && debate.result && <OfficialActaPublisher tournament={tournament} round={round} debate={debate} result={debate.result} token={managerSessionToken} store={store} notify={notify} />}
             <div className="tab-actions">
               {debate.result && <button type="button" className="text-button danger-action" onClick={remove}><Trash2 size={14} /> Borrar acta</button>}
               <button type="button" className="text-button" disabled={!dirty} onClick={() => open(debate, true)}>Descartar cambios</button>

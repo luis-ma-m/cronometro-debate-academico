@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { TabulationRulesPanel } from './components/TabulationRulesPanel';
+import { TabulationTournamentRanking } from './components/TabulationTournamentRanking';
 import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
-import type { RoundActivationPreview, RoomConnectionStatus } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory, publishTabulationRound as apiPublishTabulationRound } from './api';
+import type { RoundActivationPreview, RoomConnectionStatus, TabulationActaHistory as TabulationActaHistoryData } from './api';
+import { ActaVersionDetails } from './components/ActaVersionDetails';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibilities';
@@ -13,7 +16,10 @@ import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundSco
 import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 import { SearchableEntityPicker } from './components/SearchableEntityPicker';
-import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
+import { appendPanelPublishAcknowledgement, applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
+import { createIndexedDbSyncOutboxRepository, createSyncOutbox, hashSyncPayload, SYNC_OUTBOX_UPDATED_EVENT } from './tabulation/syncOutbox';
+import type { PendingSyncOperation } from './tabulation/syncOutbox';
+import { createSyncOutboxWorker } from './tabulation/syncOutboxWorker';
 
 const SESSION_KEY = 'ledu-admin-session';
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
@@ -97,12 +103,17 @@ export default function App() {
   const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
   const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([]);
   const [expandedJudgeIds, setExpandedJudgeIds] = useState<string[]>([]);
+  const [actaHistories, setActaHistories] = useState<Record<string, TabulationActaHistoryData>>({});
+  const [actaHistoryLoading, setActaHistoryLoading] = useState<Record<string, boolean>>({});
+  const [actaHistoryErrors, setActaHistoryErrors] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now());
   const [snapshot, setSnapshot] = useState<PublicRoom | null>(null);
   const [saving, setSaving] = useState(false);
   const [preparingRoomId, setPreparingRoomId] = useState<string | null>(null);
   const [preparedRoomLink, setPreparedRoomLink] = useState<{ roomName: string; href: string } | null>(null);
   const [tabulationNotice, setTabulationNotice] = useState('');
+  const [publishingTabulationRound, setPublishingTabulationRound] = useState(false);
+  const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   // Reuse already fetched room-control links for the lifetime of this admin session.
   const preparedRoomLinksRef = useRef<Record<string, { roomName: string; href: string }>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -342,6 +353,71 @@ export default function App() {
   }, [roomId, session, reloadAdmin, reloadRoom]);
 
   useEffect(() => {
+    if (roomId || !apiConfigured || !session?.token || !data.remoteId) {
+      setSyncQueue([]);
+      return;
+    }
+    let disposed = false;
+    let outbox: ReturnType<typeof createSyncOutbox>;
+    try {
+      outbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo abrir la cola offline.');
+      return;
+    }
+    const worker = createSyncOutboxWorker({
+      outbox,
+      tournamentId: data.remoteId,
+      workerId: makeId('sync-worker'),
+      dispatch: async (operation) => {
+        if (operation.operation !== 'publish-round' || operation.entityType !== 'round') {
+          return { status: 'pause', error: { code: 'UNSUPPORTED_OPERATION', message: 'Esta operación necesita un adaptador de sincronización específico; se conserva en cola.' } };
+        }
+        try {
+          const payload = operation.payload as Record<string, unknown>;
+          const published = await apiPublishTabulationRound(session.token, {
+            protocolVersion: 1, operationId: operation.operationId, tournamentId: operation.tournamentId,
+            entityType: 'round', entityId: operation.entityId, operation: 'publish-round',
+            baseRevision: operation.baseRevision, payload, payloadHash: operation.payloadHash,
+          });
+          if (!Array.isArray(published.debateAssignments)
+            || typeof payload.tabTournamentId !== 'string' || typeof payload.tabulationRoundId !== 'string') {
+            throw new Error('El servidor confirmó la ronda, pero no devolvió el mapping de debates esperado. Se requiere reconciliación por operationId.');
+          }
+          appendPanelPublishAcknowledgement(window.localStorage, {
+            version: 1, operationId: operation.operationId,
+            tabTournamentId: payload.tabTournamentId, tabulationRoundId: payload.tabulationRoundId,
+            managerRoundId: published.roundId, revision: published.revision,
+            debateAssignments: published.debateAssignments,
+          });
+          return { status: 'acknowledged' };
+        } catch (error) {
+          const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+          const message = error instanceof Error ? error.message : 'No se ha podido confirmar la sincronización.';
+          if (code === 'UNAUTHORIZED') {
+            localStorage.removeItem(SESSION_KEY);
+            setSession(null);
+            setServerError('La sesión ha caducado. Inicia sesión para reanudar la sincronización.');
+            return { status: 'pause', error: { code, message }, retryAfterMs: 60_000 };
+          }
+          if (['REVISION_CONFLICT', 'TOURNAMENT_MISMATCH', 'IDEMPOTENCY_MISMATCH'].includes(code)) return { status: 'conflict', error: { code, message } };
+          if (['INVALID_PAYLOAD', 'INVALID_RELATION', 'OPERATION_NOT_ALLOWED', 'FORMAT_NOT_CONFIGURED'].includes(code)) return { status: 'failed', error: { code, message } };
+          const retryAfterMs = error && typeof error === 'object' && 'retryAfterMs' in error ? Number((error as { retryAfterMs?: unknown }).retryAfterMs) || 0 : 0;
+          return { status: 'retry', error: { code: code || 'NETWORK_ERROR', message }, retryAfterMs };
+        }
+      },
+      onQueueChange: (operations) => { if (!disposed) setSyncQueue(operations); },
+      onAcknowledged: (operation) => {
+        if (disposed) return;
+        setTabulationNotice('La operación ' + operation.operationId + ' se ha confirmado en el servidor. La cola se ha actualizado.');
+        void reloadAdmin();
+      },
+      onError: (error) => { if (!disposed) setServerError(error instanceof Error ? error.message : 'Error en el worker de sincronización.'); },
+    });
+    worker.start();
+    return () => { disposed = true; worker.stop(); };
+  }, [roomId, session?.token, data.remoteId, reloadAdmin]);
+  useEffect(() => {
     if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
   }, [data.rounds, selectedRound]);
   useEffect(() => {
@@ -349,6 +425,32 @@ export default function App() {
       setSelectedFormatId(data.formats[0]?.id ?? '');
     }
   }, [data.formats, selectedFormatId]);
+
+  const loadActaHistory = async (room: Room) => {
+    const assignmentId = room.assignmentId;
+    if (!apiConfigured || !session || !data.remoteId || !assignmentId || hasUnsavedRef.current) {
+      const reason = !apiConfigured ? 'El historial solo está disponible con backend.'
+        : !session ? 'Inicia sesión para consultar el historial.'
+        : !data.remoteId ? 'El torneo aún no tiene identidad remota verificable.'
+        : !assignmentId ? 'Esta asignación aún no tiene identidad remota verificable.'
+        : 'Guarda o descarta los cambios locales antes de consultar el historial remoto.';
+      setActaHistoryErrors((current) => ({ ...current, [room.id]: reason }));
+      return;
+    }
+    setActaHistoryLoading((current) => ({ ...current, [room.id]: true }));
+    setActaHistoryErrors((current) => { const next = { ...current }; delete next[room.id]; return next; });
+    try {
+      const history = await getTabulationActaHistory(session.token, assignmentId);
+      if (history.assignmentId !== assignmentId || history.tournamentId !== data.remoteId) {
+        throw new Error('El historial devuelto no corresponde al torneo y asignación actuales.');
+      }
+      setActaHistories((current) => ({ ...current, [room.id]: history }));
+    } catch (error) {
+      setActaHistoryErrors((current) => ({ ...current, [room.id]: error instanceof Error ? error.message : 'No se ha podido consultar el historial.' }));
+    } finally {
+      setActaHistoryLoading((current) => ({ ...current, [room.id]: false }));
+    }
+  };
 
   const updateData = (updater: (current: Tournament) => Tournament) => {
     setPreparedRoomLink(null);
@@ -1240,6 +1342,101 @@ export default function App() {
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
   };
 
+  const publishFromTabulation = async () => {
+    if (!apiConfigured || !session || !data.remoteId) {
+      setServerError('La publicación remota requiere una sesión del gestor y una identidad canónica de torneo.');
+      return;
+    }
+    if (hasUnsavedChanges || hasUnsavedRef.current || saving) {
+      setServerError('Guarda o descarta los cambios locales del gestor antes de publicar una ronda.');
+      return;
+    }
+    const outbox = readOutbox(localStorage);
+    if (!outbox) {
+      setServerError('No hay ninguna propuesta de ronda. En Tabulación, revisa la ronda y utiliza «Enviar al panel de cronómetros».');
+      return;
+    }
+    if (!outbox.tournamentId || outbox.tournamentId !== data.remoteId) {
+      setServerError('La propuesta no contiene la identidad canónica de este torneo o pertenece a otro torneo. Actualiza el vínculo y vuelve a generarla.');
+      return;
+    }
+    const nextRoundNumber = Math.max(0, ...data.rounds.map((round) => round.number)) + 1;
+    if (outbox.roundNumber !== nextRoundNumber) {
+      setServerError('La propuesta corresponde a la ronda ' + outbox.roundNumber + ', pero el gestor espera la ronda ' + nextRoundNumber + '. Actualiza Tabulación, genera la ronda correcta y vuelve a revisarla.');
+      return;
+    }
+    const previewRoundId = makeId('preview');
+    const previewRound: Round = {
+      id: previewRoundId,
+      number: outbox.roundNumber,
+      name: outbox.roundName,
+      active: false,
+      defaultFormatId: data.formats[0]?.id ?? '',
+      scoreType: outbox.roundKind,
+    };
+    const preview = applyOutboxToPanel(
+      { ...data, rounds: [...data.rounds, previewRound], rooms: [] },
+      previewRoundId,
+      outbox,
+      { makeId },
+    );
+    if (!preview.rooms) {
+      setServerError('La propuesta no supera la revisión local: ' + preview.issues.join(' '));
+      return;
+    }
+    const summary = preview.summary.join('\n');
+    const provisionalCount = outbox.debates.filter((debate) => debate.sidesProvisional).length;
+    const noJudgeCount = outbox.debates.filter((debate) => debate.judgeIds.length === 0).length;
+    const warnings = [
+      provisionalCount ? provisionalCount + ' debate(s) tienen posturas provisionales y deberán sortearse/revisarse.' : '',
+      noJudgeCount ? noJudgeCount + ' debate(s) no tienen jueces asignados.' : '',
+    ].filter(Boolean).join('\n');
+    if (!window.confirm(
+      '¿Publicar «' + outbox.roundName + '» como nueva ronda oficial del gestor?\n\n'
+      + summary + (warnings ? '\n\nAvisos:\n' + warnings : '')
+      + '\n\nSe crearán ' + outbox.debates.length + ' asignaciones nuevas. No se sobrescribirán rondas ni actas existentes. La publicación solo se confirmará cuando el servidor responda con un ACK transaccional.',
+    )) return;
+
+    setPublishingTabulationRound(true);
+    setServerError('');
+    try {
+      const repository = createIndexedDbSyncOutboxRepository();
+      const syncOutbox = createSyncOutbox(repository);
+      await syncOutbox.recoverExpiredLeases();
+      const payloadHash = await hashSyncPayload(outbox);
+      const entityId = 'tab-' + payloadHash.slice(0, 32);
+      let existing = (await syncOutbox.list(data.remoteId)).find((item) =>
+        item.operation === 'publish-round' && item.entityType === 'round'
+        && item.entityId === entityId && item.payloadHash === payloadHash
+      );
+      if (existing?.status === 'conflict' || existing?.status === 'failed') {
+        throw new Error('Esta propuesta ya tiene un conflicto o fallo registrado. No se reenviará automáticamente; actualiza los datos, resuelve el problema y genera una propuesta nueva.');
+      }
+      if (existing?.status === 'sending') {
+        await syncOutbox.recoverExpiredLeases();
+        existing = (await syncOutbox.list(data.remoteId)).find((item) => item.operationId === existing!.operationId);
+        if (existing?.status === 'sending') throw new Error('Esta publicación ya está siendo procesada en otra pestaña. Espera a que termine antes de volver a intentarlo.');
+      }
+      const queued = existing ?? (await syncOutbox.enqueue({
+        tournamentId: data.remoteId,
+        entityType: 'round',
+        entityId,
+        operation: 'publish-round',
+        baseRevision: outbox.basePanelRevision ?? data.revision,
+        payload: outbox,
+      })).operation;
+      if (queued.status === 'sending') {
+        throw new Error('Esta publicación ya está siendo procesada en otra pestaña. Espera a que termine antes de volver a intentarlo.');
+      }
+      window.dispatchEvent(new Event(SYNC_OUTBOX_UPDATED_EVENT));
+      setTabulationNotice('La propuesta «' + outbox.roundName + '» se ha guardado en la cola duradera. El gestor la publicará automáticamente cuando el servidor esté disponible; puedes seguir trabajando sin esperar al envío.');
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se ha podido publicar la ronda.');
+    } finally {
+      setPublishingTabulationRound(false);
+    }
+  };
+
   const assignmentWarnings = validateAssignments(data);
   const incompatibilityIncidents = findAssignmentConflicts(data);
   const overviewIncompatibilityIncidents = activeTournamentRoundId
@@ -1306,16 +1503,17 @@ export default function App() {
         saving={savingScores}
       />}
 
-      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
+      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button className="button primary" onClick={() => void publishFromTabulation()} disabled={!apiConfigured || !session || !data.remoteId || hasUnsavedChanges || saving || publishingTabulationRound} title="Revisa y publica la propuesta como una nueva ronda oficial"><ClipboardList size={15} />{publishingTabulationRound ? 'Publicando…' : 'Publicar nueva ronda'}</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div>{syncQueue.length > 0 && <div className="muted" role="status" aria-live="polite">Cola de sincronización: {syncQueue.filter((item) => item.status === 'pending').length} pendiente(s), {syncQueue.filter((item) => item.status === 'sending').length} en curso, {syncQueue.filter((item) => item.status === 'conflict').length} conflicto(s), {syncQueue.filter((item) => item.status === 'failed').length} error(es). {syncQueue.find((item) => item.status === 'conflict' || item.status === 'failed')?.lastError?.message ?? ''}</div>}<div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
         const expanded = expandedRoomIds.includes(room.id);
         return <section className={'panel room-editor room-card' + (expanded ? ' expanded' : '')} key={room.id}>
           <div className="room-card-header">
-            <button type="button" className="room-card-toggle" aria-expanded={expanded} aria-controls={'room-config-' + room.id} onClick={() => setExpandedRoomIds((current) => expanded ? current.filter((id) => id !== room.id) : [...current, room.id])}>
+            <button type="button" className="room-card-toggle" aria-expanded={expanded} aria-controls={'room-config-' + room.id} onClick={() => { const opening = !expanded; setExpandedRoomIds((current) => opening ? [...current, room.id] : current.filter((id) => id !== room.id)); if (opening && !actaHistories[room.id] && !actaHistoryLoading[room.id]) void loadActaHistory(room); }}>
               <span className="room-card-name">{room.name}</span>
               <span className="room-card-toggle-hint">{expanded ? 'Ocultar configuración' : 'Ver configuración'}</span>
               <ChevronRight size={16} className="room-card-chevron" />
             </button>
             <div className="room-open-actions">
+              {actaHistories[room.id] && <span className="muted room-acta-history-indicator" title={actaHistories[room.id].totalVersions + " versiones oficiales"}>{actaHistories[room.id].rewriteCount > 0 ? "Acta reescrita " + actaHistories[room.id].rewriteCount + (actaHistories[room.id].rewriteCount === 1 ? " vez" : " veces") : "Acta oficial sin reescrituras"}</span>}
               <button type="button" className="icon-button" title="Abrir cronómetro" aria-label={'Abrir cronómetro de ' + room.name} onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button>
               <button type="button" className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button>
               <button type="button" className="icon-button danger-action" title="Eliminar sala" aria-label={'Eliminar sala ' + room.name} onClick={() => removeRoom(room)}><Trash2 size={15} /></button>
@@ -1332,7 +1530,30 @@ export default function App() {
                 const reason = conflict ? 'Institución incompatible con ' + conflict.name : teamConflict ? 'Incompatible con el equipo ' + teamConflict.name : judgeConflict ? 'Incompatible con ' + judgeConflict.name : undefined;
                 return { id: judge.id, name: judge.name, active: judge.active, disabledReason: reason };
               })} value={room.judgeIds} onChange={(value) => updateRoom(room.id, { judgeIds: value as string[] })} /></div>
-              <div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div>
+              <section className="panel room-acta-history" aria-label={'Historial del acta de ' + room.name}>
+                 <div className="panel-title"><div><h3>Historial del acta</h3><p>Versiones oficiales sincronizadas desde Tabulación.</p></div>
+                   <button type="button" className="button secondary" disabled={Boolean(actaHistoryLoading[room.id]) || saving || hasUnsavedChanges || !apiConfigured || !session || !data.remoteId || !room.assignmentId} onClick={() => void loadActaHistory(room)}>
+                     <RefreshCw size={14} /> {actaHistoryLoading[room.id] ? 'Consultando…' : 'Consultar historial'}
+                   </button>
+                 </div>
+                 {actaHistoryErrors[room.id] && <p className="muted" role="status">{actaHistoryErrors[room.id]}</p>}
+                 {actaHistories[room.id] && <div className="room-acta-history-summary">
+                   <strong>{actaHistories[room.id].rewriteCount > 0 ? 'Acta reescrita ' + actaHistories[room.id].rewriteCount + (actaHistories[room.id].rewriteCount === 1 ? ' vez' : ' veces') : 'Sin reescrituras oficiales'}</strong>
+                   <span>{actaHistories[room.id].totalVersions} {actaHistories[room.id].totalVersions === 1 ? 'versión' : 'versiones'}</span>
+                   {actaHistories[room.id].truncated && <small>Se muestran las 100 versiones más recientes.</small>}
+                   {actaHistories[room.id].versions.length > 0 ? <ol className="room-acta-history-list">
+                     {actaHistories[room.id].versions.map((version) => <li key={version.id}>
+                       <div><b>{version.id === actaHistories[room.id].currentVersionId ? 'Versión vigente' : 'Versión anterior'}</b><span>{new Date(version.createdAt).toLocaleString('es-ES')}</span></div>
+                       <small>{version.sourceMode === 'elimination' ? 'Resultado de eliminatoria' : version.sourceMode === 'joint' ? 'Acta conjunta' : 'Papeletas individuales'} · {version.roundKind === 'elimination' ? 'Eliminatoria' : 'Clasificatoria'} · {version.createdBy}</small>
+                       {version.eliminationResult && <small>Ganador: {data.teams.find((team) => team.id === version.eliminationResult?.winnerTeamId)?.name ?? String(version.eliminationResult.winnerTeamId)} · Perdedor: {data.teams.find((team) => team.id === version.eliminationResult?.loserTeamId)?.name ?? String(version.eliminationResult.loserTeamId)} · Avanzan: {(Array.isArray(version.eliminationResult.advancingTeamIds) ? version.eliminationResult.advancingTeamIds : []).map((teamId) => data.teams.find((team) => team.id === teamId)?.name ?? String(teamId)).join(', ')}</small>}
+                       <code title={version.sourceHash}>{version.sourceHash.slice(0, 12)}…</code>
+                       {session?.token && room.assignmentId && <ActaVersionDetails token={session.token} assignmentId={room.assignmentId} versionId={version.id} />}
+                     </li>)}
+                   </ol> : <p className="muted">Todavía no hay actas oficiales sincronizadas.</p>}
+                 </div>}
+                 {!actaHistories[room.id] && !actaHistoryErrors[room.id] && <p className="muted">Consulta el historial y el contador de reescrituras de esta sala.</p>}
+               </section>
+               <div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div>
             </div>
           </div>
         </section>;
@@ -1408,7 +1629,7 @@ export default function App() {
       {view === 'settings' && <><div className="page-heading"><div><p className="eyebrow">CONFIGURACIÓN</p><h2>Formatos y torneo</h2><p className="muted">Administra presets independientes. Las asignaciones existentes conservan su copia de fases hasta que se active su ronda.</p></div><button className="button secondary" onClick={() => { if (!selectedPreset) return; setFormatDirty(true); updateData((current) => ({ ...current, formats: current.formats.map((format) => format.id === selectedPreset.id ? { ...format, phases: LEDU_PHASES.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })), version: format.version + 1, updatedAt: Date.now() } : format) })); }} disabled={!selectedPreset}><RotateCcw size={16} /> Restaurar fases LEDU</button></div>
       <section className="panel settings-panel"><label className="settings-name">Nombre del torneo<input className="table-input" value={data.tournamentName} onChange={(event) => updateData((current) => ({ ...current, tournamentName: event.target.value }))} /></label><label className="settings-name">Mínimo de jueces por sala<input className="table-input" type="number" min={1} max={25} step={1} value={data.minimumJudgesPerRoom ?? 1} onChange={(event) => updateData((current) => ({ ...current, minimumJudgesPerRoom: Math.max(1, Math.min(25, Math.trunc(Number(event.target.value) || 1))) }))} /></label><div className="format-catalog-toolbar"><label>Formato que estás editando<select className="format-select" value={editingFormatId} onChange={(event) => { setSelectedFormatId(event.target.value); setFormatDirty(false); setThresholdDrafts({}); }} disabled={!data.formats.length}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><div className="format-catalog-actions"><button className="button secondary" onClick={addFormat}><Plus size={15} /> Crear formato</button><button className="button secondary" onClick={renameSelectedFormat} disabled={!selectedPreset}>Renombrar</button><button className="button ghost danger-action" onClick={removeSelectedFormat} disabled={!selectedPreset || data.formats.length <= 1}><Trash2 size={15} /> Eliminar</button></div></div><div className="format-summary"><div><b>{configuredPhases.length} intervenciones</b><span>Duración teórica total: {formatTime(configuredPhases.reduce((total, phase) => total + phase.durationSeconds, 0))}</span></div><span className={formatDirty ? 'state-pill paused' : 'state-pill ready'}>{formatDirty ? 'Formato modificado' : 'Formato guardado'}</span></div>
       
-      <div className="format-table-wrap"><table className="format-table"><thead><tr><th>#</th><th>Intervención</th><th>Tipo</th><th>Postura</th><th>Quién interviene</th><th>Segundos</th><th>Avisos</th><th>Exceso</th><th>Orden</th></tr></thead><tbody>{configuredPhases.map((phase, index) => <tr key={phase.id}><td>{index + 1}</td><td><input className="table-input" aria-label={'Nombre intervención ' + (index + 1)} value={phase.name} onChange={(event) => updatePhase(phase.id, { name: event.target.value })} /></td><td><select className="format-select" aria-label="Tipo de intervención" value={phase.type ?? 'other'} onChange={(event) => updatePhase(phase.id, { type: event.target.value as Phase['type'] })}><option value="opening">Exposición inicial</option><option value="cross-examination">Examen cruzado</option><option value="rebuttal">Refutación</option><option value="cross-rebuttal">Refutación cruzada</option><option value="conclusion">Conclusión</option><option value="other">Otro</option></select></td><td><select className="format-select" aria-label="Postura" value={phase.side} onChange={(event) => updatePhase(phase.id, { side: event.target.value as Phase['side'] })}><option value="favor">A favor</option><option value="contra">En contra</option></select></td><td><input className="table-input" aria-label="Interviniente" value={phase.speaker} onChange={(event) => updatePhase(phase.id, { speaker: event.target.value })} /></td><td><div className="duration-input"><input type="number" min={1} max={7200} value={phase.durationSeconds} aria-label="Duración en segundos" onChange={(event) => updatePhase(phase.id, { durationSeconds: Math.max(1, Math.min(7200, Number(event.target.value) || 1)) })} /><small>{formatTime(phase.durationSeconds)}</small></div></td><td><input className="threshold-input" aria-label="Umbrales de aviso en segundos" title="Segundos respecto al final; admite negativos para el exceso" value={thresholdDrafts[phase.id] ?? (phase.warningThresholdsSeconds ?? []).join(', ')} onChange={(event) => { const value = event.target.value; setThresholdDrafts((drafts) => ({ ...drafts, [phase.id]: value })); if (/^\s*$|^\s*-?\d+\s*(,\s*-?\d+\s*)*$/.test(value)) updatePhase(phase.id, { warningThresholdsSeconds: value.trim() ? [...new Set(value.split(',').map((item) => Number(item.trim())))].sort((a, b) => Math.abs(b) - Math.abs(a)) : [] }); }} onBlur={() => { const value = thresholdDrafts[phase.id] ?? (phase.warningThresholdsSeconds ?? []).join(', '); updatePhase(phase.id, { warningThresholdsSeconds: [...new Set(value.split(',').map((item) => Number(item.trim())).filter(Number.isFinite))].sort((a, b) => Math.abs(b) - Math.abs(a)) }); setThresholdDrafts((drafts) => { const next = { ...drafts }; delete next[phase.id]; return next; }); }} /></td><td><label className="overtime-toggle"><input type="checkbox" checked={phase.allowOvertimeDisplay !== false} onChange={(event) => updatePhase(phase.id, { allowOvertimeDisplay: event.target.checked })} />Sí</label></td><td><div className="phase-order"><button className="icon-button" title="Subir intervención" aria-label="Subir intervención" disabled={index === 0} onClick={() => movePhase(index, -1)}><ArrowUp size={14} /></button><button className="icon-button" title="Bajar intervención" aria-label="Bajar intervención" disabled={index === configuredPhases.length - 1} onClick={() => movePhase(index, 1)}><ArrowDown size={14} /></button><button className="icon-button danger-action" title="Eliminar intervención" aria-label="Eliminar intervención" disabled={configuredPhases.length <= 1} onClick={() => removePhase(phase.id)}><Trash2 size={14} /></button></div></td></tr>)}</tbody></table></div><div className="settings-actions"><button className="button secondary" onClick={addPhase}><Plus size={16} /> Añadir intervención</button><p className="muted">Este preset es una plantilla. Las asignaciones conservarán sus fases actuales hasta que el organizador active la ronda que las contiene.</p></div></section></>}
+      <div className="format-table-wrap"><table className="format-table"><thead><tr><th>#</th><th>Intervención</th><th>Tipo</th><th>Postura</th><th>Quién interviene</th><th>Segundos</th><th>Avisos</th><th>Exceso</th><th>Orden</th></tr></thead><tbody>{configuredPhases.map((phase, index) => <tr key={phase.id}><td>{index + 1}</td><td><input className="table-input" aria-label={'Nombre intervención ' + (index + 1)} value={phase.name} onChange={(event) => updatePhase(phase.id, { name: event.target.value })} /></td><td><select className="format-select" aria-label="Tipo de intervención" value={phase.type ?? 'other'} onChange={(event) => updatePhase(phase.id, { type: event.target.value as Phase['type'] })}><option value="opening">Exposición inicial</option><option value="cross-examination">Examen cruzado</option><option value="rebuttal">Refutación</option><option value="cross-rebuttal">Refutación cruzada</option><option value="conclusion">Conclusión</option><option value="other">Otro</option></select></td><td><select className="format-select" aria-label="Postura" value={phase.side} onChange={(event) => updatePhase(phase.id, { side: event.target.value as Phase['side'] })}><option value="favor">A favor</option><option value="contra">En contra</option></select></td><td><input className="table-input" aria-label="Interviniente" value={phase.speaker} onChange={(event) => updatePhase(phase.id, { speaker: event.target.value })} /></td><td><div className="duration-input"><input type="number" min={1} max={7200} value={phase.durationSeconds} aria-label="Duración en segundos" onChange={(event) => updatePhase(phase.id, { durationSeconds: Math.max(1, Math.min(7200, Number(event.target.value) || 1)) })} /><small>{formatTime(phase.durationSeconds)}</small></div></td><td><input className="threshold-input" aria-label="Umbrales de aviso en segundos" title="Segundos respecto al final; admite negativos para el exceso" value={thresholdDrafts[phase.id] ?? (phase.warningThresholdsSeconds ?? []).join(', ')} onChange={(event) => { const value = event.target.value; setThresholdDrafts((drafts) => ({ ...drafts, [phase.id]: value })); if (/^\s*$|^\s*-?\d+\s*(,\s*-?\d+\s*)*$/.test(value)) updatePhase(phase.id, { warningThresholdsSeconds: value.trim() ? [...new Set(value.split(',').map((item) => Number(item.trim())))].sort((a, b) => Math.abs(b) - Math.abs(a)) : [] }); }} onBlur={() => { const value = thresholdDrafts[phase.id] ?? (phase.warningThresholdsSeconds ?? []).join(', '); updatePhase(phase.id, { warningThresholdsSeconds: [...new Set(value.split(',').map((item) => Number(item.trim())).filter(Number.isFinite))].sort((a, b) => Math.abs(b) - Math.abs(a)) }); setThresholdDrafts((drafts) => { const next = { ...drafts }; delete next[phase.id]; return next; }); }} /></td><td><label className="overtime-toggle"><input type="checkbox" checked={phase.allowOvertimeDisplay !== false} onChange={(event) => updatePhase(phase.id, { allowOvertimeDisplay: event.target.checked })} />Sí</label></td><td><div className="phase-order"><button className="icon-button" title="Subir intervención" aria-label="Subir intervención" disabled={index === 0} onClick={() => movePhase(index, -1)}><ArrowUp size={14} /></button><button className="icon-button" title="Bajar intervención" aria-label="Bajar intervención" disabled={index === configuredPhases.length - 1} onClick={() => movePhase(index, 1)}><ArrowDown size={14} /></button><button className="icon-button danger-action" title="Eliminar intervención" aria-label="Eliminar intervención" disabled={configuredPhases.length <= 1} onClick={() => removePhase(phase.id)}><Trash2 size={14} /></button></div></td></tr>)}</tbody></table></div><div className="settings-actions"><button className="button secondary" onClick={addPhase}><Plus size={16} /> Añadir intervención</button><p className="muted">Este preset es una plantilla. Las asignaciones conservarán sus fases actuales hasta que el organizador active la ronda que las contiene.</p></div></section>{apiConfigured && session?.token && <TabulationRulesPanel token={session.token} />}</>}
 
       <footer className="footer"><span>Debate Control · Herramienta de organización</span><span>{connected ? 'Conectado' : 'Conexión no confirmada'} · {lastSyncedAt ? 'Última sincronización: ' + new Date(lastSyncedAt).toLocaleTimeString('es-ES') : 'Sin sincronización confirmada'} · {apiConfigured ? 'Neon PostgreSQL' : 'Demo local'}</span></footer>
     </main>
@@ -1427,12 +1648,15 @@ function TournamentView({data, onSendToTabulation}:{data:Tournament; onSendToTab
  const [expandedRankings, setExpandedRankings] = useState<Record<string, boolean>>({});
  const teamsExpanded = Boolean(expandedRankings.teams);
  const visibleTeams = teamsExpanded ? teams : teams.slice(0, 5);
- return <><div className="page-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Torneo</h2><p className="muted">Clasificación de equipos y rankings de oradores de las rondas clasificatorias.</p></div><div className="top-actions"><button className="button secondary" onClick={onSendToTabulation} title="Copia equipos, oradores, jueces, incompatibilidades y salas a la tabulación local de este navegador"><ClipboardList size={16} /> Enviar a tabulación</button></div></div>
- {!hasScores&&<div className="notice"><BookOpen size={17}/><span>Aún no hay actas clasificatorias. Los rankings aparecerán cuando se registren puntuaciones.</span></div>}
- <section className="panel tournament-ranking-panel"><div className="panel-title"><div><h3>Clasificación por equipos</h3><p>Orden: victorias y, a continuación, suma de ítems. Los empates comparten posición.</p></div></div><div className="tournament-table-wrap"><table><thead><tr><th>Pos.</th><th>Equipo</th><th>Victorias</th><th>Derrotas</th><th>Puntuación de ítems</th><th>Debates</th></tr></thead><tbody>{visibleTeams.map(row=><tr key={row.teamId}><td><strong>{row.rank}</strong></td><td>{row.teamName}</td><td>{row.wins}</td><td>{row.losses}</td><td>{row.itemTotal}</td><td>{row.debates}</td></tr>)}</tbody></table>{!teams.length&&<Empty text="No hay equipos activos para clasificar."/>}</div><RankingExpandButton total={teams.length} expanded={teamsExpanded} onToggle={()=>setExpandedRankings(current=>({...current,teams:!current.teams}))}/></section>
- <div className="speaker-ranking-grid">{rankings.map(category=>{const expanded=Boolean(expandedRankings[category.key]);const visibleRows=expanded?category.rows:category.rows.slice(0,5);return <section className="panel speaker-ranking-panel" key={category.key}><div className="panel-title"><div><h3>{category.title}</h3><p>Sumatorio de puntuaciones · {category.rows.length?"ranking disponible":"sin evaluaciones"}</p></div></div>{category.rows.length?<><div className="tournament-table-wrap"><table><thead><tr><th>Pos.</th><th>Orador</th><th>Equipo</th><th>Ítems</th><th>Notas</th></tr></thead><tbody>{visibleRows.map(row=><tr key={row.speakerId}><td><strong>{row.rank}</strong></td><td>{row.speakerName}</td><td>{row.teamName}</td><td>{row.itemTotal}</td><td>{row.evaluations}</td></tr>)}</tbody></table></div><RankingExpandButton total={category.rows.length} expanded={expanded} onToggle={()=>setExpandedRankings(current=>({...current,[category.key]:!current[category.key]}))}/></>:<p className="muted tournament-empty">Todavía no hay puntuaciones aplicables a este ranking.</p>}</section>})}</div></>;
+ const fallback = <>
+  {!hasScores&&<div className="notice"><BookOpen size={17}/><span>Aún no hay actas clasificatorias. Los rankings aparecerán cuando se registren puntuaciones.</span></div>}
+  <section className="panel tournament-ranking-panel"><div className="panel-title"><div><h3>Clasificación por equipos</h3><p>Orden: victorias y, a continuación, suma de ítems. Los empates comparten posición.</p></div></div><div className="tournament-table-wrap"><table><thead><tr><th>Pos.</th><th>Equipo</th><th>Victorias</th><th>Derrotas</th><th>Puntuación de ítems</th><th>Debates</th></tr></thead><tbody>{visibleTeams.map(row=><tr key={row.teamId}><td><strong>{row.rank}</strong></td><td>{row.teamName}</td><td>{row.wins}</td><td>{row.losses}</td><td>{row.itemTotal}</td><td>{row.debates}</td></tr>)}</tbody></table>{!teams.length&&<Empty text="No hay equipos activos para clasificar."/>}</div><RankingExpandButton total={teams.length} expanded={teamsExpanded} onToggle={()=>setExpandedRankings(current=>({...current,teams:!current.teams}))}/></section>
+  <div className="speaker-ranking-grid">{rankings.map(category=>{const expanded=Boolean(expandedRankings[category.key]);const visibleRows=expanded?category.rows:category.rows.slice(0,5);return <section className="panel speaker-ranking-panel" key={category.key}><div className="panel-title"><div><h3>{category.title}</h3><p>Sumatorio de puntuaciones · {category.rows.length?"ranking disponible":"sin evaluaciones"}</p></div></div>{category.rows.length?<><div className="tournament-table-wrap"><table><thead><tr><th>Pos.</th><th>Orador</th><th>Equipo</th><th>Ítems</th><th>Notas</th></tr></thead><tbody>{visibleRows.map(row=><tr key={row.speakerId}><td><strong>{row.rank}</strong></td><td>{row.speakerName}</td><td>{row.teamName}</td><td>{row.itemTotal}</td><td>{row.evaluations}</td></tr>)}</tbody></table></div><RankingExpandButton total={category.rows.length} expanded={expanded} onToggle={()=>setExpandedRankings(current=>({...current,[category.key]:!current[category.key]}))}/></>:<p className="muted tournament-empty">Todavía no hay puntuaciones aplicables a este ranking.</p>}</section>})}</div>
+ </>;
+ return <><div className="page-heading"><div><p className="eyebrow">CLASIFICACIÓN</p><h2>Torneo</h2><p className="muted">La clasificación oficial de Tabulación se muestra cuando hay un torneo local vinculado en este navegador; si no, se usa la clasificación de scorecards del Gestor.</p></div><div className="top-actions"><button className="button secondary" onClick={onSendToTabulation} title="Copia equipos, oradores, jueces, incompatibilidades y salas a la tabulación local de este navegador"><ClipboardList size={16} /> Enviar a tabulación</button></div></div>
+  <TabulationTournamentRanking remoteId={data.remoteId} managerTeams={data.teams} fallback={fallback}/>
+ </>;
 }
-
 function ScoringView({
   data, scoring, rooms, selectedRoundId, onUpdateRoundScoreType, scoreCategoryDraft,
   onCategoryDraftChange, onAddCategory, onUpdateCategory, onRemoveCategory,

@@ -20,6 +20,7 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
   const visibleRounds = blindHidden ? [] : projection && firstSilent && !(settings.blindQualifying && qualifyingFinished) ? rounds.filter((round) => round.number < firstSilent.number) : rounds;
   const [cutoff, setCutoff] = useState<number | 'all'>('all');
   const [expandedRankings, setExpandedRankings] = useState<string[]>([]);
+  const [expandedTeams, setExpandedTeams] = useState<string[]>([]);
   const upTo = cutoff === 'all' ? visibleRounds.at(-1)?.number : Math.min(cutoff, visibleRounds.at(-1)?.number ?? cutoff);
   const options = { outcomes, upToRoundNumber: upTo };
   const sections = useMemo(() => {
@@ -32,6 +33,7 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
   const teamName = (id: string) => tournament.teams.find((team) => team.id === id)?.name ?? id;
 
   const fallenFrom = new Map(tournament.teams.filter((team) => team.fallenFromRound !== undefined).map((team) => [team.id, team.fallenFromRound!]));
+  const fallenTeams = tournament.teams.filter((team) => team.fallenFromRound !== undefined && !team.swing);
   const teamsById = new Map(tournament.teams.map((team) => [team.id, team]));
   const breakStage = eliminationRoundName(Math.max(1, Math.floor(settings.breakSize / 2))).toLowerCase();
   const firstElimination = eliminationRounds(tournament)[0];
@@ -82,7 +84,8 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
     {blindHidden && <section className="panel tab-blind"><h3>Rondas a ciegas</h3><p>La clasificación se publicará al terminar la fase clasificatoria.</p></section>}
     {projection && !blindHidden && firstSilent && visibleRounds.length < rounds.length && <p className="muted">Clasificación hasta antes de {firstSilent.name}: las rondas cerradas no se muestran.</p>}
     {blindHidden ? null : !sections.length ? <Empty text="La clasificación aparecerá cuando haya rondas clasificatorias." /> : <div className={sections.length > 1 ? 'tab-standings-grid' : ''}>
-      {sections.map((section) => {
+      {sections.map((section, sectionIndex) => {
+        const visibleTeamRows = expandedTeams.includes(section.title) || projection ? section.rows : section.rows.slice(0, 5);
         const ties = tiedBlocks(section.rows);
         const manual = manualBlocks(section.rows);
         const qualified = qualifiedIds(section.rows);
@@ -91,11 +94,12 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
           <div className="panel-title"><div><h3>{section.title}</h3>{tournament.settings.stage === 'groups' && <p>Pasan los {tournament.settings.groupAdvance} primeros.</p>}
             {qualified.size > 0 && <p className="tab-cut-note">Pasan a {breakStage === 'final' ? 'la final' : breakStage} los {settings.breakSize} primeros que pueden clasificarse{provisionalCut ? ' (corte provisional)' : ''}.</p>}</div></div>
           <div className="tournament-table-wrap tab-standings">
+            {sectionIndex === 0 && fallenTeams.length > 0 && <p className="muted tab-fallen-summary">Fuera de la clasificación: {fallenTeams.map((team) => team.name + ' (caído desde la ronda ' + team.fallenFromRound + ')').join(' · ')}. Los equipos caídos no pueden clasificarse.</p>}
             <table>
               <thead><tr><th>Pos.</th><th>Equipo</th><th>V</th><th>D</th>{joint
                 ? <><th title="Ítems netos: ítems menos faltas">Ítems</th><th>Graves</th><th>Leves</th></>
                 : <><th>Votos</th><th>Puntos</th><th>Media</th>{settings.speakerScores && <th>Oradores</th>}<th title="Graves / leves / avisos">Faltas</th></>}</tr></thead>
-              <tbody>{section.rows.map((row, index) => <Fragment key={row.teamId}><tr className={((settings.stage === 'groups' ? row.rank <= settings.groupAdvance : qualified.has(row.teamId)) ? 'tab-qualified' : '') + (fallenFrom.has(row.teamId) ? ' tab-row-muted' : '')}>
+              <tbody>{visibleTeamRows.map((row, index) => <Fragment key={row.teamId}><tr className={((settings.stage === 'groups' ? row.rank <= settings.groupAdvance : qualified.has(row.teamId)) ? 'tab-qualified' : '') + (fallenFrom.has(row.teamId) ? ' tab-row-muted' : '')}>
                 <td><strong>{row.rank}</strong>{row.tied && <span className="tab-tie" title="Empate sin resolver">=</span>}{row.decidedByLots && <span className="tab-tie" title="Desempatado por sorteo">S</span>}</td>
                 <td><b>{row.name}</b>{fallenFrom.has(row.teamId) && <span className="state-pill unassigned tab-fallen-pill">caído desde la ronda {fallenFrom.get(row.teamId)}</span>}<small className="tab-cell-sub">{row.institution}</small></td>
                 <td>{row.wins}</td><td>{row.losses}</td>
@@ -114,6 +118,7 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
               </Fragment>)}</tbody>
             </table>
           </div>
+          {section.rows.length > 5 && !projection && <button type="button" className="text-button tab-no-print" aria-expanded={expandedTeams.includes(section.title)} onClick={() => setExpandedTeams((current) => current.includes(section.title) ? current.filter((item) => item !== section.title) : [...current, section.title])}>{expandedTeams.includes(section.title) ? 'Ver menos' : 'Ver más (' + (section.rows.length - 5) + ' equipos)'}</button>}
           {(ties.length > 0 || manual.length > 0) && <div className="tab-ties tab-no-project">
             {ties.map((block) => <div key={block.join()} className="tab-tie-block">
               <span>Empate sin resolver entre {block.map(teamName).join(', ')}.</span>
@@ -139,15 +144,15 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
         <div className="panel-title"><div><h3>{ranking.title}</h3></div></div>
         {ranking.rows.length ? <div className="tournament-table-wrap"><table>
           <thead><tr><th>Pos.</th><th>Orador</th><th>Equipo</th><th>{tournament.settings.speakerMetric === 'sum' ? 'Suma' : 'Media'}</th><th>Notas</th></tr></thead>
-          <tbody>{ranking.rows.slice(0, projection || !expandedRankings.includes(ranking.key) ? 10 : undefined).map((row) => <tr key={row.speakerId} className={joint && ranking.key === 'all' && row.rank <= 2 ? 'tab-qualified' : ''}>
+          <tbody>{ranking.rows.slice(0, projection ? 5 : expandedRankings.includes(ranking.key) ? undefined : 5).map((row) => <tr key={row.speakerId} className={joint && ranking.key === 'all' && row.rank <= 2 ? 'tab-qualified' : ''}>
             <td><strong>{row.rank}</strong></td>
             <td>{row.name}{joint && ranking.key === 'all' && row.rank <= 2 && <span className="state-pill ready tab-fallen-pill" title="ADUMA art. 43">final de discursos</span>}
               {row.fallenRivalDebates > 0 && <span className="tab-tie" title={'Su equipo se enfrentó a un equipo caído: tiene ' + row.fallenRivalDebates + ' debate(s) menos puntuado(s). Lo decide el comité.'}>†</span>}</td>
             <td>{row.teamName}</td><td>{formatNumber(row.value)}</td><td>{row.count}</td>
           </tr>)}</tbody>
         </table></div> : <p className="muted tournament-empty">Sin notas todavía.</p>}
-        {ranking.rows.length > 10 && !projection && <button type="button" className="text-button tab-no-print" onClick={() => setExpandedRankings((current) => (current.includes(ranking.key) ? current.filter((key) => key !== ranking.key) : [...current, ranking.key]))}>
-          {expandedRankings.includes(ranking.key) ? 'Ver solo los 10 primeros' : 'Ver todos (' + ranking.rows.length + ')'}
+        {ranking.rows.length > 5 && !projection && <button type="button" className="text-button tab-no-print" onClick={() => setExpandedRankings((current) => (current.includes(ranking.key) ? current.filter((key) => key !== ranking.key) : [...current, ranking.key]))}>
+          {expandedRankings.includes(ranking.key) ? 'Ver menos' : 'Ver más (' + (ranking.rows.length - 5) + ' oradores)'}
         </button>}
       </section>)}</div>
     </>}

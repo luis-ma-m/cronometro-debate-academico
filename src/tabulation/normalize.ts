@@ -11,6 +11,7 @@ import {
   type TabJointActa,
   type TabJudgeConflict,
   type TabLogEntry,
+  type PanelEntityIdMap,
   type TabPenalties,
   type TabRound,
   type TabRoundDraft,
@@ -55,6 +56,15 @@ function normalizeRubric(value: unknown, fallback: TabRubricItem[]): TabRubricIt
   return uniqueById(list(value).filter((item) => isText(item.id)).map((item) => ({
     id: item.id as string, name: text(item.name, item.id as string), section: text(item.section), description: text(item.description),
   })));
+}
+
+function normalizePanelEntityIdMap(raw: unknown): PanelEntityIdMap | undefined {
+  if (!isObject(raw)) return undefined;
+  const read = (value: unknown): Record<string, string> => {
+    if (!isObject(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => entry[0].length > 0 && isText(entry[1])));
+  };
+  return { teams: read(raw.teams), speakers: read(raw.speakers), judges: read(raw.judges), venues: read(raw.venues) };
 }
 
 function normalizeSettings(raw: unknown): TabSettings {
@@ -191,6 +201,7 @@ function normalizeRound(round: Json, references: References): { round: TabRound;
       judgeIds: judgeList,
       chairId: text(debate.chairId),
       ...(typeof debate.bracketSlot === 'number' ? { bracketSlot: debate.bracketSlot } : {}),
+      ...(isText(debate.managerAssignmentId) ? { managerAssignmentId: debate.managerAssignmentId } : {}),
       ...(result ? { result } : {}),
     };
   }));
@@ -207,6 +218,7 @@ function normalizeRound(round: Json, references: References): { round: TabRound;
       silent: flag(round.silent, false),
       debates,
       createdAt: num(round.createdAt, 0),
+      ...(isText(round.managerRoundId) ? { managerRoundId: round.managerRoundId } : {}),
       ...(typeof round.pushedAt === 'number' ? { pushedAt: round.pushedAt } : {}),
     },
   };
@@ -328,7 +340,7 @@ export function normalizeTabTournament(raw: unknown): NormalizeResult {
     rounds,
     breakSeeds: ids(raw.breakSeeds),
     manualOrder: ids(raw.manualOrder),
-    ...(isObject(raw.panelLink) ? { panelLink: { tournamentName: text(raw.panelLink.tournamentName), linkedAt: num(raw.panelLink.linkedAt, 0) } } : {}),
+    ...(isObject(raw.panelLink) ? { panelLink: { tournamentName: text(raw.panelLink.tournamentName), linkedAt: num(raw.panelLink.linkedAt, 0), ...(typeof raw.panelLink.remoteId === 'string' && raw.panelLink.remoteId ? { remoteId: raw.panelLink.remoteId } : {}), ...(Number.isInteger(raw.panelLink.remoteRevision) ? { remoteRevision: raw.panelLink.remoteRevision as number } : {}), ...(isFiniteNumber(raw.panelLink.remoteUpdatedAt) ? { remoteUpdatedAt: raw.panelLink.remoteUpdatedAt } : {}), ...(isObject(raw.panelLink.idMap) ? { idMap: normalizePanelEntityIdMap(raw.panelLink.idMap) } : {}) } } : {}),
     ...(isObject(raw.whatsapp) ? { whatsapp: { deskPhone: text(raw.whatsapp.deskPhone), baseUrl: text(raw.whatsapp.baseUrl) } } : {}),
     judgeConflicts,
     ...(draftRound ? { draftRound } : {}),

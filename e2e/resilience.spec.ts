@@ -9,8 +9,16 @@ test('sin conexión: la mesa hace una ronda entera y el juez solo necesita red p
   await page.getByRole('button', { name: 'Nueva ronda (Ronda 1)' }).click();
   await confirmOpenDraft(page);
   await expect(page.locator('.tab-round-screen')).toContainText('frente a');
+  // The desk can generate the snapshot offline; opening the public acta URL
+  // is a network navigation, so reconnect before testing that hand-off.
+  await context.setOffline(false);
   await page.locator('.tab-whatsapp summary').click();
-  const actaUrl = (await page.getByRole('link', { name: /Abrir el acta de/ }).first().getAttribute('href'))!;
+  const actaPopupPromise = page.waitForEvent('popup');
+  await page.getByRole('button', { name: 'Abrir el acta' }).first().click();
+  const actaPopup = await actaPopupPromise;
+  await expect.poll(() => actaPopup.url()).toContain('/acta#A2');
+  const actaUrl = actaPopup.url();
+  await actaPopup.close();
 
   await context.setOffline(false);
   const phone = await context.newPage();
@@ -104,4 +112,35 @@ test('si el código de la página no llega a descargarse, lo dice en vez de qued
   await expect(page.getByRole('button', { name: 'Recargar' })).toBeVisible();
   await page.goto('/acta#A1-x');
   await expect(page.getByRole('alert')).toContainText('No se ha podido cargar el acta');
+});
+
+
+test('F3: IndexedDB v1 migra a v2 sin perder la outbox y mantiene exclusión entre pestañas', async ({ page }) => {
+  await page.goto('/tabulacion');
+  await page.waitForFunction(() => Boolean((window as Window & {
+    __LEDU_E2E_SYNC_OUTBOX__?: { run: () => Promise<unknown> };
+  }).__LEDU_E2E_SYNC_OUTBOX__));
+
+  const result = await page.evaluate(async () => {
+    const harness = (window as Window & {
+      __LEDU_E2E_SYNC_OUTBOX__?: { run: () => Promise<{
+        migratedCount: number;
+        migratedOperationId: string | undefined;
+        migratedPayload: unknown;
+        recoveredLeases: number;
+        claimCount: number;
+        upgraded: { version: number; indexes: string[] };
+      }> };
+    }).__LEDU_E2E_SYNC_OUTBOX__;
+    if (!harness) throw new Error('No se ha instalado el harness E2E de IndexedDB.');
+    return harness.run();
+  });
+
+  expect(result.migratedCount).toBe(1);
+  expect(result.migratedOperationId).toBe('legacy-pending-operation');
+  expect(result.migratedPayload).toEqual({ roundName: 'Ronda conservada' });
+  expect(result.recoveredLeases).toBe(1);
+  expect(result.claimCount).toBe(1);
+  expect(result.upgraded.version).toBe(2);
+  expect(result.upgraded.indexes).toContain('byTournamentCreatedAt');
 });

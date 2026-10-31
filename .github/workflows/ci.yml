@@ -31,6 +31,7 @@ jobs:
       - run: npm run test:e2e
         env:
           E2E_PREVIEW: '1'
+          VITE_E2E_PREVIEW: '1'
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

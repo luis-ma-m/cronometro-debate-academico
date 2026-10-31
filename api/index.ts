@@ -1,7 +1,13 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
-import { checkDatabase, databaseConfigured } from "./db.js";
-import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
+import { checkDatabase, databaseConfigured, getPool } from "../server/db.js";
+import { readTabulationActaHistory, readTabulationActaVersion } from "../server/tabulation-acta-history.js";
+import { previewTabulationActa, saveTabulationActa } from "../server/tabulation-acta-write.js";
+import { publishTabulationRound as publishTabulationRoundOperation } from "../server/tabulation-round-publish.js";
+import { presetSettings } from "../src/tabulation/presets.js";
+import { validateTabulationSettings as validateTabulationSettingsPayload, TabulationSettingsValidationError } from "../server/tabulation-settings-validation.js";
+import { TAB_SCHEMA_VERSION, type TabSettings } from "../src/tabulation/types.js";
+import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "../server/postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
 import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
@@ -24,7 +30,7 @@ import {
   validateTournamentInput,
   type SheetName,
   type SheetRow,
-} from "./core.js";
+} from "../server/core.js";
 
 type RequestLike = {
   method?: string;
@@ -172,6 +178,7 @@ function tournamentFromData(data: SheetData): Tournament {
     return room;
   });
   return {
+    ...(configValue(config, "remoteId") ? { remoteId: configValue(config, "remoteId") } : {}),
     tournamentName: str(configValue(config, "tournamentName")) || "Torneo LEDU",
     rounds,
     scoring,
@@ -348,6 +355,38 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "getTournament":
       await requireSession(payload.token);
       return tournamentFromData(await loadSheetData());
+    case "createActaShortLink": await requireSession(payload.token); return createActaShortLink(payload);
+    case "listActaShortLinks": await requireSession(payload.token); return listActaShortLinks(payload);
+    case "updateActaShortLinkExpiry": await requireSession(payload.token); return updateActaShortLinkExpiry(payload);
+    case "revokeActaShortLinks": await requireSession(payload.token); return revokeActaShortLinks(payload);
+    case "getTabulationSettings":
+      await requireSession(payload.token);
+      return getTabulationSettings();
+    case "saveTabulationSettings":
+      await requireSession(payload.token);
+      return saveTabulationSettings(payload);
+    case "getTabulationActaHistory":
+      await requireSession(payload.token);
+      return getTabulationActaHistory(payload);
+    case "getTabulationActaVersion":
+      await requireSession(payload.token);
+      return getTabulationActaVersion(payload);
+    case "previewTabulationActa":
+      await requireSession(payload.token);
+      return previewTabulationActa({ assignmentId: str(payload.assignmentId), source: payload.source });
+    case "saveTabulationActa":
+      await requireSession(payload.token);
+      return saveTabulationActa({
+        operationId: str(payload.operationId),
+        assignmentId: str(payload.assignmentId),
+        source: payload.source,
+        expectedCurrentSourceId: payload.expectedCurrentSourceId === null ? null : str(payload.expectedCurrentSourceId),
+        confirmReplace: payload.confirmReplace === true,
+        expectedSettingsRevision: num(payload.expectedSettingsRevision),
+      });
+    case "publishTabulationRound":
+      await requireSession(payload.token);
+      return publishTabulationRoundOperation(payload.operation);
     case "getPublicRoom":
       return publicRoomPayload(tournamentFromData(await loadSheetData()), str(payload.roomId));
     case "roomHeartbeat":
@@ -373,6 +412,195 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       return updateRoomTimer(payload);
     default:
       throw new ApiError("UNKNOWN_ACTION", "Acción no reconocida.");
+  }
+}
+
+type PersistedTabulationSettings = {
+  schemaVersion: number;
+  tournamentId: string;
+  revision: number;
+  settings: TabSettings;
+  updatedAt: number | null;
+  updatedBy: string;
+};
+
+const TABULATION_SETTINGS_DEFAULT_PRESET = "ledu-groups" as const;
+
+function validateTabulationSettings(value: unknown): TabSettings {
+  try {
+    return validateTabulationSettingsPayload(value);
+  } catch (error) {
+    if (error instanceof TabulationSettingsValidationError) {
+      throw new ApiError("INVALID_PAYLOAD", error.message);
+    }
+    throw error;
+  }
+}
+
+function defaultPersistedTabulationSettings(tournamentId: string): PersistedTabulationSettings {
+  return {
+    schemaVersion: TAB_SCHEMA_VERSION,
+    tournamentId,
+    revision: 0,
+    settings: presetSettings(TABULATION_SETTINGS_DEFAULT_PRESET),
+    updatedAt: null,
+    updatedBy: "system-default:" + TABULATION_SETTINGS_DEFAULT_PRESET,
+  };
+}
+
+function isMissingTabulationSettingsMigration(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && ["42P01", "42703"].includes(String((error as { code?: unknown }).code)));
+}
+
+async function getTabulationSettings(): Promise<PersistedTabulationSettings> {
+  const pool = getPool();
+  let result;
+  try {
+    result = await pool.query("SELECT schema_version, revision, settings, updated_at, updated_by, tournament_id FROM tabulation_settings WHERE id = 1");
+  } catch (error) {
+    if (isMissingTabulationSettingsMigration(error)) throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar las migraciones 0010_tabulation_settings.sql y 0011_tournament_identity.sql en la base de datos del entorno. No se ha modificado ningún dato.", 503);
+    throw error;
+  }
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row || !row.tournament_id) throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0011_tournament_identity.sql en la base de datos del entorno.", 503);
+  if (!row.settings || Object.keys(row.settings as object).length === 0) return defaultPersistedTabulationSettings(str(row.tournament_id));
+  const schemaVersion = num(row.schema_version);
+  if (schemaVersion > TAB_SCHEMA_VERSION) {
+    throw new ApiError("SCHEMA_TOO_NEW", "Las reglas fueron guardadas con una versión más reciente. Esta versión entra en solo lectura; actualiza la aplicación.", 409);
+  }
+  return {
+    schemaVersion,
+    tournamentId: str(row.tournament_id),
+    revision: num(row.revision),
+    settings: validateTabulationSettings(row.settings),
+    updatedAt: row.updated_at ? new Date(String(row.updated_at)).getTime() : null,
+    updatedBy: str(row.updated_by) || "unknown",
+  };
+}
+
+async function getTabulationActaVersion(payload: Record<string, unknown>) {
+  const assignmentId = str(payload.assignmentId).trim();
+  const versionId = str(payload.versionId).trim();
+  if (!assignmentId || assignmentId.length > 128 || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(versionId)) {
+    throw new ApiError("INVALID_PAYLOAD", "La asignación o versión solicitada no es válida.");
+  }
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const version = await readTabulationActaVersion(client, assignmentId, versionId);
+    await client.query("COMMIT");
+    return version;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    if (isMissingTabulationSettingsMigration(error)) {
+      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar las migraciones 0012_tabulation_acta_sources.sql y 0013_tabulation_elimination_sources.sql en la base de datos de este entorno. No se ha modificado ningún dato.", 503);
+    }
+    throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido consultar el detalle de la versión del acta.", 503);
+  } finally {
+    client.release();
+  }
+}
+
+async function getTabulationActaHistory(payload: Record<string, unknown>) {
+  const assignmentId = str(payload.assignmentId).trim();
+  if (!assignmentId || assignmentId.length > 128) {
+    throw new ApiError("INVALID_PAYLOAD", "Indica una asignación válida para consultar su historial.");
+  }
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const history = await readTabulationActaHistory(client, assignmentId);
+    await client.query("COMMIT");
+    return history;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    if (isMissingTabulationSettingsMigration(error)) {
+      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar las migraciones 0012_tabulation_acta_sources.sql y 0013_tabulation_elimination_sources.sql en la base de datos de este entorno. No se ha modificado ningún dato.", 503);
+    }
+    throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido consultar el historial de actas.", 503);
+  } finally {
+    client.release();
+  }
+}
+
+async function saveTabulationSettings(payload: Record<string, unknown>): Promise<PersistedTabulationSettings> {
+  const settings = validateTabulationSettings(payload.settings);
+  const schemaVersion = num(payload.schemaVersion);
+  if (schemaVersion !== TAB_SCHEMA_VERSION) throw new ApiError("SCHEMA_MISMATCH", "Actualiza la aplicación antes de guardar estas reglas.", 409);
+  const expectedRevision = num(payload.expectedRevision);
+  const operationId = str(payload.operationId);
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(operationId)) throw new ApiError("INVALID_PAYLOAD", "Falta un identificador de operación válido.");
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) throw new ApiError("INVALID_PAYLOAD", "La revisión esperada no es válida.");
+  const payloadHash = sha256(JSON.stringify({ schemaVersion, expectedRevision, settings }));
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const priorOperation = await client.query(
+      "SELECT payload_hash, response FROM tabulation_settings_operations WHERE operation_id = $1",
+      [operationId],
+    );
+    if (priorOperation.rows[0]) {
+      const prior = priorOperation.rows[0] as { payload_hash: string; response: PersistedTabulationSettings };
+      if (prior.payload_hash !== payloadHash) throw new ApiError("IDEMPOTENCY_MISMATCH", "El identificador de operación ya se utilizó con otro contenido.", 409);
+      await client.query("COMMIT");
+      return prior.response;
+    }
+    const currentResult = await client.query("SELECT revision, tournament_id FROM tabulation_settings WHERE id = 1 FOR UPDATE");
+    // Another request may have committed the same operation while this request waited for the row lock.
+    const replayAfterLock = await client.query(
+      "SELECT payload_hash, response FROM tabulation_settings_operations WHERE operation_id = $1",
+      [operationId],
+    );
+    if (replayAfterLock.rows[0]) {
+      const prior = replayAfterLock.rows[0] as { payload_hash: string; response: PersistedTabulationSettings };
+      if (prior.payload_hash !== payloadHash) throw new ApiError("IDEMPOTENCY_MISMATCH", "El identificador de operación ya se utilizó con otro contenido.", 409);
+      await client.query("COMMIT");
+      return prior.response;
+    }
+    const currentRow = currentResult.rows[0] as { revision?: unknown; tournament_id?: unknown } | undefined;
+    const currentRevision = num(currentRow?.revision);
+    const tournamentId = str(currentRow?.tournament_id);
+    if (!tournamentId) throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0011_tournament_identity.sql en la base de datos del entorno.", 503);
+    if (currentRevision !== expectedRevision) {
+      throw new ApiError("REVISION_CONFLICT", "Las reglas han cambiado en otro dispositivo. Recarga la configuración antes de guardar.", 409);
+    }
+    const nextRevision = currentRevision + 1;
+    const now = Date.now();
+    const response: PersistedTabulationSettings = {
+      schemaVersion: TAB_SCHEMA_VERSION, tournamentId, revision: nextRevision,
+      settings, updatedAt: now, updatedBy: "admin",
+    };
+    await client.query(
+      "UPDATE tabulation_settings SET schema_version = $1, revision = $2, settings = $3::jsonb, updated_at = now(), updated_by = $4 WHERE id = 1",
+      [TAB_SCHEMA_VERSION, nextRevision, JSON.stringify(settings), "admin"],
+    );
+    await client.query(
+      "INSERT INTO tabulation_settings_versions(tournament_id, revision, schema_version, settings, operation_id, updated_by) VALUES ($1, $2, $3, $4::jsonb, $5, $6)",
+      [tournamentId, nextRevision, TAB_SCHEMA_VERSION, JSON.stringify(settings), operationId, "admin"],
+    );
+    await client.query(
+      "INSERT INTO tabulation_settings_operations(operation_id, payload_hash, response) VALUES ($1, $2, $3::jsonb)",
+      [operationId, payloadHash, JSON.stringify(response)],
+    );
+    await client.query(
+      "INSERT INTO audit_events(event_key, event_type, details) VALUES ($1, $2, $3::jsonb)",
+      ["tabulation-settings:" + operationId, "tabulation_settings_updated", JSON.stringify({ revision: nextRevision, schemaVersion: TAB_SCHEMA_VERSION, presetId: settings.presetId, operationId, updatedBy: "admin" })],
+    );
+    await client.query("UPDATE tournament_settings SET revision = revision + 1, updated_at = now() WHERE id = 1");
+    await client.query("COMMIT");
+    return response;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    if (isMissingTabulationSettingsMigration(error)) {
+      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0010_tabulation_settings.sql en la base de datos del entorno. No se ha modificado ningún dato.", 503);
+    }
+    throw new ApiError("DATABASE_UNAVAILABLE", "No se han podido guardar las reglas de tabulación en PostgreSQL.", 503);
+  } finally {
+    client.release();
   }
 }
 
@@ -1033,6 +1261,47 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
 }
 
 
+
+type ShortLinkRow = { id:string; tournament_id:string; debate_id:string; snapshot:unknown; snapshot_sha256:string; expires_at:Date|string|null; revoked_at:Date|string|null; created_at:Date|string };
+function canonicalShortLinkJson(value:unknown):string {
+  if(Array.isArray(value)) return "["+value.map(canonicalShortLinkJson).join(",")+"]";
+  if(value && typeof value==="object"){const r=value as Record<string,unknown>;return "{"+Object.keys(r).sort().map(k=>JSON.stringify(k)+":"+canonicalShortLinkJson(r[k])).join(",")+"}";}
+  return JSON.stringify(value) ?? "null";
+}
+function validActaSnapshot(value:unknown):value is Record<string,unknown>{
+  if(!value||typeof value!=="object"||Array.isArray(value))return false;
+  const v=value as Record<string,unknown>, round=v.round as Record<string,unknown>|undefined, rules=v.rules as Record<string,unknown>|undefined;
+  return (v.version===1||v.version===2)&&typeof v.debate==="string"&&v.debate.length>0&&v.debate.length<=200
+    &&typeof v.key==="string"&&v.key.length>0&&v.key.length<=100&&!!round&&Number.isInteger(round.number)
+    &&typeof round.name==="string"&&typeof round.elimination==="boolean"&&Array.isArray(v.teams)&&v.teams.length===2
+    &&v.teams.every(t=>!!t&&typeof t==="object"&&typeof (t as Record<string,unknown>).id==="string"&&typeof (t as Record<string,unknown>).name==="string"&&Array.isArray((t as Record<string,unknown>).members))
+    &&Array.isArray(v.jury)&&v.jury.length<=20&&v.jury.every(n=>typeof n==="string")&&!!rules&&Array.isArray(rules.rubric)&&rules.rubric.length<=100
+    &&typeof v.venue==="string"&&typeof v.desk==="string";
+}
+function shortLinkId():string{const a="0123456789ABCDEFGHJKMNPQRSTVWXYZ";let n=0n;for(const b of randomBytes(5))n=(n<<8n)|BigInt(b);let s="";for(let i=0;i<8;i++){s=a[Number(n&31n)]+s;n>>=5n;}return s;}
+function expiryDate(value:unknown):Date{const d=Number(value);if(![1,7,30,90,365].includes(d))throw new ApiError("INVALID_EXPIRY","Elige una caducidad de 1, 7, 30, 90 o 365 días.");return new Date(Date.now()+d*86400000);}
+function shortLinkPublic(r:ShortLinkRow){return{id:r.id,tournamentId:r.tournament_id,debateId:r.debate_id,createdAt:new Date(r.created_at).getTime(),expiresAt:r.expires_at?new Date(r.expires_at).getTime():null,revokedAt:r.revoked_at?new Date(r.revoked_at).getTime():null};}
+async function createActaShortLink(p:Record<string,unknown>):Promise<unknown>{
+ const tournamentId=str(p.tournamentId).trim(),debateId=str(p.debateId).trim(),snapshot=p.snapshot;
+ if(!/^[a-zA-Z0-9_-]{1,128}$/.test(tournamentId)||!/^[a-zA-Z0-9_-]{1,200}$/.test(debateId)||!validActaSnapshot(snapshot))throw new ApiError("INVALID_SHORT_LINK","El snapshot del acta no es válido.");
+ const json=canonicalShortLinkJson(snapshot);if(new TextEncoder().encode(json).byteLength>32768)throw new ApiError("SHORT_LINK_TOO_LARGE","El acta supera el tamaño máximo permitido.");
+ const rawIdem=str(p.idempotencyKey).trim();if(!/^[a-zA-Z0-9_-]{8,128}$/.test(rawIdem))throw new ApiError("INVALID_IDEMPOTENCY_KEY","Clave de idempotencia no válida.");const hash=sha256(json),idem=sha256("acta-short-link:v1|"+tournamentId+"|"+debateId+"|"+rawIdem),expires=expiryDate(p.expiryDays??30),client=await getPool().connect();
+ try{
+  await client.query("BEGIN");
+  const prior=await client.query("SELECT * FROM acta_short_links WHERE tournament_id=$1 AND idempotency_key=$2 FOR UPDATE",[tournamentId,idem]);
+  if(prior.rows[0]){const row=prior.rows[0] as ShortLinkRow;if(row.snapshot_sha256!==hash)throw new ApiError("IDEMPOTENCY_CONFLICT","La clave de idempotencia tiene otro contenido.",409);await client.query("COMMIT");return shortLinkPublic(row);}
+  let created:ShortLinkRow|undefined;
+  for(let i=0;i<8&&!created;i++){const r=await client.query("INSERT INTO acta_short_links(id,tournament_id,debate_id,snapshot,snapshot_sha256,idempotency_key,created_by,expires_at) VALUES($1,$2,$3,$4::jsonb,$5,$6,'manager',$7) ON CONFLICT DO NOTHING RETURNING *",[shortLinkId(),tournamentId,debateId,json,hash,idem,expires]);if(r.rows[0])created=r.rows[0] as ShortLinkRow;else{const raced=await client.query("SELECT * FROM acta_short_links WHERE tournament_id=$1 AND idempotency_key=$2 FOR UPDATE",[tournamentId,idem]);if(raced.rows[0]){const prior=raced.rows[0] as ShortLinkRow;if(prior.snapshot_sha256!==hash)throw new ApiError("IDEMPOTENCY_CONFLICT","La clave de idempotencia tiene otro contenido.",409);await client.query("COMMIT");return shortLinkPublic(prior);}}}
+  if(!created)throw new ApiError("SHORT_LINK_COLLISION","No se ha podido reservar un identificador único.",503);
+  await client.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'created','manager',$2::jsonb)",[created.id,JSON.stringify({expiresAt:expires.toISOString(),snapshotHash:hash})]);
+  await client.query("COMMIT");return shortLinkPublic(created);
+ }catch(e){await client.query("ROLLBACK").catch(()=>undefined);throw e;}finally{client.release();}
+}
+async function listActaShortLinks(p:Record<string,unknown>):Promise<unknown>{const id=str(p.tournamentId).trim();if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id))throw new ApiError("INVALID_TOURNAMENT","Torneo no válido.");const r=await getPool().query("SELECT l.id,l.tournament_id,l.debate_id,l.created_at,l.expires_at,l.revoked_at,COALESCE((SELECT json_agg(json_build_object('eventType',e.event_type,'actor',e.actor,'occurredAt',e.occurred_at,'details',e.details) ORDER BY e.occurred_at) FROM acta_short_link_events e WHERE e.link_id=l.id),'[]'::json) AS events FROM acta_short_links l WHERE l.tournament_id=$1 ORDER BY l.created_at DESC LIMIT 1000",[id]);return r.rows.map((x)=>({...shortLinkPublic(x as ShortLinkRow),events:Array.isArray(x.events)?x.events:[]}));}
+async function updateActaShortLinkExpiry(p:Record<string,unknown>):Promise<unknown>{const tournamentId=str(p.tournamentId),id=str(p.id).toUpperCase(),expires=expiryDate(p.expiryDays);if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("INVALID_SHORT_LINK","Identificador no válido.");const c=await getPool().connect();try{await c.query("BEGIN");const r=await c.query("UPDATE acta_short_links SET expires_at=$3,updated_at=now() WHERE id=$1 AND tournament_id=$2 AND revoked_at IS NULL RETURNING *",[id,tournamentId,expires]);if(!r.rows[0])throw new ApiError("SHORT_LINK_NOT_FOUND","No existe un enlace activo.",404);await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'expiry_updated','manager',$2::jsonb)",[id,JSON.stringify({expiresAt:expires.toISOString()})]);await c.query("COMMIT");return shortLinkPublic(r.rows[0] as ShortLinkRow);}catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}}
+async function revokeActaShortLinks(p:Record<string,unknown>):Promise<unknown>{const tid=str(p.tournamentId),all=p.all===true,ids=Array.isArray(p.ids)?Array.from(new Set(p.ids.filter(x=>typeof x==="string").map(x=>(x as string).toUpperCase()))):[];if(!all&&(!ids.length||ids.length>200||ids.some(x=>!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(x))))throw new ApiError("INVALID_SHORT_LINKS","Selecciona entre 1 y 200 enlaces válidos.");const reason=str(p.reason).trim().slice(0,300),c=await getPool().connect();try{await c.query("BEGIN");const r=await c.query(all?"SELECT id FROM acta_short_links WHERE tournament_id=$1 AND revoked_at IS NULL":"SELECT id FROM acta_short_links WHERE tournament_id=$1 AND revoked_at IS NULL AND id=ANY($2::text[])",all?[tid]:[tid,ids]);const affected=r.rows.map(x=>String(x.id));if(affected.length){await c.query("UPDATE acta_short_links SET revoked_at=now(),updated_at=now() WHERE tournament_id=$1 AND id=ANY($2::text[]) AND revoked_at IS NULL",[tid,affected]);for(const id of affected)await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'revoked','manager',$2::jsonb)",[id,JSON.stringify({reason,bulk:all})]);}await c.query("COMMIT");return{revoked:affected.length,ids:affected};}catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}}
+async function resolveActaShortLink(req:RequestLike):Promise<unknown>{ensureConfigured();const key="ledu:acta-short-link:resolve:"+sha256(requestIp(req)),count=num(await redisCommand(["INCR",key]));if(count===1)await redisCommand(["EXPIRE",key,60]);if(count>60)throw new ApiError("RATE_LIMITED","Demasiadas consultas de enlaces. Espera un minuto.",429);const raw=Array.isArray(req.query?.id)?req.query?.id[0]:req.query?.id,id=str(raw).toUpperCase();if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);const r=await getPool().query("SELECT * FROM acta_short_links WHERE id=$1",[id]),row=r.rows[0] as ShortLinkRow|undefined;if(!row)throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);if(row.revoked_at)throw new ApiError("SHORT_LINK_REVOKED","Este enlace ha sido revocado por la mesa.",410);if(row.expires_at&&new Date(row.expires_at).getTime()<=Date.now())throw new ApiError("SHORT_LINK_EXPIRED","Este enlace ha caducado. Pide a la mesa que genere uno nuevo.",410);if(!validActaSnapshot(row.snapshot)||sha256(canonicalShortLinkJson(row.snapshot))!==row.snapshot_sha256)throw new ApiError("SHORT_LINK_CORRUPT","El contenido del enlace no supera la comprobación de integridad.",500);return{snapshot:row.snapshot,expiresAt:row.expires_at?new Date(row.expires_at).getTime():null};}
+
 async function health(): Promise<unknown> {
   ensureConfigured();
   const database = await checkDatabase();
@@ -1070,6 +1339,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
   try {
     if (req.method === "GET") {
       const action = Array.isArray(req.query?.action) ? req.query?.action[0] : req.query?.action;
+      if (action === "resolveActaShortLink") { const result = await resolveActaShortLink(req); res.status(200).json({ ok: true, data: result }); return; }
       if (action !== "health") throw new ApiError("METHOD_NOT_ALLOWED", "Usa POST para operar con la API.", 405);
       const result = await health();
       res.status(200).json({ ok: true, data: result });

@@ -85,8 +85,18 @@ test('todas las pantallas: sin errores en consola, controles con nombre y sin de
   // The judges' page on a phone, and a broken link.
   await nav(page, 'Rondas');
   await page.locator('.tab-whatsapp summary').click();
-  const actaUrl = (await page.getByRole('link', { name: /Abrir el acta de/ }).first().getAttribute('href'))!;
-  const otherUrl = (await page.getByRole('link', { name: /Abrir el acta de/ }).nth(1).getAttribute('href'))!;
+  const actaRows = page.locator('.tab-whatsapp tbody tr');
+  const openActaUrl = async (index: number) => {
+    const popupPromise = page.waitForEvent('popup');
+    await actaRows.nth(index).getByRole('button', { name: 'Abrir el acta' }).click();
+    const popup = await popupPromise;
+    await expect.poll(() => popup.url()).toContain('/acta#A2');
+    const url = popup.url();
+    await popup.close();
+    return url;
+  };
+  const actaUrl = await openActaUrl(0);
+  const otherUrl = await openActaUrl(1);
   const phone = await context.newPage();
   watch(phone);
   await phone.setViewportSize({ width: 360, height: 740 });

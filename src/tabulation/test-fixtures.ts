@@ -1,5 +1,5 @@
-import { createTabTournament } from './presets';
-import { isFallenAt, type PresetId, type TabBallot, type TabDebate, type TabDebateResult, type TabJointActa, type TabJudge, type TabRound, type TabTeam, type TabTournament } from './types';
+import { createTabTournament } from './presets.js';
+import { isFallenAt, type PresetId, type TabBallot, type TabDebate, type TabDebateResult, type TabJointActa, type TabJudge, type TabRound, type TabTeam, type TabTournament } from './types.js';
 
 /** Deterministic fixtures shared by the tabulation tests. */
 export function team(id: string, institution = 'Inst ' + id, extra: Partial<TabTeam> = {}): TabTeam {
@@ -28,7 +28,8 @@ export function result(ballotList: TabBallot[], extra: Partial<TabDebateResult> 
   return { lineup: {}, ballots: ballotList, penalties: {}, notes: '', updatedAt: 1, ...extra };
 }
 
-/** The tournament of fixtures/acta-v1.json, whose link and code are in the first WhatsApp format. */
+
+/** The tournament of fixtures/acta-v1.json, whose link and code use the first WhatsApp format. */
 export function actaV1Tournament(): TabTournament {
   const tournament = makeTournament('aduma', ['a', 'b', 'c', 'd'], ['j1', 'j2', 'j3'], 2);
   tournament.id = 'torneo-acta-v1';
