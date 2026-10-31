@@ -92,6 +92,15 @@ describe("published round domain validation", () => {
     }, context)).toThrow(/identificador local del debate está duplicado/);
   });
 
+  it("rejects incomplete or malformed Tabulation-only outcome metadata", () => {
+    const payload = validPayload();
+    expect(() => validatePublishedRoundPayload({ ...payload, sideMode: "unknown" }, context)).toThrow(/modo de posturas/);
+    expect(() => validatePublishedRoundPayload({ ...payload, teamMetadata: payload.teamMetadata.slice(1) }, context)).toThrow(/exactamente los metadatos/);
+    expect(() => validatePublishedRoundPayload({
+      ...payload, teamMetadata: payload.teamMetadata.map((entry) => entry.teamId === "team-a" ? { ...entry, swing: "yes" } : entry),
+    }, context)).toThrow(/metadatos de un equipo/);
+  });
+
   it("rejects unknown, inactive and duplicate physical rooms", () => {
     const payload = validPayload();
     expect(() => validatePublishedRoundPayload({
