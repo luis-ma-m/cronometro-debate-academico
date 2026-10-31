@@ -142,6 +142,30 @@ export interface TabulationActaHistory {
   truncated: boolean;
   versions: TabulationActaHistoryVersion[];
 }
+export interface SaveTabulationActaResponse {
+  assignmentId: string;
+  tournamentId: string;
+  sourceId: string;
+  currentVersionId: string;
+  sourceMode: 'judges' | 'joint' | 'elimination';
+  winnerTeamId: string | null;
+  rewriteCount: number;
+  totalVersions: number;
+  replacedSourceId: string | null;
+  operationId: string;
+  createdAt: number;
+}
+export const saveTabulationActa = (
+  token: string,
+  input: {
+    operationId: string;
+    assignmentId: string;
+    source: Record<string, unknown>;
+    expectedCurrentSourceId: string | null;
+    confirmReplace: boolean;
+  },
+) => apiCall<SaveTabulationActaResponse>('saveTabulationActa', { token, ...input });
+
 export const getTabulationActaHistory = (token: string, assignmentId: string) =>
   apiCall<TabulationActaHistory>('getTabulationActaHistory', { token, assignmentId });
 
