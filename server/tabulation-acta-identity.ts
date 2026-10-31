@@ -44,7 +44,7 @@ function mapTeamRecord(
   const result: Record<string, unknown> = {};
   for (const [localId, entry] of Object.entries(value)) {
     const remoteId = mappedId(localId, mapping, allowed, label);
-    if (Object.hasOwn(result, remoteId)) throw new ApiError("INVALID_ACTA_IDENTITY", "Dos referencias locales de " + label + " apuntan a la misma entidad remota.");
+    if (Object.prototype.hasOwnProperty.call(result, remoteId)) throw new ApiError("INVALID_ACTA_IDENTITY", "Dos referencias locales de " + label + " apuntan a la misma entidad remota.");
     result[remoteId] = entry;
   }
   return result;
