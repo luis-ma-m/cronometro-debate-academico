@@ -201,6 +201,7 @@ function normalizeRound(round: Json, references: References): { round: TabRound;
       judgeIds: judgeList,
       chairId: text(debate.chairId),
       ...(typeof debate.bracketSlot === 'number' ? { bracketSlot: debate.bracketSlot } : {}),
+      ...(isText(debate.managerAssignmentId) ? { managerAssignmentId: debate.managerAssignmentId } : {}),
       ...(result ? { result } : {}),
     };
   }));
@@ -217,6 +218,7 @@ function normalizeRound(round: Json, references: References): { round: TabRound;
       silent: flag(round.silent, false),
       debates,
       createdAt: num(round.createdAt, 0),
+      ...(isText(round.managerRoundId) ? { managerRoundId: round.managerRoundId } : {}),
       ...(typeof round.pushedAt === 'number' ? { pushedAt: round.pushedAt } : {}),
     },
   };
