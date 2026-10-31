@@ -167,4 +167,24 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     )).rejects.toMatchObject({ code: "23514" });
   });
 
+  it("applies a database-backed per-IP rate limit for public S8 resolution", async () => {
+    const ipHash = "e".repeat(64);
+    const increment = () => client!.query(
+      `INSERT INTO acta_short_link_resolution_limits(ip_hash,window_started_at,request_count)
+       VALUES($1,date_trunc('minute',now()),1)
+       ON CONFLICT(ip_hash) DO UPDATE SET
+         request_count=CASE WHEN acta_short_link_resolution_limits.window_started_at < date_trunc('minute',now()) THEN 1 ELSE acta_short_link_resolution_limits.request_count+1 END,
+         window_started_at=CASE WHEN acta_short_link_resolution_limits.window_started_at < date_trunc('minute',now()) THEN date_trunc('minute',now()) ELSE acta_short_link_resolution_limits.window_started_at END
+       RETURNING request_count`,
+      [ipHash],
+    );
+    const first = await increment();
+    const second = await increment();
+    expect(Number(first.rows[0].request_count)).toBe(1);
+    expect(Number(second.rows[0].request_count)).toBe(2);
+    await client!.query("UPDATE acta_short_link_resolution_limits SET window_started_at=now()-interval '2 minutes' WHERE ip_hash=$1", [ipHash]);
+    const reset = await increment();
+    expect(Number(reset.rows[0].request_count)).toBe(1);
+  });
+
 });
