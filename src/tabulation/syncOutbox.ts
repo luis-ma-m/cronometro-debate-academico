@@ -9,7 +9,7 @@ export interface PendingSyncOperation {
   operationId: string; tournamentId: string; entityType: string; entityId: string;
   operation: SyncOperationKind; baseRevision: number; payload: unknown; payloadHash: string;
   status: SyncOperationStatus; attempts: number; createdAt: number; lastAttemptAt?: number;
-  lastError?: SyncOperationError; workerId?: string; leaseUntil?: number;
+  lastError?: SyncOperationError; workerId?: string; leaseUntil?: number; nextAttemptAt?: number;
 }
 export interface EnqueueSyncOperation {
   tournamentId: string; entityType: string; entityId: string;
@@ -19,7 +19,7 @@ export interface SyncOutboxRepository {
   insert(operation: PendingSyncOperation): Promise<PendingSyncOperation | null>;
   list(tournamentId: string): Promise<PendingSyncOperation[]>;
   claimNext(tournamentId: string, workerId: string, now: number, leaseMs: number): Promise<PendingSyncOperation | null>;
-  transition(operationId: string, workerId: string, status: 'pending' | 'conflict' | 'failed', error?: SyncOperationError): Promise<boolean>;
+  transition(operationId: string, workerId: string, status: 'pending' | 'conflict' | 'failed', error?: SyncOperationError, nextAttemptAt?: number): Promise<boolean>;
   acknowledge(operationId: string, workerId: string): Promise<boolean>;
   recoverExpired(now: number): Promise<number>;
 }
@@ -27,7 +27,7 @@ export interface SyncOutbox {
   enqueue(input: EnqueueSyncOperation): Promise<{ operation: PendingSyncOperation; duplicate: boolean }>;
   list(tournamentId: string): Promise<PendingSyncOperation[]>;
   claimNext(tournamentId: string, workerId: string): Promise<PendingSyncOperation | null>;
-  retry(operationId: string, workerId: string, error?: SyncOperationError): Promise<boolean>;
+  retry(operationId: string, workerId: string, error?: SyncOperationError, attempts?: number, retryAfterMs?: number): Promise<boolean>;
   markConflict(operationId: string, workerId: string, error: SyncOperationError): Promise<boolean>;
   markFailed(operationId: string, workerId: string, error: SyncOperationError): Promise<boolean>;
   acknowledge(operationId: string, workerId: string): Promise<boolean>;
@@ -36,6 +36,21 @@ export interface SyncOutbox {
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const DEFAULT_LEASE_MS = 60_000;
+const RETRY_BASE_MS = 2_000;
+const RETRY_MAX_MS = 5 * 60_000;
+const RETRY_AFTER_MAX_MS = 24 * 60 * 60_000;
+export const SYNC_OUTBOX_UPDATED_EVENT = 'ledu:sync-outbox-updated';
+
+export function syncRetryDelayMs(attempts: number, random = Math.random, retryAfterMs = 0): number {
+  const exponent = Math.min(8, Math.max(0, Math.trunc(attempts) - 1));
+  const base = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * (2 ** exponent));
+  const jittered = Math.round(base * (0.5 + Math.min(1, Math.max(0, random()))));
+  return Math.max(jittered, Math.min(RETRY_AFTER_MAX_MS, Math.max(0, retryAfterMs)));
+}
+function recoveredRetryDelayMs(operationId: string, attempts: number): number {
+  const seed = operationId.split('').reduce((sum, char) => (sum + char.charCodeAt(0)) % 1000, 0);
+  return syncRetryDelayMs(attempts, () => seed / 1000);
+}
 function stableValue(value: unknown, ancestors = new Set<object>()): unknown {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number') {
@@ -106,11 +121,12 @@ function createId(): string {
 }
 export function createSyncOutbox(
   repository: SyncOutboxRepository,
-  options: { now?: () => number; createOperationId?: () => string; leaseMs?: number } = {},
+  options: { now?: () => number; createOperationId?: () => string; leaseMs?: number; random?: () => number } = {},
 ): SyncOutbox {
   const now = options.now ?? Date.now;
   const createOperationId = options.createOperationId ?? createId;
   const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const random = options.random ?? Math.random;
   return {
     async enqueue(input) {
       if (!input.tournamentId.trim() || !input.entityType.trim() || !input.entityId.trim()) throw new Error('La operación necesita torneo y entidad identificables.');
@@ -132,7 +148,7 @@ export function createSyncOutbox(
       if (!workerId.trim()) throw new Error('El worker necesita un identificador.');
       return repository.claimNext(tournamentId, workerId, now(), leaseMs);
     },
-    retry: (id, worker, error) => repository.transition(id, worker, 'pending', error),
+    retry: (id, worker, error, attempts = 1, retryAfterMs = 0) => repository.transition(id, worker, 'pending', error, now() + syncRetryDelayMs(attempts, random, retryAfterMs)),
     markConflict: (id, worker, error) => repository.transition(id, worker, 'conflict', error),
     markFailed: (id, worker, error) => repository.transition(id, worker, 'failed', error),
     acknowledge: (id, worker) => repository.acknowledge(id, worker),
@@ -141,7 +157,7 @@ export function createSyncOutbox(
 }
 
 const DB_NAME = 'ledu-tabulation-sync-v1';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'operations';
 function requestValue<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -171,6 +187,9 @@ export function createIndexedDbSyncOutboxRepository(factory: IDBFactory = global
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'operationId' });
         store.createIndex('byTournamentCreatedAt', ['tournamentId', 'createdAt'], { unique: false });
+      } else {
+        const store = request.transaction!.objectStore(STORE_NAME);
+        if (!store.indexNames.contains('byTournamentCreatedAt')) store.createIndex('byTournamentCreatedAt', ['tournamentId', 'createdAt'], { unique: false });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -210,14 +229,14 @@ export function createIndexedDbSyncOutboxRepository(factory: IDBFactory = global
         request.onsuccess = () => {
           const rows = request.result as PendingSyncOperation[];
           const oldest = rows.sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId))[0];
-          if (!oldest || oldest.status !== 'pending') return;
+          if (!oldest || oldest.status !== 'pending' || (oldest.nextAttemptAt ?? 0) > timestamp) return;
           result = { ...oldest, status: 'sending', attempts: oldest.attempts + 1, lastAttemptAt: timestamp,
-            workerId, leaseUntil: timestamp + leaseMs, lastError: undefined };
+            workerId, leaseUntil: timestamp + leaseMs, lastError: undefined, nextAttemptAt: undefined };
           store.put(result);
         };
       }));
     },
-    transition(operationId, workerId, status, error) {
+    transition(operationId, workerId, status, error, nextAttemptAt) {
       return database.then((db) => new Promise<boolean>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite'); const store = tx.objectStore(STORE_NAME);
         let changed = false; tx.oncomplete = () => resolve(changed); transactionError(tx, reject);
@@ -226,7 +245,7 @@ export function createIndexedDbSyncOutboxRepository(factory: IDBFactory = global
         request.onsuccess = () => {
           const current = request.result as PendingSyncOperation | undefined;
           if (!current || current.status !== 'sending' || current.workerId !== workerId) return;
-          store.put({ ...current, status, lastError: error, workerId: undefined, leaseUntil: undefined });
+          store.put({ ...current, status, lastError: error, workerId: undefined, leaseUntil: undefined, nextAttemptAt: status === 'pending' ? nextAttemptAt : undefined });
           changed = true;
         };
       }));
@@ -254,7 +273,8 @@ export function createIndexedDbSyncOutboxRepository(factory: IDBFactory = global
           for (const row of request.result as PendingSyncOperation[]) {
             if (row.status !== 'sending' || (row.leaseUntil ?? 0) > timestamp) continue;
             store.put({ ...row, status: 'pending', workerId: undefined, leaseUntil: undefined,
-              lastError: { code: 'LEASE_EXPIRED', message: 'Se recuperó una operación cuyo worker dejó de responder.' } });
+              lastError: { code: 'LEASE_EXPIRED', message: 'Se recuperó una operación cuyo worker dejó de responder.' },
+              nextAttemptAt: timestamp + recoveredRetryDelayMs(row.operationId, row.attempts) });
             recovered++;
           }
         };
