@@ -202,3 +202,23 @@ En el Gestor:
 ## 9. Criterio de salida F4
 
 F4 no se considera terminada hasta que los tres modos se conservan sin pérdida, el primer guardado y las sustituciones cumplen el flujo aprobado, el historial y contador son consistentes, la concurrencia/idempotencia están probadas en PostgreSQL real y las pantallas del Gestor/Tabulación muestran el estado oficial sin confundirlo con un borrador local.
+
+
+## Ampliación F3/F4: identidad de debates y contexto autoritativo (2026-10-31)
+
+Se ha añadido una primera capa persistente para eliminar la ambigüedad entre el debate local de Tabulación y la asignación del Gestor:
+
+- Cada debate incluido en una propuesta lleva tabulationDebateId, su identidad local estable. El validador exige un identificador válido y único dentro de la ronda.
+- La publicación transaccional escribe tabulation_debate_assignments junto con la asignación. La relación incluye torneo canónico, ronda, debate local, asignación remota, presidencia y si las posturas eran provisionales.
+- La respuesta de publicación devuelve debateAssignments (debate local → assignmentId) para que el cliente pueda persistir el vínculo sin inferirlo por orden o nombres.
+- La migración 0014_tabulation_debate_assignments.sql crea el puente de identidad.
+
+También se incorpora una instantánea de metadatos propios de Tabulación en la publicación autenticada:
+
+- sideMode de la ronda.
+- Por cada equipo activo del Gestor: swing, breakEligible y fallenFromRound opcional.
+- El servidor valida tipos, referencias, duplicados y cobertura exacta de equipos activos; no acepta metadatos parciales.
+- tabulation_round_metadata conserva la instantánea por ronda. La asignación conserva chair y estado provisional.
+- La migración 0015_tabulation_round_metadata.sql añade esta persistencia.
+
+**Límites actuales:** estas tablas y contratos son la base del flujo remoto, pero la publicación transaccional todavía debe quedar conectada al flujo interactivo/outbox de Tabulación, guardar el debateAssignments recibido en el modelo local y usar la instantánea persistida al construir el contexto server-side del endpoint de actas. Hasta completar esas conexiones, no se debe afirmar que la identidad o los metadatos ya están sincronizados de extremo a extremo. Las migraciones 0014 y 0015 no se han aplicado a Neon Production.
