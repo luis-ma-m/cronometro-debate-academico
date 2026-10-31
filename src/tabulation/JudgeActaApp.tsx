@@ -26,7 +26,7 @@ interface PhoneDraft {
 
 const ROLE_LABELS = Object.fromEntries(SPEAKER_POSITIONS.map((position) => [position.value, position.label])) as Record<SpeakerRole, string>;
 const DESCRIPTIONS = new Map(ADUMA_RUBRIC.map((item) => [item.id, item.description]));
-const draftKey = (link: ActaLink) => 'ledu-acta-borrador-v1:' + link.debate;
+const draftKey = (link: ActaLink) => 'ledu-acta-borrador-v2:' + link.version + ':' + link.key + ':' + link.debate;
 const count = (text: string) => Math.max(0, Math.floor(parseDecimal(text) ?? 0));
 
 function emptyDraft(link: ActaLink): PhoneDraft {
