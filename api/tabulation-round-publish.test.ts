@@ -29,6 +29,11 @@ function payload() {
     roundName: "Ronda 1",
     roundNumber: 1,
     roundKind: "qualifying",
+    sideMode: "balanced",
+    teamMetadata: [
+      { teamId: "team-a", swing: false, breakEligible: true },
+      { teamId: "team-b", swing: false, breakEligible: true },
+    ],
     debates: [{
       tabulationDebateId: "tab-debate-1",
       physicalRoomId: "room-a",
