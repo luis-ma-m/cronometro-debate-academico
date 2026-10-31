@@ -87,6 +87,7 @@ describe("transactional Tabulation round publication", () => {
       if (statement.startsWith("SELECT ti.tournament_id")) return { rows: [{
         tournament_id: tournamentId, revision: 7, updated_at_ms: baseUpdatedAt, minimum_judges_per_room: 1,
       }] };
+      if (statement.startsWith("UPDATE tournament_settings SET revision")) return { rows: [{ updated_at_ms: baseUpdatedAt + 1 }] };
       if (statement.startsWith("SELECT scope, response FROM idempotency_keys")) {
         return { rows: stored.response && params[0] === "publish-operation-0001" ? [{ scope: stored.scope, response: stored.response }] : [] };
       }
@@ -119,7 +120,7 @@ describe("transactional Tabulation round publication", () => {
     const result = await publishTabulationRound(await operation());
     expect(result).toMatchObject({
       tournamentId, roundId: "tab-round-1", roundNumber: 1, roundName: "Ronda 1",
-      roundKind: "qualifying", revision: 8, operationId: "publish-operation-0001",
+      roundKind: "qualifying", revision: 8, updatedAt: baseUpdatedAt + 1, operationId: "publish-operation-0001",
     });
     expect(query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT t.id, t.name") && String(sql).includes("team_judge_incompatibilities"))).toBe(true);
     expect(query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT j.id, j.name") && String(sql).includes("judge_incompatibilities"))).toBe(true);
