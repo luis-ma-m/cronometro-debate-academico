@@ -7,7 +7,11 @@ import { downloadEmergencyCopy } from '../ErrorBoundary';
 import { checkIntegrity, type IntegrityReport } from '../integrity';
 import { type LogVerification } from '../log';
 import { TabDataError } from '../normalize';
-import { clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, tournamentFromHandoff } from '../panelBridge';
+import { buildPanelHandoff, clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, tournamentFromHandoff, type PanelHandoff } from '../panelBridge';
+import { getTournament } from '../../api';
+import { ApiError } from '../../api';
+import { comparePanelRevisions } from '../reconciliation';
+import { clearPendingPanelReconciliation, readPanelSyncBase, readPendingPanelReconciliation, writePanelSyncBase, writePendingPanelReconciliation } from '../panelSync';
 import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS } from '../presets';
 import { roundIsComplete, type DebateOutcome } from '../results';
 import { createSampleTournament } from '../sample';
@@ -61,6 +65,8 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const [operator, setOperator] = useState(state.operator);
   const [handoffVersion, setHandoffVersion] = useState(0);
   const [showLinkReview, setShowLinkReview] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
+  const [pendingReconciliation, setPendingReconciliation] = useState<{ base: PanelHandoff; remote: PanelHandoff; detectedAt: number } | null>(null);
   const [backupVersion, setBackupVersion] = useState(0);
   const [diagnosis, setDiagnosis] = useState<{ integrity: IntegrityReport; log: LogVerification & { issues: string[] } } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -72,7 +78,107 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
-  useEffect(() => setDiagnosis(null), [tournament?.id]);
+  useEffect(() => {
+    setDiagnosis(null);
+    setPendingReconciliation(tournament?.panelLink?.remoteId
+      ? readPendingPanelReconciliation(window.localStorage, tournament.id) : null);
+    setSyncStatus('');
+  }, [tournament?.id]);
+
+  useEffect(() => {
+    if (!tournament?.panelLink?.remoteId || state.readOnly || !navigator.onLine) return;
+    let disposed = false;
+    let running = false;
+    const pull = async () => {
+      if (disposed || running || document.visibilityState === 'hidden' || !navigator.onLine) return;
+      let token = '';
+      try {
+        const session = JSON.parse(window.localStorage.getItem('ledu-admin-session') ?? 'null') as { token?: string; expiresAt?: number } | null;
+        if (!session?.token || (session.expiresAt ?? 0) <= Date.now()) {
+          setSyncStatus('Inicia sesión en el Gestor para sincronizar este torneo.');
+          return;
+        }
+        token = session.token;
+      } catch {
+        setSyncStatus('Inicia sesión en el Gestor para sincronizar este torneo.');
+        return;
+      }
+      running = true;
+      try {
+        const remoteTournament = await getTournament(token);
+        if (disposed || remoteTournament.remoteId !== tournament.panelLink.remoteId) return;
+        const remote = buildPanelHandoff(remoteTournament);
+        const base = readPanelSyncBase(window.localStorage, tournament.id);
+        if (!base) {
+          // Existing links created before F3 had no durable base. Establish a baseline without guessing what changed.
+          writePanelSyncBase(window.localStorage, tournament.id, remote);
+          setSyncStatus('Primera sincronización: se ha establecido una base remota. Revisa los datos recibidos del panel para importar cambios anteriores.');
+          return;
+        }
+        if ((remote.revision ?? 0) <= (base.revision ?? 0)) {
+          setSyncStatus('Al día · revisión remota ' + (base.revision ?? 0));
+          return;
+        }
+        const existingPending = readPendingPanelReconciliation(window.localStorage, tournament.id);
+        if (existingPending) {
+          setPendingReconciliation(existingPending);
+          setSyncStatus('Hay cambios remotos pendientes de revisión.');
+          return;
+        }
+        const diff = comparePanelRevisions(tournament, base, remote);
+        if (diff.hasConflicts || diff.requiresHistoricalReview) {
+          const pending = { base, remote, detectedAt: Date.now() };
+          writePendingPanelReconciliation(window.localStorage, tournament.id, pending);
+          setPendingReconciliation(pending);
+          setSyncStatus('Cambios remotos requieren revisión: ' + diff.changes.filter((item) => item.change === 'conflict' || item.change === 'historical-review').length + ' elemento(s).');
+          return;
+        }
+        const changed = diff.changes.some((item) => item.change !== 'unchanged');
+        if (!changed) {
+          writePanelSyncBase(window.localStorage, tournament.id, remote);
+          setSyncStatus('Al día · revisión remota ' + (remote.revision ?? 0));
+          return;
+        }
+        if (!store.backup('Antes de sincronizar revisión remota ' + remote.revision)) {
+          setSyncStatus('No se pudo crear una copia previa. Exporta una copia antes de sincronizar.');
+          return;
+        }
+        const merged = mergeHandoff(tournament, remote);
+        if (merged.issues.length) {
+          setSyncStatus('Sincronización detenida: ' + merged.issues.join(' '));
+          return;
+        }
+        if (!store.update(() => merged.tournament, { type: 'panel.sync.pull', message: 'Sincronización remota aplicada (revisión ' + remote.revision + '): ' + merged.added + ' altas y ' + merged.updated + ' actualizaciones.' })) {
+          setSyncStatus('No se pudo guardar la sincronización local. No se ha avanzado la revisión base.');
+          return;
+        }
+        writePanelSyncBase(window.localStorage, tournament.id, remote);
+        setSyncStatus('Sincronizado · revisión remota ' + (remote.revision ?? 0));
+        notify('Cambios compatibles del Gestor sincronizados: ' + merged.added + ' altas y ' + merged.updated + ' actualizaciones.');
+      } catch (error) {
+        if (!disposed) setSyncStatus(error instanceof ApiError && error.code === 'UNAUTHORIZED'
+          ? 'La sesión del Gestor ha caducado. Inicia sesión de nuevo.'
+          : 'No se ha podido consultar el Gestor. Los datos locales permanecen intactos; se reintentará.');
+      } finally {
+        running = false;
+      }
+    };
+    void pull();
+    const interval = window.setInterval(() => void pull(), 30000);
+    const onOnline = () => void pull();
+    const onFocus = () => void pull();
+    const onVisibility = () => { if (document.visibilityState === 'visible') void pull(); };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [tournament?.id, tournament?.panelLink?.remoteId, tournament?.panelLink?.remoteRevision, tournament?.revision, state.readOnly, store, notify]);
 
   const debates = tournament?.rounds.flatMap((round) => round.debates.map((debate) => ({ debate, round }))) ?? [];
   const teams = tournament ? new Map(tournament.teams.map((team) => [team.id, team])) : new Map();
@@ -110,7 +216,9 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
 
   const createFromPanel = () => {
     if (!handoff || readOnlyNotice()) return;
-    store.create(tournamentFromHandoff(handoff, presetId));
+    const created = tournamentFromHandoff(handoff, presetId);
+    store.create(created);
+    if (handoff.tournamentId) writePanelSyncBase(window.localStorage, created.id, handoff);
     clearHandoff(window.localStorage);
     setHandoffVersion((value) => value + 1);
     notify('Torneo creado y vinculado con la identidad del panel. Revisa las reglas, los niveles de los jueces y quién puede presidir.');
@@ -143,10 +251,33 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       notify('No se ha podido guardar la vinculación. Los datos locales no se han modificado.', 'error');
       return;
     }
+    writePanelSyncBase(window.localStorage, tournament.id, handoff);
+    clearPendingPanelReconciliation(window.localStorage, tournament.id);
+    setPendingReconciliation(null);
     clearHandoff(window.localStorage);
     setHandoffVersion((value) => value + 1);
     setShowLinkReview(false);
     notify('Torneo vinculado. Se han conservado los IDs locales y se han importado las entidades remotas no vinculadas.', 'success');
+  };
+
+  const applyPendingRemote = () => {
+    if (!tournament || !pendingReconciliation || state.readOnly) return;
+    if (!window.confirm('Se aplicarán los datos del Gestor a equipos, oradores, jueces y salas. Se guardará una copia previa. Los cambios del Gestor prevalecen sobre los datos compartidos; no se borrarán entidades locales ni rondas/actas. ¿Continuar?')) return;
+    if (!store.backup('Antes de resolver conflicto remoto ' + pendingReconciliation.remote.revision)) {
+      notify('No se pudo crear una copia de seguridad. Exporta una copia antes de resolver el conflicto.', 'error');
+      return;
+    }
+    const merged = mergeHandoff(tournament, pendingReconciliation.remote);
+    if (merged.issues.length) { notify(merged.issues.join(' '), 'error'); return; }
+    if (!store.update(() => merged.tournament, { type: 'panel.sync.resolve', message: 'Conflictos revisados y resueltos aceptando la revisión remota ' + pendingReconciliation.remote.revision + '.' })) {
+      notify('No se pudo guardar la resolución. La revisión remota sigue pendiente.', 'error');
+      return;
+    }
+    writePanelSyncBase(window.localStorage, tournament.id, pendingReconciliation.remote);
+    clearPendingPanelReconciliation(window.localStorage, tournament.id);
+    setPendingReconciliation(null);
+    setSyncStatus('Conflicto resuelto · revisión remota ' + pendingReconciliation.remote.revision);
+    notify('Revisión remota aplicada. La copia anterior y el registro local se conservan.');
   };
 
   const importFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -180,6 +311,15 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
 
   return <>
     <div className="page-heading"><div><p className="eyebrow">INICIO</p><h2>Tabulación del torneo</h2><p className="muted">Emparejamientos, jueces, actas, clasificación y eliminatorias para debate académico. Todo se calcula y se guarda en este navegador, sin servidor.</p></div></div>
+
+    {tournament?.panelLink?.remoteId && <section className="panel tab-handoff">
+      <div className="panel-title"><div><h3>Sincronización con el Gestor</h3><p>{syncStatus || 'Consultando revisiones remotas…'} · Identidad {tournament.panelLink.remoteId}</p></div></div>
+      {pendingReconciliation && <>
+        <Notice kind="warning">Hay una revisión remota nueva ({pendingReconciliation.remote.revision}) que requiere decisión. La versión local no se ha sobrescrito.</Notice>
+        <p className="muted">Base: revisión {pendingReconciliation.base.revision} · Detectada: {new Date(pendingReconciliation.detectedAt).toLocaleString('es-ES')}. Al aceptar se crea una copia local y se aplican los datos compartidos del Gestor; las rondas y actas de Tabulación se preservan.</p>
+        <div className="tab-actions"><button type="button" className="button primary" disabled={state.readOnly} onClick={applyPendingRemote}>Revisar y aplicar cambios del Gestor</button></div>
+      </>}
+    </section>}
 
     {!adumaOpen && <section className="panel tab-aduma">
       <div className="panel-title"><div><h3><Trophy size={18} /> V Torneo Nacional ADUMA · 10.º aniversario</h3>
