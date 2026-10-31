@@ -1,5 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import App from './App';
 import './styles.css';
 
@@ -29,5 +30,6 @@ createRoot(root).render(
       : isJudgeActa
         ? <Suspense fallback={<div className="tab-loading">Cargando el acta…</div>}><JudgeActaApp /></Suspense>
         : <App />}
+    <SpeedInsights />
   </React.StrictMode>,
 );
