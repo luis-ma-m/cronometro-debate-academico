@@ -797,3 +797,5 @@ El flujo implementado es: borrador local → preview validado y no mutante → c
 Esto acredita implementación de código, no validación operativa completa. Quedan pendientes Neon Preview, concurrencia/rollback en PostgreSQL real, E2E en navegador y recuperación de pérdida de respuesta. No se han aplicado migraciones a Production; la PR permanece Draft hasta esas pruebas.
 
 La migración 0017 añade la integridad referencial de la presidencia persistida hacia `judges(id)` con `ON DELETE RESTRICT`.
+
+La migración 0018 conserva también el ID local del torneo de Tabulación. Tanto el preview como el guardado rechazan si el torneo, ronda o debate de la fuente local no coinciden con el mapping persistido para esa asignación.
