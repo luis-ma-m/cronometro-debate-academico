@@ -2,6 +2,25 @@
 
 > Documento de ejecución para F4 de la PR #79. Complementa y no sustituye `TABULATION_MANAGER_DECISIONS.md` ni `TABULATION_MANAGER_SYNC.md`. F4 depende de que F3 proporcione identidad remota, revisión confirmada, outbox durable y resolución de conflictos. No habilitar la escritura de actas oficiales mientras esa base no esté validada.
 
+## Estado de ejecución — inicio de F4
+
+La rama ya contenía una primera base de F4: validación pura del resultado de Tabulación, migración 0012 para historial fuente inmutable y endpoints de lectura de historial/detalle. Eso no equivalía a tener guardado oficial implementado: en el dispatcher todavía no existe una acción de escritura de acta y el historial solo reconocía judges/joint.
+
+**Añadido en este avance:**
+- Migración nueva 0013 que amplía el tipo de fuente para admitir elimination y persiste un resultado explícito separado (ganador, perdedor y equipos que avanzan), sin convertirlo en RoundScorecard.
+- Validador puro de resultado de eliminatoria con comprobación de que ganador/perdedor pertenecen a la asignación, son distintos, y los equipos que avanzan son únicos e incluyen al ganador.
+- Historial y tipos de API preparados para exponer sourceMode elimination y su resultado explícito.
+
+**Todavía no implementado ni habilitado:**
+- Endpoint transaccional de guardado inicial/sustitución y recuperación idempotente.
+- Construcción de contexto remoto completo y validación server-side conectada al guardado.
+- Mapeo de IDs locales a IDs canónicos remotos para cada acta.
+- Proyección compatible a scorecard cuando corresponda.
+- UI de primer guardado, diff, confirmación, historial y contador conectados al endpoint.
+- E2E y pruebas reales contra Neon Preview.
+
+F3 sigue siendo una dependencia: este avance añade contrato, esquema y validación de dominio, pero no activa escrituras oficiales. No aplicar la migración 0013 a Neon hasta tener autorización para hacerlo en el entorno Preview de pruebas.
+
 ## 1. Objetivo y límites
 
 F4 permite que un acta guardada en Tabulación se convierta en una versión oficial del debate en el Gestor. La fuente completa de Tabulación se conserva siempre; la `RoundScorecard` del gestor es únicamente una proyección compatible para las pantallas y cálculos que todavía la necesiten.
