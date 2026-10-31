@@ -144,9 +144,9 @@ export async function publishTabulationRound(rawOperation: unknown) {
       // Persist the exact local→remote debate identity in the same transaction as its assignment.
       await client.query(
         `INSERT INTO tabulation_debate_assignments
-          (tournament_id, tabulation_round_id, tabulation_debate_id, manager_round_id, assignment_id, chair_judge_id, sides_provisional)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [canonicalTournamentId, validated.tabulationRoundId, debate.tabulationDebateId, operation.entityId, assignmentId, debate.chairId || null, debate.sidesProvisional],
+          (tournament_id, tab_tournament_id, tabulation_round_id, tabulation_debate_id, manager_round_id, assignment_id, chair_judge_id, sides_provisional)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [canonicalTournamentId, validated.tabTournamentId, validated.tabulationRoundId, debate.tabulationDebateId, operation.entityId, assignmentId, debate.chairId || null, debate.sidesProvisional],
       );
       for (const phase of phases) {
         await client.query(
