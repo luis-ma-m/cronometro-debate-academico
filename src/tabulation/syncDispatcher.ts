@@ -14,21 +14,28 @@ function classify(error: unknown): SyncDispatchResult {
   const code = error instanceof ApiError ? error.code
     : error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
   const message = error instanceof Error ? error.message : 'No se ha podido sincronizar la operación.';
-  if (code === 'UNAUTHORIZED') return { status: 'pause', error: { code, message }, retryAfterMs: 60_000 };
-  if ([
+  const status = error instanceof ApiError ? error.status
+    : error && typeof error === 'object' && 'status' in error ? Number((error as { status?: unknown }).status) : 0;
+  const retryAfterMs = error && typeof error === 'object' && 'retryAfterMs' in error
+    ? Number((error as { retryAfterMs?: unknown }).retryAfterMs) || 0 : 0;
+  if (code === 'UNAUTHORIZED' || status === 401) {
+    return { status: 'pause', error: { code: code || 'UNAUTHORIZED', message }, retryAfterMs: 60_000 };
+  }
+  if (status === 409 || [
     'REVISION_CONFLICT', 'TOURNAMENT_MISMATCH', 'IDEMPOTENCY_MISMATCH',
     'ACTA_REVISION_CONFLICT', 'ACTA_RULES_REVISION_CONFLICT', 'ACTA_IDENTITY_MISMATCH',
     'ACTA_REPLACEMENT_CONFIRMATION_REQUIRED', 'ACTA_REPLACEMENT_CONFIRMATION_INVALID',
-  ].includes(code)) return { status: 'conflict', error: { code, message } };
-  if ([
+  ].includes(code)) return { status: 'conflict', error: { code: code || 'REVISION_CONFLICT', message } };
+  if (status === 429 || code === 'RATE_LIMITED') {
+    return { status: 'retry', error: { code: code || 'RATE_LIMITED', message }, retryAfterMs };
+  }
+  if (status >= 400 && status < 500 || [
     'INVALID_PAYLOAD', 'INVALID_RELATION', 'OPERATION_NOT_ALLOWED', 'FORMAT_NOT_CONFIGURED',
     'ACTA_CONTEXT_INVALID', 'ACTA_IDENTITY_REVIEW_REQUIRED', 'INVALID_ACTA',
     'INVALID_ACTA_SOURCE', 'ACTA_SOURCE_MODE_MISMATCH', 'INVALID_ELIMINATION_RESULT',
     'ELIMINATION_RESULT_MISMATCH', 'SCHEMA_TOO_NEW',
-  ].includes(code)) return { status: 'failed', error: { code, message } };
-  return { status: 'retry', error: { code: code || 'NETWORK_ERROR', message },
-    retryAfterMs: error && typeof error === 'object' && 'retryAfterMs' in error
-      ? Number((error as { retryAfterMs?: unknown }).retryAfterMs) || 0 : 0 };
+  ].includes(code)) return { status: 'failed', error: { code: code || 'INVALID_OPERATION', message } };
+  return { status: 'retry', error: { code: code || 'NETWORK_ERROR', message }, retryAfterMs };
 }
 
 async function dispatchRound(token: string, operation: PendingSyncOperation): Promise<SyncDispatchResult> {
