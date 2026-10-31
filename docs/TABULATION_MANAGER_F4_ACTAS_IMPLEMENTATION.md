@@ -1,28 +1,48 @@
-# Fase 4 — Actas oficiales: diseño de implementación
+# Fase 4 — Actas oficiales: estado de implementación y validación
 
-> Documento de ejecución para F4 de la PR #79. Complementa y no sustituye `TABULATION_MANAGER_DECISIONS.md` ni `TABULATION_MANAGER_SYNC.md`. F4 depende de que F3 proporcione identidad remota, revisión confirmada, outbox durable y resolución de conflictos. No habilitar la escritura de actas oficiales mientras esa base no esté validada.
+> Registro actualizado a 2026-10-30/31. Este documento complementa `TABULATION_MANAGER_DECISIONS.md` y `TABULATION_MANAGER_SYNC.md`; no los sustituye. Las decisiones funcionales aprobadas prevalecen sobre cualquier descripción anterior de una propuesta técnica.
 
-## Estado de ejecución — inicio de F4
+## Estado real
 
-La rama ya contenía una primera base de F4: validación pura del resultado de Tabulación, migración 0012 para historial fuente inmutable y endpoints de lectura de historial/detalle. Eso no equivalía a tener guardado oficial implementado: en el dispatcher todavía no existe una acción de escritura de acta y el historial solo reconocía judges/joint.
+F4 dispone ya de una implementación funcional en código para el flujo de preview y persistencia de fuentes de acta. No debe describirse como un mero validador/prototipo, pero tampoco como terminada: la evidencia de Actions no demuestra todavía el comportamiento transaccional contra Neon real ni la integración visual completa de todos los tipos de acta.
 
-**Añadido en este avance:**
-- Migración nueva 0013 que amplía el tipo de fuente para admitir elimination y persiste un resultado explícito separado (ganador, perdedor y equipos que avanzan), sin convertirlo en RoundScorecard.
-- Validador puro de resultado de eliminatoria con comprobación de que ganador/perdedor pertenecen a la asignación, son distintos, y los equipos que avanzan son únicos e incluyen al ganador.
-- Historial y tipos de API preparados para exponer sourceMode elimination y su resultado explícito.
-- Canonicalizador puro `api/tabulation-acta-identity.ts`: traduce equipos, jueces y oradores de la fuente local a IDs del Gestor usando exclusivamente el `idMap` revisado; reescribe también las claves de puntuaciones/sanciones/alineaciones, las papeletas, el acta conjunta y el resultado de eliminatoria. El ámbito torneo/ronda/asignación se toma de los objetivos resueltos por el Gestor, no de los IDs enviados por el cliente.
-- Tests de identidad: mapeo completo, IDs ausentes, destino fuera de la asignación, colisiones de mapeo, acta conjunta y progresión eliminatoria.
-- Se mantiene separada la modalidad de origen persistido (`elimination`) del modo de acta configurado (`judges` o `joint`): la primera identifica la progresión de cuadro; el segundo determina la estructura del resultado. No se fuerza a ADUMA a usar papeletas individuales en eliminatorias.
+### Implementado en el HEAD actual
 
-**Todavía no implementado ni habilitado:**
-- Endpoint transaccional de guardado inicial/sustitución y recuperación idempotente.
-- Construcción de contexto remoto completo y validación server-side conectada al guardado (el canonicalizador puro existe, pero todavía no está conectado a una consulta/operación autorizada del Gestor).
-- Resolver de forma autoritativa los metadatos propios de Tabulación que no existen en el esquema actual del Gestor (por ejemplo, equipos swing/caídos y otros atributos que pueden alterar el ganador calculado). No aceptar estos flags desde el cliente como verdad: deben quedar persistidos/versionados o verificarse contra un snapshot remoto confiable antes de validar el acta.
-- Proyección compatible a scorecard cuando corresponda.
-- UI de primer guardado, diff, confirmación, historial y contador conectados al endpoint.
-- E2E y pruebas reales contra Neon Preview.
+- Contexto autoritativo cargado desde PostgreSQL por `assignmentId`: identidad canónica del torneo, relación torneo/ronda/debate local, ronda/asignación del Gestor, equipos, panel asignado, presidencia, oradores, configuración y metadatos de ronda.
+- Canonicalización de las referencias locales a IDs canónicos del Gestor a través del mapa revisado persistido. El servidor valida la pertenencia al debate; el cliente no establece la verdad de los metadatos que afectan al resultado.
+- Preview no mutante: valida y prepara propuesta, devuelve versión oficial actual, diff, hash, revisión del Gestor y revisión de reglas.
+- Guardado inicial y sustitución transaccionales con bloqueo de asignación, compare-and-swap sobre versión actual y revisión de reglas, fuente inmutable, head actualizado mediante trigger, evento de auditoría y respuesta idempotente por `operationId`.
+- Persistencia de resultado de eliminatoria separada de la scorecard clasificatoria. `sourceMode: elimination` representa el tipo de resultado/progresión; la estructura de papeletas sigue respetando `settings.ballotMode` (incluido el modo conjunto ADUMA).
+- Historial y detalle de versiones; el contador de reescrituras se calcula en servidor a partir de versiones que sustituyen una fuente anterior.
+- UI `OfficialActaPublisher` de comparación, primer guardado/sustitución explícitos y reintento del mismo `operationId` después de error ambiguo.
+- Migraciones append-only 0010–0019 definidas en el repositorio. No se han aplicado a Neon Production.
 
-F3 sigue siendo una dependencia: este avance añade contrato, esquema y validación de dominio, pero no activa escrituras oficiales. No aplicar la migración 0013 a Neon hasta tener autorización para hacerlo en el entorno Preview de pruebas.
+### Validación completada
+
+- GitHub Actions run #1464, HEAD de PR `2c5bb8ae5bcc690531d867b2d15794423371dbfd`: jobs `verify` y `e2e` completados con `success`. `verify` ejecutó `test:coverage`, `typecheck:api` y `build`; E2E ejecutó Playwright.
+- Las pruebas son automatizadas en CI y no equivalen a prueba de integración contra una instancia Neon persistente ni a prueba manual multi-dispositivo.
+
+### Pendiente de validación / implementación adicional
+
+- Aplicar las migraciones necesarias únicamente en Neon Preview y validar aplicación secuencial desde los estados de esquema soportados.
+- Ejecutar en PostgreSQL real creación inicial, reemplazo, cancelación (sin llamada de escritura), operación idempotente repetida, colisión de `operationId`, dos reemplazos concurrentes, conflicto de revisión, timeout posterior al commit y rollback provocado.
+- Verificar que el contexto autoritativo y el mapping de debate/torneo quedan íntegros con datos reales; probar especialmente dos torneos locales que reutilicen IDs locales de ronda/debate.
+- E2E real en navegador y dos dispositivos: publicación de ronda, ACK, primera acta, sustitución, historial tras recarga, contador consistente y recuperación del mismo `operationId`.
+- Completar UI de historial/versiones para consultar y restaurar/revisar versiones antiguas según las decisiones aprobadas. La UI actual de publicación muestra el diff de sustitución, pero esto no prueba por sí solo todos los recorridos de auditoría en la sala/gestor.
+- Asegurar que el estado de reescrituras se muestra en la tarjeta/resumen de la sala del Gestor con el número exacto, no solo en la notificación de Tabulación.
+- Verificar la semántica de todos los campos y datos conjuntos/eliminatoria en la UI, no únicamente su persistencia JSONB.
+- No marcar F4 cerrada hasta que estas pruebas sean satisfactorias.
+
+## Advertencia de configuración Vercel
+
+La ejecución más reciente del deployment de la rama `feat/tabulation-manager-sync` observada al actualizar este registro terminó con `exceeded_serverless_functions_per_deployment`: el proyecto está en Hobby y el deployment supera el límite de 12 Serverless Functions. Es distinto del anterior `build-rate-limit`; no es un fallo de TypeScript ni un fallo de GitHub Actions. Debe resolverse reduciendo/consolidando funciones API o cambiando el plan; no multiplicar reintentos de deployment porque repetirán el mismo límite.
+
+Actions run #1464 está verde, pero el check Vercel de la PR continúa fallido por limitación de plataforma. No afirmar que existe Preview desplegado del HEAD actual mientras no haya un deployment READY que apunte al SHA correspondiente.
+
+## Regla de seguridad operativa
+
+No ejecutar migraciones, mutaciones ni pruebas de escritura en Neon Production. La validación pendiente debe usar una rama/base Preview aislada y datos de prueba. Mantener PR #79 en Draft.
+
 
 ## 1. Objetivo y límites
 
