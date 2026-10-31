@@ -8,6 +8,7 @@ import { SPEAKER_ROLES, type SpeakerRole, type TabJointActa, type TabPenalties, 
 import { copyText, formatNumber, parseDecimal } from './ui';
 import { actaCodeMessage, decodeActaLink, whatsAppUrl, type ActaEntry, type ActaLink } from './whatsapp';
 import { resolveActaShortLink } from '../api';
+import { isActaLinkSnapshot } from './actaShortLink';
 
 interface PhoneDraft {
   favor: string;
@@ -84,7 +85,7 @@ export default function JudgeActaApp() {
     let active=true;
     const load=async()=>{
       const short=/^#S8-([0-9A-HJKMNP-TV-Z]{8})$/i.exec(hash.trim());
-      if(short){setParsed({link:null,error:null,loading:true});try{const resolved=await resolveActaShortLink(short[1].toUpperCase());if(active)setParsed({link:resolved.snapshot as ActaLink,error:null,loading:false});}catch(error){if(active)setParsed({link:null,error:error instanceof Error?error.message:'No se ha podido recuperar el acta.',loading:false});}return;}
+      if(short){setParsed({link:null,error:null,loading:true});try{const resolved=await resolveActaShortLink(short[1].toUpperCase());if(active){if(!isActaLinkSnapshot(resolved.snapshot))throw new Error('El snapshot recuperado no tiene una estructura de acta válida.');setParsed({link:resolved.snapshot,error:null,loading:false});}}catch(error){if(active)setParsed({link:null,error:error instanceof Error?error.message:'No se ha podido recuperar el acta.',loading:false});}return;}
       try{setParsed({link:decodeActaLink(hash),error:null,loading:false});}catch(error){setParsed({link:null,error:error instanceof Error?error.message:'El enlace no es válido.',loading:false});}
     };
     void load();return()=>{active=false;};
