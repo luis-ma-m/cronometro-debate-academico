@@ -123,20 +123,22 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
         && row.operation === 'replace-acta' && row.status !== 'superseded');
       if (!queued) return;
       const payload = asRecord(queued.payload);
-      if (payload?.mode === 'first-save' && asRecord(payload.source)) {
+      const firstSaveSource = asRecord(payload?.source);
+      if (payload?.mode === 'first-save' && firstSaveSource) {
         setPendingSave({
           operationId: queued.operationId,
           mode: 'first-save',
           input: {
-            operationId: queued.operationId, assignmentId, source: payload.source,
+            operationId: queued.operationId, assignmentId, source: firstSaveSource,
             expectedCurrentSourceId: null, confirmReplace: false, expectedSettingsRevision: queued.baseRevision,
           },
         });
         return;
       }
       const input = asRecord(payload?.input);
+      const confirmedSource = asRecord(input?.source);
       if (payload?.mode === 'confirmed' && input && input.operationId === queued.operationId
-        && input.assignmentId === assignmentId && asRecord(input.source)
+        && input.assignmentId === assignmentId && confirmedSource
         && Number.isSafeInteger(input.expectedSettingsRevision)
         && typeof input.confirmReplace === 'boolean'
         && (input.expectedCurrentSourceId === null || typeof input.expectedCurrentSourceId === 'string')) {
@@ -144,7 +146,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
           operationId: queued.operationId,
           mode: 'confirmed',
           input: {
-            operationId: queued.operationId, assignmentId, source: input.source,
+            operationId: queued.operationId, assignmentId, source: confirmedSource,
             expectedCurrentSourceId: input.expectedCurrentSourceId as string | null,
             confirmReplace: input.confirmReplace,
             expectedSettingsRevision: input.expectedSettingsRevision as number,
