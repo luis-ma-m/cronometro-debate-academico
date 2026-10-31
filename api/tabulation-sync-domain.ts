@@ -136,6 +136,11 @@ export function validatePublishedRoundPayload(
     if (seenMetadataTeams.size !== activeTeamIds.size || [...activeTeamIds].some((id) => !seenMetadataTeams.has(id))) {
       issues.push("La propuesta debe incluir exactamente los metadatos de todos los equipos activos del gestor.");
     }
+    const teamMap = isRecord(value.entityIdMap) && isRecord(value.entityIdMap.teams) ? value.entityIdMap.teams : {};
+    const mappedTeamIds = new Set(Object.values(teamMap));
+    if ([...activeTeamIds].some((id) => !mappedTeamIds.has(id))) {
+      issues.push("El mapa de identidades no contiene todos los equipos activos del gestor.");
+    }
   }
   const judges = new Map(context.judges.map((item) => [item.id, item]));
   const usedDebateIds = new Set<string>();
