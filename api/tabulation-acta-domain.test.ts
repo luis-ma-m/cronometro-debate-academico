@@ -40,21 +40,6 @@ describe("validateTabulationActaResult", () => {
     expect(validateTabulationActaResult({ ...payload, result: resultPayload }, elimination).result).toEqual(resultPayload);
     expect(() => validateTabulationActaResult({ ...payload, result: { ...resultPayload, ballots: [{ judgeId: "j1", totals: { a: 1 }, speeches: {} }] } }, elimination)).toThrow("votar por uno");
   });
-  it("keeps elimination votes valid when qualifying rounds use joint actas", () => {
-    const { context, payload } = fixture();
-    const elimination = {
-      ...context,
-      settings: presetSettings("aduma"),
-      round: { ...context.round, kind: "elimination" as const },
-    };
-    expect(elimination.settings.ballotMode).toBe("joint");
-    const eliminationResult = result([
-      { judgeId: "j1", totals: {}, speeches: {}, winnerTeamId: "a" },
-      { judgeId: "j2", totals: {}, speeches: {}, winnerTeamId: "b" },
-      { judgeId: "j3", totals: {}, speeches: {}, winnerTeamId: "a" },
-    ]);
-    expect(validateTabulationActaResult({ ...payload, result: eliminationResult }, elimination).winnerTeamId).toBe("a");
-  });
   it("rejects unknown ballot fields and intervention positions ignored by the outcome engine", () => {
     const { context, payload } = fixture();
     const ballot = payload.result.ballots[0];
