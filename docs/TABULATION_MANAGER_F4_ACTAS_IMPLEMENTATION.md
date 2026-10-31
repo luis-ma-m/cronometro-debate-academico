@@ -34,6 +34,13 @@ F4 dispone ya de una implementación funcional en código para el flujo de previ
 - Verificar la semántica de todos los campos y datos conjuntos/eliminatoria en la UI, no únicamente su persistencia JSONB.
 - No marcar F4 cerrada hasta que estas pruebas sean satisfactorias.
 
+## Continuación de implementación — UI de sala y rollback (2026-10-30)
+
+- Al expandir una sala del Gestor, se consulta automáticamente su historial oficial si todavía no está cargado. El contador de reescrituras queda visible también en la cabecera de la tarjeta de sala una vez recuperado el historial; la consulta sigue siendo de solo lectura y no se ejecuta mientras existan cambios locales sin guardar.
+- Se añade una prueba de regresión de F4 que fuerza un fallo al insertar el evento de auditoría después de insertar la fuente inmutable. La prueba exige `ROLLBACK`, prohíbe `COMMIT` y comprueba que no se registra la clave de idempotencia incompleta. Es una prueba de contrato con cliente PostgreSQL simulado; no sustituye la prueba de rollback en Neon Preview.
+
+F3: la implementación de pull/reconciliación, snapshot base, conflictos persistentes y cola de publicación de rondas ya está incorporada en este HEAD. No se identifica un bloque adicional de código F3 que pueda cerrarse responsablemente sin la prueba de navegador multi-dispositivo y la validación de IndexedDB en un navegador real. Esas pruebas permanecen como criterios de salida, no se etiquetan como implementadas.
+
 ## Nota de Vercel (no bloqueante para la implementación)
 
 El deployment de Preview puede quedar pendiente por la cuota/disponibilidad del plan de Vercel. Esto es una limitación operativa de la cuenta, no un defecto que deba corregirse modificando la arquitectura o el código de la PR. No se condiciona el avance de implementación a resolverla ni se deben hacer cambios estructurales en `api/` por este motivo. Las validaciones de código se siguen realizando mediante GitHub Actions; la validación de Preview quedará pendiente hasta que haya cuota disponible.
