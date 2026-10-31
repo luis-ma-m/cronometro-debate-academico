@@ -89,6 +89,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     if (!tournament?.panelLink?.remoteId || state.readOnly) return;
     let disposed = false;
     let running = false;
+    let activeController: AbortController | null = null;
     const pull = async () => {
       if (disposed || running || document.visibilityState === 'hidden' || !navigator.onLine) return;
       let token = '';
@@ -104,8 +105,11 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
         return;
       }
       running = true;
+      const controller = new AbortController();
+      activeController = controller;
+      const timeout = window.setTimeout(() => controller.abort(), 10000);
       try {
-        const remoteTournament = await getTournament(token);
+        const remoteTournament = await getTournament(token, controller.signal);
         if (disposed || remoteTournament.remoteId !== tournament.panelLink.remoteId) return;
         const remote = buildPanelHandoff(remoteTournament);
         const storedBase = readPanelSyncBase(window.localStorage, tournament.id);
@@ -184,6 +188,8 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           ? 'La sesión del Gestor ha caducado. Inicia sesión de nuevo.'
           : 'No se ha podido consultar el Gestor. Los datos locales permanecen intactos; se reintentará.');
       } finally {
+        window.clearTimeout(timeout);
+        if (activeController === controller) activeController = null;
         running = false;
       }
     };
@@ -197,6 +203,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       disposed = true;
+      activeController?.abort();
       window.clearInterval(interval);
       window.removeEventListener('online', onOnline);
       window.removeEventListener('focus', onFocus);
