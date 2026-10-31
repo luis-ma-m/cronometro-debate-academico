@@ -710,7 +710,7 @@ function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken 
   return <details className="tab-whatsapp tab-no-project">
     <summary><MessageCircle size={16} /> Actas por WhatsApp · enlaces cortos de 8 caracteres</summary>
     {unreachable && <Notice kind="warning">Los móviles no pueden abrir {baseUrl}: configura una dirección pública.</Notice>}
-    <p className="muted">Con backend y sesión activa se crea un enlace corto de ocho caracteres que guarda el snapshot completo en Neon. Si no hay conexión, se genera el formato A2 autocontenido. Los enlaces cortos necesitan backend para resolverse; A2 puede abrirse sin conexión.</p>
+    <p className="muted">Con backend y sesión activa se crea un enlace corto de ocho caracteres que guarda el snapshot completo en Neon. Si no hay conexión, se genera el formato A2 autocontenido. Los enlaces cortos necesitan backend para resolverse; A2 puede abrirse sin conexión. El juez enviará el acta por WhatsApp {desk ? 'al +' + desk : 'al chat que elija (configura el móvil de mesa en Reglas)'}.</p>
     <label className="tab-field"><span>Caducidad de los nuevos enlaces</span><select value={expiryDays} onChange={(event) => setExpiryDays(Number(event.target.value))}><option value={1}>1 día</option><option value={7}>7 días</option><option value={30}>30 días</option><option value={90}>90 días</option><option value={365}>365 días</option></select></label>
     {!managerSessionToken && <Notice kind="info">Inicia sesión en el panel de organización para crear y administrar enlaces cortos. Mientras tanto se utilizará A2 offline.</Notice>}
     {refreshError && <Notice kind="warning">No se ha podido cargar el inventario de enlaces: {refreshError}</Notice>}
