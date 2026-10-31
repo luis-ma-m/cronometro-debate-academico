@@ -10,7 +10,7 @@ import { TabDataError } from '../normalize';
 import { buildPanelHandoff, clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, tournamentFromHandoff, type PanelHandoff } from '../panelBridge';
 import { getTournament } from '../../api';
 import { ApiError } from '../../api';
-import { comparePanelRevisions } from '../reconciliation';
+import { buildLocalPanelBase, comparePanelRevisions } from '../reconciliation';
 import { clearPendingPanelReconciliation, readPanelSyncBase, readPendingPanelReconciliation, writePanelSyncBase, writePendingPanelReconciliation } from '../panelSync';
 import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS } from '../presets';
 import { roundIsComplete, type DebateOutcome } from '../results';
@@ -108,11 +108,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
         const remoteTournament = await getTournament(token);
         if (disposed || remoteTournament.remoteId !== tournament.panelLink.remoteId) return;
         const remote = buildPanelHandoff(remoteTournament);
-        const base = readPanelSyncBase(window.localStorage, tournament.id);
+        const storedBase = readPanelSyncBase(window.localStorage, tournament.id);
+        const base = storedBase ?? buildLocalPanelBase(tournament);
         if (!base) {
-          // Existing links created before F3 had no durable base. Establish a baseline without guessing what changed.
-          writePanelSyncBase(window.localStorage, tournament.id, remote);
-          setSyncStatus('Primera sincronización: se ha establecido una base remota. Revisa los datos recibidos del panel para importar cambios anteriores.');
+          setSyncStatus('No se puede reconstruir la base de comparación. Vuelve a vincular el torneo mediante revisión manual.');
           return;
         }
         if ((remote.revision ?? 0) <= (base.revision ?? 0)) {
