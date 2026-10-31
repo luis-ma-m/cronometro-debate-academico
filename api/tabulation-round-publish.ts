@@ -5,10 +5,6 @@ import { assertSyncOperationAuthorized } from "./sync-operation-policy.js";
 import { validateSyncOperationEnvelope, type ValidatedSyncOperation } from "./sync-operation-validation.js";
 import { SyncDomainValidationError, validatePublishedRoundPayload } from "./tabulation-sync-domain.js";
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
 /**
  * Publishes a reviewed Tabulation round as official manager assignments.
  * The manager session is verified by the dispatcher before this function runs.
