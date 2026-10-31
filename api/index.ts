@@ -1298,12 +1298,25 @@ export function validActaSnapshot(value:unknown):value is Record<string,unknown>
     }
   }
   // A2 links omit rules equal to the ADUMA defaults; the client expands those defaults.
-  if(rules.rubric!==undefined&&(!Array.isArray(rules.rubric)||rules.rubric.length>100
-    ||!rules.rubric.every(item=>!!item&&typeof item==="object"&&!Array.isArray(item)
-      &&typeof (item as Record<string,unknown>).id==="string"&&typeof (item as Record<string,unknown>).name==="string"
-      &&typeof (item as Record<string,unknown>).section==="string")))return false;
+  if(rules.rubric!==undefined){
+    if(!Array.isArray(rules.rubric)||rules.rubric.length>100)return false;
+    const rubricIds=new Set<string>();
+    for(const item of rules.rubric){
+      if(!item||typeof item!=="object"||Array.isArray(item))return false;
+      const rubricItem=item as Record<string,unknown>;
+      if(typeof rubricItem.id!=="string"||!rubricItem.id.trim()||rubricIds.has(rubricItem.id)
+        ||typeof rubricItem.name!=="string"||!rubricItem.name.trim()
+        ||typeof rubricItem.section!=="string"||!rubricItem.section.trim()
+        ||(rubricItem.description!==undefined&&typeof rubricItem.description!=="string"))return false;
+      rubricIds.add(rubricItem.id);
+    }
+  }
   const numericRules=["itemMin","itemMax","speakerScoreMin","speakerScoreMax","speakerScoreStep","minorPoints","minorsPerMajor","majorPoints"];
   if(numericRules.some(key=>rules[key]!==undefined&&(typeof rules[key]!=="number"||!Number.isFinite(rules[key]))))return false;
+  if(rules.itemMin!==undefined&&rules.itemMax!==undefined&&Number(rules.itemMin)>Number(rules.itemMax))return false;
+  if(rules.speakerScoreStep!==undefined&&Number(rules.speakerScoreStep)<=0)return false;
+  if(rules.minorsPerMajor!==undefined&&(!Number.isInteger(rules.minorsPerMajor)||Number(rules.minorsPerMajor)<1))return false;
+  if(["minorPoints","majorPoints"].some(key=>rules[key]!==undefined&&Number(rules[key])<0))return false;
   if(rules.speakerScores!==undefined&&typeof rules.speakerScores!=="boolean")return false;
   if(rules.warningConversion!==undefined&&!["ledu","pairs","aduma","none"].includes(String(rules.warningConversion)))return false;
   if(rules.minorEscalation!==undefined&&!["blocks","aduma"].includes(String(rules.minorEscalation)))return false;
