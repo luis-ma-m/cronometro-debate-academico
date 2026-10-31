@@ -52,7 +52,7 @@ function historicalIds(tournament: TabTournament, kind: PanelEntityKind): Set<st
   }
   if (kind === 'speakers') {
     for (const speaker of tournament.speakers) {
-      if (tournament.rounds.some((round) => round.debates.some((debate) => debate.ballots.some((ballot) =>
+      if (tournament.rounds.some((round) => round.debates.some((debate) => debate.result?.ballots.some((ballot) =>
         Object.keys(ballot.speeches ?? {}).includes(speaker.id))))) ids.add(speaker.id);
     }
   }
@@ -74,9 +74,9 @@ export function comparePanelRevisions(
   const changes: ReconciliationChange[] = [];
   const definitions: Array<{
     kind: PanelEntityKind;
-    base: Array<{ id: string; name: string; [key: string]: unknown }>;
-    remote: Array<{ id: string; name: string; [key: string]: unknown }>;
-    local: Array<{ id: string; name: string; [key: string]: unknown }>;
+    base: Array<{ id: string; name: string }>;
+    remote: Array<{ id: string; name: string }>;
+    local: Array<{ id: string; name: string }>;
   }> = [
     { kind: 'teams', base: base.teams, remote: remote.teams, local: tournament.teams },
     { kind: 'speakers', base: base.speakers, remote: remote.speakers, local: tournament.speakers },
@@ -108,7 +108,7 @@ export function comparePanelRevisions(
         changes.push({ kind: definition.kind, localId, remoteId, label: remoteRow.name, change: 'unchanged', fields: [], base: baseValue, local: localValue, remote: remoteValue });
         continue;
       }
-      const localChanged = localValue !== null && stable({ ...baseRow, id: localId }) !== stable({ ...localValue, id: remoteId });
+      const localChanged = localValue !== null && stable({ ...baseRow, id: remoteId }) !== stable({ ...localValue, id: remoteId });
       const fields = [...new Set([...Object.keys(baseRow), ...Object.keys(remoteRow)])]
         .filter((field) => stable((baseRow as Record<string, unknown>)[field]) !== stable(remoteValue[field]));
       const change: ReconciliationChangeKind = localChanged
