@@ -26,10 +26,17 @@ test('un juez rellena el acta en el móvil y la mesa la recibe por WhatsApp', as
 
   // Link for the chair of the first room.
   await desk.locator('.tab-whatsapp summary').click();
-  const sendLink = await desk.getByRole('link', { name: /Enviar el enlace de/ }).first().getAttribute('href');
-  expect(sendLink).toMatch(/^https:\/\/wa\.me\/\d*\?text=/);
-  const actaUrl = (await desk.getByRole('link', { name: /Abrir el acta de/ }).first().getAttribute('href'))!;
-  expect(decodeURIComponent(sendLink!.split('?text=')[1])).toContain(actaUrl);
+  const sendPopupPromise = desk.waitForEvent('popup');
+  await desk.getByRole('button', { name: 'Enviar enlace' }).first().click();
+  const sendPopup = await sendPopupPromise;
+  await expect.poll(() => sendPopup.url()).toMatch(/^https:\/\/wa\.me\/\d*\?text=/);
+  const sendLink = sendPopup.url();
+  const actaPopupPromise = desk.waitForEvent('popup');
+  await desk.getByRole('button', { name: 'Abrir el acta' }).first().click();
+  const actaPopup = await actaPopupPromise;
+  await expect.poll(() => actaPopup.url()).toContain('/acta#A2');
+  const actaUrl = actaPopup.url();
+  await expect.poll(() => new URL(sendLink).searchParams.get('text') ?? '').toContain(actaUrl);
   // WhatsApp iOS must see the entire fragment as one URL: no separators after #A2.
   expect(actaUrl).toMatch(/#A2[0-9A-Za-z]+$/);
   expect(actaUrl.slice(actaUrl.indexOf('#A2'))).not.toContain('-');
