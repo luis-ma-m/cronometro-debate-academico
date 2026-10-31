@@ -342,6 +342,10 @@ export async function saveTabulationActa(input: SaveTabulationActaInput) {
       || input.source.acta.debateId !== loaded.context.debate.id) {
       throw new ApiError("ACTA_IDENTITY_MISMATCH", "El acta local no coincide con el torneo, ronda y debate vinculados a esta asignación del Gestor.", 409);
     }
+    if (input.source.acta.basePanelRevision !== loaded.context.currentRevision
+      || input.source.acta.basePanelUpdatedAt !== loaded.context.currentUpdatedAt) {
+      throw new ApiError("ACTA_REVISION_CONFLICT", "El Gestor ha cambiado desde la última comparación. Vuelve a reconciliar y revisar el acta antes de guardarla.", 409);
+    }
     const canonicalActa = canonicalizeTabulationActa(
       { ...input.source.acta, ...(input.source.eliminationResult === undefined ? {} : { eliminationResult: input.source.eliminationResult }) },
       loaded.idMap,
