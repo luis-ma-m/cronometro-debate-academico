@@ -20,6 +20,8 @@ function payload() {
   return {
     format: "ledu-tabulacion-outbox",
     version: 1,
+    tabTournamentId: "tab-tournament-1",
+    tabulationRoundId: "tab-round-local-1",
     createdAt: baseUpdatedAt,
     tournamentId,
     basePanelRevision: 7,
