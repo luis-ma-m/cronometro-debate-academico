@@ -68,6 +68,12 @@ describe("Neon migration artifacts", () => {
     expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
   });
 
+  it("constrains persisted Tabulation chairs to manager judges", async () => {
+    const sql = await readFile(resolve("db/migrations/0017_tabulation_chair_judge_fk.sql"), "utf8");
+    expect(sql).toContain("FOREIGN KEY (chair_judge_id) REFERENCES judges(id)");
+    expect(sql).toContain("ON DELETE RESTRICT");
+  });
+
   it("migration runner discovers ordered, versioned SQL migrations and verifies checksums", async () => {
     const runner = await readFile(resolve("scripts/migrate-db.mjs"), "utf8");
     expect(runner).toContain('readdir(directory)');
