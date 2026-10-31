@@ -186,6 +186,8 @@ export interface TabDebate {
   judgeIds: string[];
   chairId: string;
   bracketSlot?: number;
+  /** Canonical manager assignment returned by an acknowledged round publication. */
+  managerAssignmentId?: string;
   result?: TabDebateResult;
 }
 
@@ -201,6 +203,8 @@ export interface TabRound {
   silent: boolean;
   debates: TabDebate[];
   createdAt: number;
+  /** Canonical manager round returned by an acknowledged publication. */
+  managerRoundId?: string;
   pushedAt?: number;
 }
 
