@@ -151,6 +151,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           setSyncStatus('No se pudo guardar la sincronización local. No se ha avanzado la revisión base.');
           return;
         }
+        if (!store.flush()) {
+          setSyncStatus('La sincronización está aplicada en memoria, pero no se ha confirmado su guardado local. La revisión base no se ha avanzado.');
+          return;
+        }
         writePanelSyncBase(window.localStorage, tournament.id, remote);
         setSyncStatus('Sincronizado · revisión remota ' + (remote.revision ?? 0));
         notify('Cambios compatibles del Gestor sincronizados: ' + merged.added + ' altas y ' + merged.updated + ' actualizaciones.');
@@ -250,6 +254,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       notify('No se ha podido guardar la vinculación. Los datos locales no se han modificado.', 'error');
       return;
     }
+    if (!store.flush()) { notify('No se ha podido confirmar el guardado local de la vinculación. No se ha avanzado la revisión base.', 'error'); return; }
     writePanelSyncBase(window.localStorage, tournament.id, handoff);
     clearPendingPanelReconciliation(window.localStorage, tournament.id);
     setPendingReconciliation(null);
@@ -270,6 +275,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     if (merged.issues.length) { notify(merged.issues.join(' '), 'error'); return; }
     if (!store.update(() => merged.tournament, { type: 'panel.sync.resolve', message: 'Conflictos revisados y resueltos aceptando la revisión remota ' + pendingReconciliation.remote.revision + '.' })) {
       notify('No se pudo guardar la resolución. La revisión remota sigue pendiente.', 'error');
+      return;
+    }
+    if (!store.flush()) {
+      notify('La resolución está aplicada en memoria, pero no se ha confirmado su guardado local. La revisión seguirá pendiente.', 'error');
       return;
     }
     writePanelSyncBase(window.localStorage, tournament.id, pendingReconciliation.remote);
