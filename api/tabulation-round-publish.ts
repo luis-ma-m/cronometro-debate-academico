@@ -119,9 +119,9 @@ export async function publishTabulationRound(rawOperation: unknown) {
       [operation.entityId, validated.roundNumber, validated.roundName, roundKind, defaultFormatId],
     );
     await client.query(
-      `INSERT INTO tabulation_round_metadata (tournament_id, manager_round_id, side_mode, team_metadata, updated_by)
-       VALUES ($1, $2, $3, $4::jsonb, $5)`,
-      [canonicalTournamentId, operation.entityId, validated.sideMode, JSON.stringify(validated.teamMetadata), "tabulation:" + operation.operationId],
+      `INSERT INTO tabulation_round_metadata (tournament_id, manager_round_id, side_mode, team_metadata, updated_by, entity_id_map)
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb)`,
+      [canonicalTournamentId, operation.entityId, validated.sideMode, JSON.stringify(validated.teamMetadata), "tabulation:" + operation.operationId, JSON.stringify(validated.entityIdMap)],
     );
     await client.query(
       "INSERT INTO audit_events(event_key, event_type, round_id, details) VALUES ($1, $2, $3, $4::jsonb)",
