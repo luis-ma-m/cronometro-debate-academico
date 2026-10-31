@@ -237,3 +237,6 @@ También se incorpora una instantánea de metadatos propios de Tabulación en la
 
 
 La migración 0017 añade una FK para garantizar que la presidencia persistida del debate siga apuntando a un juez existente del Gestor. Migraciones acumuladas de esta ampliación: 0014–0017 (además de 0010–0013 para settings e historial).
+
+
+La migración 0018 añade `tab_tournament_id` al puente de asignaciones. Preview y guardado verifican que el torneo, la ronda y el debate locales coincidan exactamente con la identidad persistida antes de canonicalizar; ya no basta con que el assignmentId sea válido.
