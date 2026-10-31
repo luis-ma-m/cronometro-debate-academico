@@ -161,6 +161,9 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
   };
   const rulesSnapshot = {
     settings,
+    settingsRevision: num(settingsRow.revision),
+    managerRevision: revision,
+    managerUpdatedAt: updatedAt,
     round: context.round,
     debate: { id: context.debate.id, teamIds: context.debate.teamIds, judgeIds, chairId: context.debate.chairId, favorTeamId: teamFavorId },
     teams: teams.map(({ id, swing, breakEligible, fallenFromRound }) => ({ id, swing, breakEligible, fallenFromRound: fallenFromRound ?? null })),
@@ -271,6 +274,7 @@ export async function saveTabulationActa(input: SaveTabulationActaInput) {
     const loaded = await loadActaContext(client, input.assignmentId);
     const scope = "tabulation-save-acta:" + input.assignmentId + ":" + hash({
       source: input.source, expectedCurrentSourceId: input.expectedCurrentSourceId, confirmReplace: input.confirmReplace,
+      expectedSettingsRevision: input.expectedSettingsRevision,
     });
     const prior = await client.query("SELECT scope, response FROM idempotency_keys WHERE operation_key = $1", [input.operationId]);
     if (prior.rows[0]) {
