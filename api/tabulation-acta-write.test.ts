@@ -158,6 +158,36 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT b.tournament_id"))).toBe(false);
   });
 
+  it("persists the separately validated elimination outcome column", async () => {
+    const baseImplementation = mocks.query.getMockImplementation();
+    mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      const response = await baseImplementation!(sql, params);
+      if (String(sql).startsWith("SELECT b.tournament_id")) {
+        return { ...response, rows: response.rows.map((row) => ({ ...row, round_kind: "elimination" })) };
+      }
+      return response;
+    });
+    const eliminationResult = result([
+      { judgeId: "j1", totals: {}, speeches: {}, winnerTeamId: "a" },
+      { judgeId: "j2", totals: {}, speeches: {}, winnerTeamId: "a" },
+      { judgeId: "j3", totals: {}, speeches: {}, winnerTeamId: "b" },
+    ]);
+    const response = await saveTabulationActa(input({
+      source: {
+        sourceMode: "elimination",
+        acta: {
+          tournamentId: "local-tournament", basePanelRevision: 3, basePanelUpdatedAt: baseUpdatedAt,
+          roundId: "local-round", debateId: "local-debate", result: eliminationResult,
+        },
+        eliminationResult: { winnerTeamId: "a", loserTeamId: "b", advancingTeamIds: ["a"] },
+      },
+    }));
+    expect(response).toMatchObject({ sourceMode: "elimination", winnerTeamId: "team-a" });
+    const insert = mocks.query.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO tabulation_acta_sources"));
+    const savedElimination = JSON.parse(String((insert?.[1] as unknown[])[8])) as Record<string, unknown>;
+    expect(savedElimination).toMatchObject({ winnerTeamId: "team-a", loserTeamId: "team-b", advancingTeamIds: ["team-a"] });
+  });
+
   it("rejects a save if Tabulation rules changed after the preview", async () => {
     await expect(saveTabulationActa(input({ expectedSettingsRevision: 3 })))
       .rejects.toMatchObject({ code: "ACTA_RULES_REVISION_CONFLICT", status: 409 });
