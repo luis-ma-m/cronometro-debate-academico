@@ -297,7 +297,7 @@ export function mergeHandoff(
   const teams = merge<TabTeam>(
     tournament.teams,
     mappedTeams,
-    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, incompatibleJudgeIds: next.incompatibleJudgeIds }),
+    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, active: next.active, incompatibleJudgeIds: next.incompatibleJudgeIds }),
   );
   const speakers = merge(
     tournament.speakers,
@@ -307,7 +307,7 @@ export function mergeHandoff(
   const judges = merge<TabJudge>(
     tournament.judges,
     mappedJudges,
-    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, incompatibleJudgeIds: next.incompatibleJudgeIds }),
+    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, active: next.active, incompatibleJudgeIds: next.incompatibleJudgeIds }),
   );
   const venues = merge(tournament.venues, mappedVenues, (existing, next) => ({ ...existing, name: next.name }));
   return {
