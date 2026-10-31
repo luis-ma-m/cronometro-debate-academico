@@ -18,6 +18,8 @@ export interface PublishedRoundPayload {
   tabTournamentName: string;
   panelTournamentName: string | null;
   roundName: string;
+  roundNumber: number;
+  roundKind: 'qualifying' | 'elimination';
   debates: PublishedRoundDebate[];
 }
 
@@ -68,6 +70,8 @@ export function validatePublishedRoundPayload(
     issues.push("La fecha de creación de la propuesta no es válida.");
   }
   if (!nonEmptyString(value.roundName)) issues.push("La propuesta debe identificar la ronda.");
+  if (!Number.isSafeInteger(value.roundNumber) || (value.roundNumber as number) < 1) issues.push("El número de ronda debe ser un entero positivo.");
+  if (value.roundKind !== 'qualifying' && value.roundKind !== 'elimination') issues.push("El tipo de ronda no es válido.");
   if (!nonEmptyString(value.tabTournamentName)) issues.push("La propuesta debe identificar el torneo de Tabulación.");
   if (value.tournamentId !== context.canonicalTournamentId) {
     issues.push("La propuesta no pertenece a la identidad canónica del torneo.");
@@ -182,6 +186,8 @@ export function validatePublishedRoundPayload(
     tabTournamentName: value.tabTournamentName as string,
     panelTournamentName: typeof value.panelTournamentName === "string" ? value.panelTournamentName : null,
     roundName: value.roundName as string,
+    roundNumber: value.roundNumber as number,
+    roundKind: value.roundKind as 'qualifying' | 'elimination',
     debates: (value.debates as Record<string, unknown>[]).map((item) => ({
       physicalRoomId: item.physicalRoomId as string,
       venueName: item.venueName as string,

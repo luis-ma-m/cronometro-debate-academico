@@ -125,6 +125,8 @@ export interface PanelOutbox {
   tabTournamentName: string;
   panelTournamentName: string | null;
   roundName: string;
+  roundNumber: number;
+  roundKind: 'qualifying' | 'elimination';
   debates: PanelOutboxDebate[];
 }
 
@@ -412,6 +414,8 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       tabTournamentName: tournament.name,
       panelTournamentName: tournament.panelLink?.tournamentName ?? null,
       roundName: round.name,
+      roundNumber: round.number,
+      roundKind: round.kind,
       debates,
     },
     issues,

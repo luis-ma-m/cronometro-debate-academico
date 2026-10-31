@@ -137,6 +137,30 @@ export interface TabulationActaHistory {
 export const getTabulationActaHistory = (token: string, assignmentId: string) =>
   apiCall<TabulationActaHistory>('getTabulationActaHistory', { token, assignmentId });
 
+export interface TabulationRoundPublishOperation {
+  protocolVersion: 1;
+  operationId: string;
+  tournamentId: string;
+  entityType: 'round';
+  entityId: string;
+  operation: 'publish-round';
+  baseRevision: number;
+  payload: Record<string, unknown>;
+  payloadHash: string;
+}
+export interface PublishedTabulationRound {
+  tournamentId: string;
+  roundId: string;
+  roundNumber: number;
+  roundName: string;
+  roundKind: 'qualifying' | 'elimination';
+  assignmentIds: string[];
+  revision: number;
+  operationId: string;
+}
+export const publishTabulationRound = (token: string, operation: TabulationRoundPublishOperation) =>
+  apiCall<PublishedTabulationRound>('publishTabulationRound', { token, operation });
+
 export interface PersistedTabulationSettings {
   schemaVersion: number;
   tournamentId: string;

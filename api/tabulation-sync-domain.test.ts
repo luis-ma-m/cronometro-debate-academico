@@ -40,6 +40,8 @@ const validPayload = (): PublishedRoundPayload => ({
   tabTournamentName: "Torneo de prueba",
   panelTournamentName: "Torneo de prueba",
   roundName: "Ronda 1",
+  roundNumber: 1,
+  roundKind: "qualifying",
   debates: [{
     physicalRoomId: "room-a",
     venueName: "Sala A",
@@ -167,6 +169,13 @@ describe("published round domain validation", () => {
       ...payload,
       debates: [{ ...payload.debates[0], judgeIds: ["judge-a", "judge-b"], chairId: "judge-a" }],
     }, judgeConflictContext)).toThrow(/jueces incompatibles/);
+  });
+
+  it("rejects missing, invalid or non-positive round metadata", () => {
+    const payload = validPayload();
+    expect(() => validatePublishedRoundPayload({ ...payload, roundNumber: 0 }, context)).toThrow(/entero positivo/);
+    expect(() => validatePublishedRoundPayload({ ...payload, roundKind: "unknown" }, context)).toThrow(/tipo de ronda/);
+    expect(() => validatePublishedRoundPayload({ ...payload, roundNumber: 1.5 }, context)).toThrow(/entero positivo/);
   });
 
   it("rejects malformed proposals without throwing incidental runtime errors", () => {
