@@ -795,3 +795,5 @@ El backend ya resuelve la identidad de cada debate mediante `tabulation_debate_a
 El flujo implementado es: borrador local → preview validado y no mutante → comparación de la versión oficial → confirmación explícita → guardado transaccional append-only. La transacción comprueba el head vigente y la revisión independiente de reglas de Tabulación, recalcula el ganador, conserva la fuente completa, avanza el head, registra auditoría y devuelve una respuesta idempotente. Se añadió UI para ambos modos de acta.
 
 Esto acredita implementación de código, no validación operativa completa. Quedan pendientes Neon Preview, concurrencia/rollback en PostgreSQL real, E2E en navegador y recuperación de pérdida de respuesta. No se han aplicado migraciones a Production; la PR permanece Draft hasta esas pruebas.
+
+La migración 0017 añade la integridad referencial de la presidencia persistida hacia `judges(id)` con `ON DELETE RESTRICT`.
