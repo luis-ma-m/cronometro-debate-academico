@@ -1270,13 +1270,43 @@ function canonicalShortLinkJson(value:unknown):string {
 }
 function validActaSnapshot(value:unknown):value is Record<string,unknown>{
   if(!value||typeof value!=="object"||Array.isArray(value))return false;
-  const v=value as Record<string,unknown>, round=v.round as Record<string,unknown>|undefined, rules=v.rules as Record<string,unknown>|undefined;
-  return (v.version===1||v.version===2)&&typeof v.debate==="string"&&v.debate.length>0&&v.debate.length<=200
-    &&typeof v.key==="string"&&v.key.length>0&&v.key.length<=100&&!!round&&Number.isInteger(round.number)
-    &&typeof round.name==="string"&&typeof round.elimination==="boolean"&&Array.isArray(v.teams)&&v.teams.length===2
-    &&v.teams.every(t=>!!t&&typeof t==="object"&&typeof (t as Record<string,unknown>).id==="string"&&typeof (t as Record<string,unknown>).name==="string"&&Array.isArray((t as Record<string,unknown>).members))
-    &&Array.isArray(v.jury)&&v.jury.length<=20&&v.jury.every(n=>typeof n==="string")&&!!rules&&Array.isArray(rules.rubric)&&rules.rubric.length<=100
-    &&typeof v.venue==="string"&&typeof v.desk==="string";
+  const v=value as Record<string,unknown>;
+  const round=v.round&&typeof v.round==="object"&&!Array.isArray(v.round)?v.round as Record<string,unknown>:null;
+  const rules=v.rules&&typeof v.rules==="object"&&!Array.isArray(v.rules)?v.rules as Record<string,unknown>:null;
+  if((v.version!==1&&v.version!==2)||typeof v.tournament!=="string"||v.tournament.length>160
+    ||typeof v.debate!=="string"||!v.debate.trim()||v.debate.length>200
+    ||typeof v.key!=="string"||!v.key||v.key.length>100
+    ||!round||!Number.isSafeInteger(round.number)||(round.number as number)<1||(round.number as number)>10000
+    ||typeof round.name!=="string"||!round.name.trim()||round.name.length>160||typeof round.elimination!=="boolean"
+    ||typeof v.venue!=="string"||v.venue.length>240||typeof v.desk!=="string"||v.desk.length>40
+    ||!Array.isArray(v.teams)||v.teams.length!==2||!Array.isArray(v.jury)||v.jury.length>20
+    ||!v.jury.every(n=>typeof n==="string"&&n.length<=160)||!rules)return false;
+  const teamIds=new Set<string>(),speakerIds=new Set<string>();
+  for(const rawTeam of v.teams){
+    if(!rawTeam||typeof rawTeam!=="object"||Array.isArray(rawTeam))return false;
+    const team=rawTeam as Record<string,unknown>;
+    if(typeof team.id!=="string"||!team.id.trim()||team.id.length>128||teamIds.has(team.id)
+      ||typeof team.name!=="string"||!team.name.trim()||team.name.length>200
+      ||!Array.isArray(team.members)||team.members.length>32)return false;
+    teamIds.add(team.id);
+    for(const rawSpeaker of team.members){
+      if(!rawSpeaker||typeof rawSpeaker!=="object"||Array.isArray(rawSpeaker))return false;
+      const speaker=rawSpeaker as Record<string,unknown>;
+      if(typeof speaker.id!=="string"||!speaker.id.trim()||speaker.id.length>128||speakerIds.has(speaker.id)
+        ||typeof speaker.name!=="string"||!speaker.name.trim()||speaker.name.length>160)return false;
+      speakerIds.add(speaker.id);
+    }
+  }
+  // A2 links omit rules equal to the ADUMA defaults; the client expands those defaults.
+  if(rules.rubric!==undefined&&(!Array.isArray(rules.rubric)||rules.rubric.length>100
+    ||!rules.rubric.every(item=>!!item&&typeof item==="object"&&!Array.isArray(item)
+      &&typeof (item as Record<string,unknown>).id==="string"&&typeof (item as Record<string,unknown>).name==="string"
+      &&typeof (item as Record<string,unknown>).section==="string")))return false;
+  const numericRules=["itemMin","itemMax","speakerScoreMin","speakerScoreMax","speakerScoreStep","warningConversion","minorEscalation","minorPoints","minorsPerMajor","majorPoints"];
+  if(numericRules.some(key=>rules[key]!==undefined&&(typeof rules[key]!=="number"||!Number.isFinite(rules[key]))))return false;
+  if(rules.speakerScores!==undefined&&typeof rules.speakerScores!=="boolean")return false;
+  if(rules.majorMode!==undefined&&typeof rules.majorMode!=="string")return false;
+  return true;
 }
 function shortLinkId():string{const a="0123456789ABCDEFGHJKMNPQRSTVWXYZ";let n=0n;for(const b of randomBytes(5))n=(n<<8n)|BigInt(b);let s="";for(let i=0;i<8;i++){s=a[Number(n&31n)]+s;n>>=5n;}return s;}
 function expiryDate(value:unknown):Date{const d=Number(value);if(![1,7,30,90,365].includes(d))throw new ApiError("INVALID_EXPIRY","Elige una caducidad de 1, 7, 30, 90 o 365 días.");return new Date(Date.now()+d*86400000);}
