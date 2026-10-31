@@ -47,9 +47,12 @@ export async function runSyncOutboxUpgradeScenario(): Promise<SyncOutboxUpgradeR
 
   const firstRepository = createIndexedDbSyncOutboxRepository();
   const migratedRows = await firstRepository.list('legacy-tournament');
-  const firstOutbox = createSyncOutbox(firstRepository);
-  const secondOutbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
-  const recoveredLeases = await firstOutbox.recoverExpiredLeases();
+  const recoveryTime = Date.now();
+  const recoveryOutbox = createSyncOutbox(firstRepository, { now: () => recoveryTime });
+  const recoveredLeases = await recoveryOutbox.recoverExpiredLeases();
+  // Expired leases intentionally enter backoff; advance the test clock to its first retry slot.
+  const firstOutbox = createSyncOutbox(firstRepository, { now: () => recoveryTime + 2_000 });
+  const secondOutbox = createSyncOutbox(createIndexedDbSyncOutboxRepository(), { now: () => recoveryTime + 2_000 });
   const [firstClaim, secondClaim] = await Promise.all([
     firstOutbox.claimNext('legacy-tournament', 'browser-tab-a'),
     secondOutbox.claimNext('legacy-tournament', 'browser-tab-b'),
