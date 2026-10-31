@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, CloudUpload, RefreshCw } from 'lucide-react';
-import { apiConfigured, previewTabulationActa, saveTabulationActa, type PreviewTabulationActaResponse, type SaveTabulationActaResponse } from '../api';
+import { ApiError, apiConfigured, previewTabulationActa, saveTabulationActa, type PreviewTabulationActaResponse, type SaveTabulationActaResponse } from '../api';
 import { computeDebateOutcome, outcomeContext } from './results';
 import { makeTabId, type TabDebate, type TabDebateResult, type TabRound, type TabTournament } from './types';
 import { lookups } from './ui';
@@ -48,6 +48,12 @@ function readPendingSave(assignmentId: string): PendingSave | null {
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
+const nonRetryableActaCodes = new Set([
+  'ACTA_REVISION_CONFLICT', 'ACTA_RULES_REVISION_CONFLICT', 'ACTA_IDENTITY_MISMATCH',
+  'ACTA_CONTEXT_INVALID', 'ACTA_IDENTITY_REVIEW_REQUIRED', 'ACTA_REPLACEMENT_CONFIRMATION_REQUIRED',
+  'ACTA_REPLACEMENT_CONFIRMATION_INVALID', 'INVALID_ACTA', 'INVALID_ACTA_SOURCE',
+  'ACTA_SOURCE_MODE_MISMATCH', 'INVALID_ELIMINATION_RESULT', 'ELIMINATION_RESULT_MISMATCH',
+]);
 function ballotCount(source: Record<string, unknown> | null): number {
   const payload = asRecord(source?.sourcePayload);
   const acta = asRecord(payload?.acta);
@@ -162,8 +168,14 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
       });
       notify(saved.replacedSourceId ? 'Acta oficial sustituida. Reescrituras acumuladas: ' + saved.rewriteCount + '.' : 'Primera versión del acta publicada oficialmente en el Gestor.', 'success');
     } catch (error) {
-      notify((error instanceof Error ? error.message : 'No se ha podido publicar el acta.')
-        + ' Puedes reintentar: se conservará el mismo identificador de operación.', 'error');
+      if (error instanceof ApiError && nonRetryableActaCodes.has(error.code)) {
+        setPendingSave(null);
+        setPreview(null);
+        notify(error.message + ' La operación no se ha guardado; vuelve a comparar el acta con el Gestor.', 'error');
+      } else {
+        notify((error instanceof Error ? error.message : 'No se ha podido publicar el acta.')
+          + ' Puedes reintentar: se conservará el mismo identificador de operación.', 'error');
+      }
     } finally { setBusy(false); }
   };
 
@@ -182,8 +194,14 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
       });
       notify('Confirmación recuperada: el Gestor conserva la versión oficial ' + saved.sourceId + '.', 'success');
     } catch (error) {
-      notify((error instanceof Error ? error.message : 'No se ha podido recuperar la confirmación.')
-        + ' Se conservará la misma operación para volver a intentarlo.', 'error');
+      if (error instanceof ApiError && nonRetryableActaCodes.has(error.code)) {
+        setPendingSave(null);
+        setPreview(null);
+        notify(error.message + ' La operación no se ha guardado; vuelve a comparar después de resolver el conflicto.', 'error');
+      } else {
+        notify((error instanceof Error ? error.message : 'No se ha podido recuperar la confirmación.')
+          + ' Se conservará la misma operación para volver a intentarlo.', 'error');
+      }
     } finally { setBusy(false); }
   };
 
