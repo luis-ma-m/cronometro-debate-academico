@@ -112,6 +112,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
         source: confirmedSource,
         expectedCurrentSourceId: preview.currentSourceId,
         confirmReplace: Boolean(preview.currentSourceId),
+        expectedSettingsRevision: preview.settingsRevision,
       },
     };
     // Keep the same operationId and body if the network response is lost; a retry is idempotent.
