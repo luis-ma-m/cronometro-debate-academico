@@ -476,7 +476,7 @@ async function getTabulationActaVersion(payload: Record<string, unknown>) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof ApiError) throw error;
     if (isMissingTabulationSettingsMigration(error)) {
-      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0012_tabulation_acta_sources.sql en la base de datos de este entorno. No se ha modificado ningún dato.", 503);
+      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar las migraciones 0012_tabulation_acta_sources.sql y 0013_tabulation_elimination_sources.sql en la base de datos de este entorno. No se ha modificado ningún dato.", 503);
     }
     throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido consultar el detalle de la versión del acta.", 503);
   } finally {
@@ -499,7 +499,7 @@ async function getTabulationActaHistory(payload: Record<string, unknown>) {
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof ApiError) throw error;
     if (isMissingTabulationSettingsMigration(error)) {
-      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0012_tabulation_acta_sources.sql en la base de datos de este entorno. No se ha modificado ningún dato.", 503);
+      throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar las migraciones 0012_tabulation_acta_sources.sql y 0013_tabulation_elimination_sources.sql en la base de datos de este entorno. No se ha modificado ningún dato.", 503);
     }
     throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido consultar el historial de actas.", 503);
   } finally {
