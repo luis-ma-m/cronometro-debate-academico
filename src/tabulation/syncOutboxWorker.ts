@@ -46,13 +46,13 @@ export function createSyncOutboxWorker(options: SyncOutboxWorkerOptions) {
     wakeTimer = window.setTimeout(() => { void runOnce(); }, Math.min(delay, pollIntervalMs));
   };
 
-  const runOnce = (): Promise<void> => {
-    if (stopped || (typeof navigator !== 'undefined' && navigator.onLine === false)) return Promise.resolve();
+  const runOnce = (force = false): Promise<void> => {
+    if ((stopped && !force) || (typeof navigator !== 'undefined' && navigator.onLine === false)) return Promise.resolve();
     if (inFlight) return inFlight;
     inFlight = (async () => {
       try {
         await options.outbox.recoverExpiredLeases();
-        while (!stopped && !(typeof navigator !== 'undefined' && navigator.onLine === false)) {
+        while ((!stopped || force) && !(typeof navigator !== 'undefined' && navigator.onLine === false)) {
           const operation = await options.outbox.claimNext(options.tournamentId, options.workerId);
           if (!operation) break;
           await refresh();
@@ -118,7 +118,7 @@ export function createSyncOutboxWorker(options: SyncOutboxWorkerOptions) {
       void runOnce();
     },
     wake,
-    async runOnce() { await runOnce(); },
+    async runOnce() { await runOnce(true); },
     async refresh() { return refresh(); },
     stop() {
       if (stopped) return;
