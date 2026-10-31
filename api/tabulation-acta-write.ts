@@ -18,6 +18,24 @@ const parseJson = (value: unknown): unknown => {
 };
 const hash = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const uuid = (value: string): boolean => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+function buildActaDiff(before: unknown, after: unknown, limit = 40): Array<{ path: string; before: unknown; after: unknown }> {
+  const changes: Array<{ path: string; before: unknown; after: unknown }> = [];
+  const visit = (left: unknown, right: unknown, path: string) => {
+    if (changes.length >= limit) return;
+    if (JSON.stringify(left) === JSON.stringify(right)) return;
+    if (isRecord(left) && isRecord(right)) {
+      for (const key of [...new Set([...Object.keys(left), ...Object.keys(right)])].sort()) {
+        visit(left[key], right[key], path ? path + "." + key : key);
+        if (changes.length >= limit) break;
+      }
+      return;
+    }
+    changes.push({ path: path || "acta", before: left === undefined ? null : left, after: right === undefined ? null : right });
+  };
+  visit(before, after, "");
+  return changes;
+}
+
 
 interface LoadedActaContext {
   context: TabulationActaDomainContext;
@@ -213,6 +231,7 @@ export async function previewTabulationActa(input: PreviewTabulationActaInput) {
       basePanelRevision: loaded.context.currentRevision, basePanelUpdatedAt: loaded.context.currentUpdatedAt,
       settingsRevision: loaded.settingsRevision,
       currentSourceId: loaded.currentSourceId, currentSource,
+      changes: currentSource ? buildActaDiff(currentSource.sourcePayload, proposedSource) : [],
       proposedSource, sourceMode: validated.sourceMode, winnerTeamId: validated.acta.winnerTeamId,
       requiresReplacementConfirmation: Boolean(loaded.currentSourceId),
     };
