@@ -8,11 +8,9 @@ import { TabulationActaValidationError, type TabulationActaDomainContext } from 
 import type { TabJudge, TabSettings, TabSpeaker, TabTeam } from "../src/tabulation/types.js";
 
 type Db = { query(sql: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> };
-type IdentityMap = TabulationActaIdMap & { venues?: Record<string, string> };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
-const asArray = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const parseJson = (value: unknown): unknown => {
   if (typeof value !== "string") return value;
   try { return JSON.parse(value) as unknown; } catch { return null; }
