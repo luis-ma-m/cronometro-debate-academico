@@ -215,6 +215,7 @@ describe('tabulation → panel', () => {
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
     const { outbox, warnings } = buildOutbox(tab, 'r1', now);
     expect(warnings.join(' ')).toContain('postura provisional');
+    expect(outbox).toMatchObject({ roundName: 'Ronda 1', roundNumber: 1, roundKind: 'qualifying' });
     const applied = applyOutboxToPanel(source, 'r2', outbox!, { makeId, now });
     expect(applied.issues).toEqual([]);
     const created = applied.rooms!.filter((room) => room.roundId === 'r2');

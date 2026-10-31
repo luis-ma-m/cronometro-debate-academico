@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { getPool } from "./db.js";
 import { ApiError, bool, num, str } from "./core.js";
 import { assertSyncOperationAuthorized } from "./sync-operation-policy.js";
-import { validateSyncOperationEnvelope } from "./sync-operation-validation.js";
+import { validateSyncOperationEnvelope, type ValidatedSyncOperation } from "./sync-operation-validation.js";
 import { SyncDomainValidationError, validatePublishedRoundPayload } from "./tabulation-sync-domain.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -16,7 +16,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * are committed atomically. No local/offline data is changed by this endpoint.
  */
 export async function publishTabulationRound(rawOperation: unknown) {
-  let operation;
+  let operation: ValidatedSyncOperation;
   try {
     operation = validateSyncOperationEnvelope(rawOperation);
   } catch (error) {
@@ -65,6 +65,10 @@ export async function publishTabulationRound(rawOperation: unknown) {
     }
 
     assertSyncOperationAuthorized(operation, { authenticatedManager: true, canonicalTournamentId });
+    if (proposal.basePanelRevision !== currentRevision
+      || (proposal.basePanelUpdatedAt !== undefined && proposal.basePanelUpdatedAt !== currentUpdatedAt)) {
+      throw new ApiError("REVISION_CONFLICT", "El gestor ha cambiado desde que se generó la propuesta. Recarga el snapshot, revisa los cruces y vuelve a publicar.", 409);
+    }
 
     const [roomsResult, teamsResult, judgesResult] = await Promise.all([
       client.query("SELECT id, active FROM physical_rooms"),

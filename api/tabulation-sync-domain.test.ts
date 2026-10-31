@@ -56,6 +56,7 @@ const validPayload = (): PublishedRoundPayload => ({
 describe("published round domain validation", () => {
   it("accepts a valid proposal matching the current canonical tournament and revision", () => {
     expect(validatePublishedRoundPayload(validPayload(), context)).toEqual(validPayload());
+    expect(validatePublishedRoundPayload({ ...validPayload(), roundKind: "elimination", roundNumber: 2 }, context)).toMatchObject({ roundKind: "elimination", roundNumber: 2 });
   });
 
   it("rejects a proposal from another tournament or a stale manager revision", () => {

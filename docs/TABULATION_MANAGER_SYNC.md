@@ -705,3 +705,16 @@ Se incorpora la acción autenticada `getTabulationActaHistory` y el lector `api/
 La consulta requiere la migración `0012_tabulation_acta_sources.sql`; si no está aplicada, devuelve `MIGRATION_REQUIRED` y no intenta crear tablas ni ejecutar migraciones. Se han añadido pruebas para historial vacío, versión vigente, recuento de reescrituras, límite de lectura, detalle bajo demanda, aislamiento por asignación, asignación inexistente y contadores incoherentes.
 
 **Pendiente:** conectar esta respuesta a la interfaz de la sala para mostrar el historial y el contador, e implementar la operación de escritura oficial con diff y confirmación. El endpoint no debe invocarse desde la UI hasta que el vínculo remoto y la asignación hayan sido verificados.
+
+
+## Incremento: endpoint transaccional de publicación explícita de rondas
+
+Se añade `api/tabulation-round-publish.ts` y la acción privada `publishTabulationRound`.
+
+- Requiere sesión privada del gestor y un sobre de operación `publish-round/round` con protocolo, operationId, UUID canónico, revisión base, payload y SHA-256 verificado.
+- La propuesta ahora incluye `roundNumber` y `roundKind`; se conserva la distinción entre clasificatoria y eliminatoria y se valida que el número sea el siguiente disponible.
+- Dentro de una única transacción se bloquea la fila de configuración del torneo, se comprueba identidad y revisión, se cargan salas/equipos/jueces desde PostgreSQL, se repiten las validaciones de dominio y se crean ronda, asignaciones, paneles de jueces, auditoría, revisión global y respuesta idempotente.
+- Los reintentos con el mismo operationId y contenido devuelven el ACK persistido; reutilizarlo con otro contenido devuelve conflicto. Un cambio de revisión devuelve 409 y exige recargar y revisar la propuesta.
+- La presidencia y la indicación de postura provisional quedan registradas en el evento de auditoría de cada asignación; la asignación del gestor continúa almacenando el panel de jueces según su modelo actual.
+
+**Límite de esta entrega:** el endpoint está implementado, pero todavía no está conectado al worker HTTP de la outbox ni al botón de revisión/publicación en la interfaz del gestor. No se presenta la ronda como publicada hasta que el futuro cliente reciba este ACK confirmado. No se han ejecutado migraciones ni escrituras en Neon.
