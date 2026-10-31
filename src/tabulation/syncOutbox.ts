@@ -7,7 +7,7 @@ export type SyncOperationStatus = 'pending' | 'sending' | 'conflict' | 'failed' 
 export interface SyncOperationError { code: string; message: string }
 export interface PendingSyncOperation {
   operationId: string; tournamentId: string; entityType: string; entityId: string;
-  operation: SyncOperationKind; baseRevision: number; payload: unknown; payloadHash: string;
+  operation: SyncOperationKind; baseRevision: number; payload: unknown; payloadHash: string; dependsOnOperationId?: string;
   status: SyncOperationStatus; attempts: number; createdAt: number; lastAttemptAt?: number;
   lastError?: SyncOperationError; workerId?: string; leaseUntil?: number; nextAttemptAt?: number; supersededBy?: string;
 }
@@ -15,7 +15,7 @@ export interface EnqueueSyncOperation {
   /** Caller-supplied id for operations already persisted by a domain workflow. */
   operationId?: string;
   tournamentId: string; entityType: string; entityId: string;
-  operation: SyncOperationKind; baseRevision: number; payload: unknown;
+  operation: SyncOperationKind; baseRevision: number; payload: unknown; dependsOnOperationId?: string;
 }
 export interface SyncOutboxRepository {
   insert(operation: PendingSyncOperation): Promise<PendingSyncOperation | null>;
@@ -237,10 +237,19 @@ export function createIndexedDbSyncOutboxRepository(factory: IDBFactory = global
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const rows = request.result as PendingSyncOperation[];
-          const oldest = rows.sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId))
-            .find((row) => row.status !== 'superseded');
-          if (!oldest || oldest.status !== 'pending' || (oldest.nextAttemptAt ?? 0) > timestamp) return;
-          result = { ...oldest, status: 'sending', attempts: oldest.attempts + 1, lastAttemptAt: timestamp,
+          const ordered = rows.sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId));
+          const candidate = ordered.find((row, index) => {
+            if (row.status !== 'pending' || (row.nextAttemptAt ?? 0) > timestamp) return false;
+            const earlier = ordered.slice(0, index);
+            const sameEntityBlocked = earlier.some((prior) => prior.status !== 'superseded'
+              && prior.entityType === row.entityType && prior.entityId === row.entityId);
+            const dependency = row.dependsOnOperationId
+              ? ordered.find((prior) => prior.operationId === row.dependsOnOperationId) : undefined;
+            const dependencyBlocked = Boolean(dependency && dependency.status !== 'superseded');
+            return !sameEntityBlocked && !dependencyBlocked;
+          });
+          if (!candidate) return;
+          result = { ...candidate, status: 'sending', attempts: candidate.attempts + 1, lastAttemptAt: timestamp,
             workerId, leaseUntil: timestamp + leaseMs, lastError: undefined, nextAttemptAt: undefined };
           store.put(result);
         };
