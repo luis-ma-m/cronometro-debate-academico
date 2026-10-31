@@ -114,10 +114,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           setSyncStatus('No se puede reconstruir la base de comparación. Vuelve a vincular el torneo mediante revisión manual.');
           return;
         }
-        if ((remote.revision ?? 0) <= (base.revision ?? 0)) {
-          setSyncStatus('Al día · revisión remota ' + (base.revision ?? 0));
-          return;
-        }
+        const remoteRevisionAdvanced = (remote.revision ?? 0) > (base.revision ?? 0);
         const existingPending = readPendingPanelReconciliation(window.localStorage, tournament.id);
         if (existingPending) {
           setPendingReconciliation(existingPending);
@@ -125,6 +122,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           return;
         }
         const diff = comparePanelRevisions(tournament, base, remote);
+        if (!remoteRevisionAdvanced && diff.changes.every((item) => item.change === 'unchanged')) {
+          setSyncStatus('Al día · revisión remota ' + (base.revision ?? 0));
+          return;
+        }
         if (diff.hasConflicts || diff.requiresHistoricalReview) {
           const pending = { base, remote, detectedAt: Date.now() };
           writePendingPanelReconciliation(window.localStorage, tournament.id, pending);
