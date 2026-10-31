@@ -109,6 +109,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
         if (disposed || remoteTournament.remoteId !== tournament.panelLink.remoteId) return;
         const remote = buildPanelHandoff(remoteTournament);
         const storedBase = readPanelSyncBase(window.localStorage, tournament.id);
+        const isLegacyBaseline = !storedBase;
         const base = storedBase ?? buildLocalPanelBase(tournament);
         if (!base) {
           setSyncStatus('No se puede reconstruir la base de comparación. Vuelve a vincular el torneo mediante revisión manual.');
@@ -122,6 +123,13 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           return;
         }
         const diff = comparePanelRevisions(tournament, base, remote);
+        if (isLegacyBaseline && diff.changes.some((item) => item.change !== 'unchanged')) {
+          const pending = { base, remote, detectedAt: Date.now() };
+          writePendingPanelReconciliation(window.localStorage, tournament.id, pending);
+          setPendingReconciliation(pending);
+          setSyncStatus('Este vínculo no tenía snapshot base persistido. Revisa manualmente el primer diff antes de sincronizar.');
+          return;
+        }
         if (!remoteRevisionAdvanced && diff.changes.every((item) => item.change === 'unchanged')) {
           setSyncStatus('Al día · revisión remota ' + (base.revision ?? 0));
           return;
