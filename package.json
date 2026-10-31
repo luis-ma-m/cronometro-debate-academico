@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "typecheck:api": "tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --lib ES2022,DOM --types node api/index.ts api/core.ts api/sync-operation-validation.ts api/sync-operation-policy.ts api/tabulation-sync-domain.ts api/tabulation-acta-domain.ts api/tabulation-acta-history.ts api/tabulation-round-publish.ts",
+    "typecheck:api": "tsc --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --lib ES2022,DOM --types node api/index.ts api/core.ts api/sync-operation-validation.ts api/sync-operation-policy.ts api/tabulation-sync-domain.ts api/tabulation-acta-domain.ts api/tabulation-acta-source.ts api/tabulation-acta-identity.ts api/tabulation-elimination.ts api/tabulation-acta-history.ts api/tabulation-round-publish.ts",
     "db:migrate": "node scripts/migrate-db.mjs",
     "db:status": "node scripts/migrate-db.mjs --status",
     "db:seed": "node scripts/seed-db.mjs"
