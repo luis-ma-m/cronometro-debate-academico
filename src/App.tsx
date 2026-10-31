@@ -4,7 +4,7 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory, publishTabulationRound as apiPublishTabulationRound } from './api';
 import type { RoundActivationPreview, RoomConnectionStatus, TabulationActaHistory as TabulationActaHistoryData } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
@@ -15,6 +15,7 @@ import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 import { SearchableEntityPicker } from './components/SearchableEntityPicker';
 import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
+import { createIndexedDbSyncOutboxRepository, createSyncOutbox, hashSyncPayload } from './tabulation/syncOutbox';
 
 const SESSION_KEY = 'ledu-admin-session';
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
@@ -107,6 +108,7 @@ export default function App() {
   const [preparingRoomId, setPreparingRoomId] = useState<string | null>(null);
   const [preparedRoomLink, setPreparedRoomLink] = useState<{ roomName: string; href: string } | null>(null);
   const [tabulationNotice, setTabulationNotice] = useState('');
+  const [publishingTabulationRound, setPublishingTabulationRound] = useState(false);
   // Reuse already fetched room-control links for the lifetime of this admin session.
   const preparedRoomLinksRef = useRef<Record<string, { roomName: string; href: string }>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -1270,6 +1272,139 @@ export default function App() {
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
   };
 
+  const publishFromTabulation = async () => {
+    if (!apiConfigured || !session || !data.remoteId) {
+      setServerError('La publicación remota requiere una sesión del gestor y una identidad canónica de torneo.');
+      return;
+    }
+    if (hasUnsavedChanges || hasUnsavedRef.current || saving) {
+      setServerError('Guarda o descarta los cambios locales del gestor antes de publicar una ronda.');
+      return;
+    }
+    const outbox = readOutbox(localStorage);
+    if (!outbox) {
+      setServerError('No hay ninguna propuesta de ronda. En Tabulación, revisa la ronda y utiliza «Enviar al panel de cronómetros».');
+      return;
+    }
+    if (!outbox.tournamentId || outbox.tournamentId !== data.remoteId) {
+      setServerError('La propuesta no contiene la identidad canónica de este torneo o pertenece a otro torneo. Actualiza el vínculo y vuelve a generarla.');
+      return;
+    }
+    const nextRoundNumber = Math.max(0, ...data.rounds.map((round) => round.number)) + 1;
+    if (outbox.roundNumber !== nextRoundNumber) {
+      setServerError('La propuesta corresponde a la ronda ' + outbox.roundNumber + ', pero el gestor espera la ronda ' + nextRoundNumber + '. Actualiza Tabulación, genera la ronda correcta y vuelve a revisarla.');
+      return;
+    }
+    const previewRoundId = makeId('preview');
+    const previewRound: Round = {
+      id: previewRoundId,
+      number: outbox.roundNumber,
+      name: outbox.roundName,
+      active: false,
+      defaultFormatId: data.formats[0]?.id ?? '',
+      scoreType: outbox.roundKind,
+    };
+    const preview = applyOutboxToPanel(
+      { ...data, rounds: [...data.rounds, previewRound], rooms: [] },
+      previewRoundId,
+      outbox,
+      { makeId },
+    );
+    if (!preview.rooms) {
+      setServerError('La propuesta no supera la revisión local: ' + preview.issues.join(' '));
+      return;
+    }
+    const summary = preview.summary.join('\n');
+    const provisionalCount = outbox.debates.filter((debate) => debate.sidesProvisional).length;
+    const noJudgeCount = outbox.debates.filter((debate) => debate.judgeIds.length === 0).length;
+    const warnings = [
+      provisionalCount ? provisionalCount + ' debate(s) tienen posturas provisionales y deberán sortearse/revisarse.' : '',
+      noJudgeCount ? noJudgeCount + ' debate(s) no tienen jueces asignados.' : '',
+    ].filter(Boolean).join('\n');
+    if (!window.confirm(
+      '¿Publicar «' + outbox.roundName + '» como nueva ronda oficial del gestor?\n\n'
+      + summary + (warnings ? '\n\nAvisos:\n' + warnings : '')
+      + '\n\nSe crearán ' + outbox.debates.length + ' asignaciones nuevas. No se sobrescribirán rondas ni actas existentes. La publicación solo se confirmará cuando el servidor responda con un ACK transaccional.',
+    )) return;
+
+    setPublishingTabulationRound(true);
+    setServerError('');
+    try {
+      const repository = createIndexedDbSyncOutboxRepository();
+      const syncOutbox = createSyncOutbox(repository);
+      await syncOutbox.recoverExpiredLeases();
+      const payloadHash = await hashSyncPayload(outbox);
+      const entityId = 'tab-' + payloadHash.slice(0, 32);
+      let existing = (await syncOutbox.list(data.remoteId)).find((item) =>
+        item.operation === 'publish-round' && item.entityType === 'round'
+        && item.entityId === entityId && item.payloadHash === payloadHash
+      );
+      if (existing?.status === 'conflict' || existing?.status === 'failed') {
+        throw new Error('Esta propuesta ya tiene un conflicto o fallo registrado. No se reenviará automáticamente; actualiza los datos, resuelve el problema y genera una propuesta nueva.');
+      }
+      if (existing?.status === 'sending') {
+        await syncOutbox.recoverExpiredLeases();
+        existing = (await syncOutbox.list(data.remoteId)).find((item) => item.operationId === existing!.operationId);
+        if (existing?.status === 'sending') throw new Error('Esta publicación ya está siendo procesada en otra pestaña. Espera a que termine antes de volver a intentarlo.');
+      }
+      const queued = existing ?? (await syncOutbox.enqueue({
+        tournamentId: data.remoteId,
+        entityType: 'round',
+        entityId,
+        operation: 'publish-round',
+        baseRevision: outbox.basePanelRevision ?? data.revision,
+        payload: outbox,
+      })).operation;
+      const workerId = makeId('publish-worker');
+      const claimed = await syncOutbox.claimNext(data.remoteId, workerId);
+      if (!claimed) throw new Error('La operación no está disponible para envío. Comprueba el estado de la cola e inténtalo de nuevo.');
+      if (claimed.operationId !== queued.operationId) {
+        await syncOutbox.retry(claimed.operationId, workerId, {
+          code: 'WAITING_FOR_PREVIOUS_OPERATION',
+          message: 'Se mantiene el orden de la cola; una operación anterior debe resolverse antes de publicar esta ronda.',
+        });
+        throw new Error('Hay una operación anterior pendiente de sincronización. Se ha respetado el orden de la cola y esta ronda no se ha enviado.');
+      }
+      try {
+        const published = await apiPublishTabulationRound(session.token, {
+          protocolVersion: 1,
+          operationId: claimed.operationId,
+          tournamentId: claimed.tournamentId,
+          entityType: 'round',
+          entityId: claimed.entityId,
+          operation: 'publish-round',
+          baseRevision: claimed.baseRevision,
+          payload: claimed.payload as Record<string, unknown>,
+          payloadHash: claimed.payloadHash,
+        });
+        const acknowledged = await syncOutbox.acknowledge(claimed.operationId, workerId);
+        await reloadAdmin();
+        setTabulationNotice(
+          'Ronda «' + published.roundName + '» publicada en el gestor con ' + published.assignmentIds.length
+          + ' asignaciones. Revisión del torneo: ' + published.revision + '.'
+          + (acknowledged ? '' : ' El servidor confirmó el commit, pero el ACK local está pendiente de recuperación automática; no vuelvas a crear la operación.'),
+        );
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+        const message = error instanceof Error ? error.message : 'No se ha podido confirmar la publicación.';
+        if (['REVISION_CONFLICT', 'TOURNAMENT_MISMATCH', 'IDEMPOTENCY_MISMATCH'].includes(code)) {
+          await syncOutbox.markConflict(claimed.operationId, workerId, { code: code || 'CONFLICT', message });
+        } else if (['INVALID_PAYLOAD', 'INVALID_RELATION', 'OPERATION_NOT_ALLOWED', 'FORMAT_NOT_CONFIGURED'].includes(code)) {
+          await syncOutbox.markFailed(claimed.operationId, workerId, { code, message });
+        } else {
+          // A timeout or 5xx may happen after COMMIT. Keep the same operationId
+          // pending so the server can return the committed idempotent response.
+          await syncOutbox.retry(claimed.operationId, workerId, { code: code || 'NETWORK_ERROR', message });
+        }
+        throw error;
+      }
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se ha podido publicar la ronda.');
+    } finally {
+      setPublishingTabulationRound(false);
+    }
+  };
+
   const assignmentWarnings = validateAssignments(data);
   const incompatibilityIncidents = findAssignmentConflicts(data);
   const overviewIncompatibilityIncidents = activeTournamentRoundId
@@ -1336,7 +1471,7 @@ export default function App() {
         saving={savingScores}
       />}
 
-      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
+      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button className="button primary" onClick={() => void publishFromTabulation()} disabled={!apiConfigured || !session || !data.remoteId || hasUnsavedChanges || saving || publishingTabulationRound} title="Revisa y publica la propuesta como una nueva ronda oficial"><ClipboardList size={15} />{publishingTabulationRound ? 'Publicando…' : 'Publicar nueva ronda'}</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
         const expanded = expandedRoomIds.includes(room.id);
         return <section className={'panel room-editor room-card' + (expanded ? ' expanded' : '')} key={room.id}>
           <div className="room-card-header">
