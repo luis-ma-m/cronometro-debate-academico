@@ -223,4 +223,14 @@ También se incorpora una instantánea de metadatos propios de Tabulación en la
 
 **Conexión cliente ya implementada:** el payload de publicación incluye la identidad local del torneo y de la ronda; el Gestor conserva la respuesta transaccional en una cola de ACK compartida entre pestañas. Tabulación valida el ACK, guarda managerRoundId en la ronda y managerAssignmentId en cada debate correspondiente, actualiza su cursor remoto y solo consume el ACK después de confirmar el guardado local. La escritura es idempotente por operationId; si no se puede guardar localmente, el ACK permanece para reintentar.
 
-**Pendiente para cerrar el extremo a extremo:** el endpoint de sustitución/guardado de actas todavía debe resolver la asignación mediante esta tabla y cargar sideMode, chair y metadatos de equipos desde la instantánea de base de datos. Hasta conectar esa lectura server-side, no se debe permitir la sustitución oficial de actas usando contexto reenviado por el cliente. Las migraciones 0014 y 0015 no se han aplicado a Neon Production.
+**Guardado oficial F4 ya conectado (2026-10-31):**
+
+- `api/tabulation-acta-write.ts` resuelve la asignación por `assignmentId` mediante `tabulation_debate_assignments`; recupera equipos, jueces asignados, oradores, presidencia, postura, metadatos de swing/caído, reglas y revisiones desde PostgreSQL.
+- El mapa de entidades local→Gestor queda persistido en `tabulation_round_metadata.entity_id_map` (migración 0016). Cada referencia utilizada por el acta se canonicaliza y se comprueba contra la pertenencia real a esa asignación; no se aceptan IDs de equipos/jueces/oradores ajenos.
+- `previewTabulationActa` valida una propuesta contra el contexto actual sin escribir nada y devuelve la versión oficial vigente, hash, modalidad, ganador propuesto y revisiones del Gestor y de reglas.
+- `saveTabulationActa` guarda primera versión o sustitución en una única transacción: valida compare-and-swap de la versión vigente y de la revisión de reglas, calcula de nuevo el ganador, inserta fuente inmutable, avanza el head mediante trigger, registra auditoría y almacena ACK idempotente.
+- El navegador de Tabulación muestra comparación y botones explícitos de primera publicación/sustitución tanto para papeletas individuales como para actas conjuntas. La copia local sigue siendo el borrador operativo y no se publica automáticamente.
+- Si se pierde la respuesta de guardado, el componente conserva el mismo `operationId` y cuerpo para reintentar sin crear una segunda versión.
+- Se añade una barrera de revisión separada para `tabulation_settings.revision`; un cambio de reglas entre comparación y confirmación obliga a volver a comparar.
+
+**Pendiente de validación externa:** aplicar 0014–0016 únicamente en Neon Preview, verificar transacciones/rollback y concurrencia real en PostgreSQL, ejecutar E2E de publicación y sustitución en navegador, probar la pérdida real de respuesta y confirmar que el historial refleja el contador exacto. Las migraciones no se han aplicado a Neon Production.
