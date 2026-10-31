@@ -13,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiCall<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
+export async function apiCall<T>(action: string, payload: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
   if (!API_URL) throw new ApiError('No hay API remota en este entorno. La aplicación está en modo de demostración local.', 'NOT_CONFIGURED');
   let response: Response;
   try {
@@ -23,6 +23,7 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
       body: JSON.stringify({ action, payload }),
       cache: 'no-store',
       credentials: 'same-origin',
+      ...(signal ? { signal } : {}),
     });
   } catch {
     throw new ApiError('No hay conexión con el backend. Comprueba internet y vuelve a intentarlo.', 'NETWORK_ERROR');
@@ -63,7 +64,7 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
 
 export const login = (password: string) => apiCall<{ token: string; expiresAt: number }>('login', { password });
 export const logout = (token: string) => apiCall<{ loggedOut: boolean }>('logout', { token });
-export const getTournament = (token: string) => apiCall<Tournament>('getTournament', { token });
+export const getTournament = (token: string, signal?: AbortSignal) => apiCall<Tournament>('getTournament', { token }, signal);
 export const saveTournament = (token: string, expectedRevision: number, tournament: Tournament) =>
   apiCall<Tournament>('saveTournament', { token, expectedRevision, tournament });
 export const saveScoreConfig = (token: string, expectedRevision: number, categories: ScoreCategory[], scorecards: RoundScorecard[]) =>
