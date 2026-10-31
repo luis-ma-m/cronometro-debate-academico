@@ -15,6 +15,8 @@ export interface ViewProps {
   update: (mutator: (tournament: TabTournament) => TabTournament, meta?: LogInput) => boolean;
   notify: (message: string, kind?: NoticeKind) => void;
   store: TabStore;
+  /** Session from the same-origin organisation panel; absent when not signed in. */
+  managerSessionToken?: string;
 }
 
 /** Version of the running build, shown so everyone can tell which code is in use on the day. */
