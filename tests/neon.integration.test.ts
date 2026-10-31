@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { Client } from "@neondatabase/serverless";
@@ -17,8 +17,12 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await client.connect();
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}"`);
-    for (const file of ["0001_initial_schema.sql", "0002_integrity_constraints.sql", "0003_normalize_incompatibilities.sql", "0004_preserve_scored_assignment_identity.sql", "0005_normalize_assignment_claims.sql", "0006_scorecard_judge_consistency.sql", "0007_scope_judge_consistency_checks.sql", "0008_preserve_scored_assignment_snapshots.sql", "0009_scorecard_team_score_consistency.sql", "0020_acta_short_links.sql"]) {
-      await client.query(await readFile(resolve("db/migrations", file), "utf8"));
+    const migrationDirectory = resolve("db/migrations");
+    const migrationFiles = (await readdir(migrationDirectory))
+      .filter((file) => /^\\d{4}_[a-z0-9_]+\\.sql$/.test(file))
+      .sort();
+    for (const file of migrationFiles) {
+      await client.query(await readFile(resolve(migrationDirectory, file), "utf8"));
     }
     await client.query("INSERT INTO tournament_settings(id) VALUES(1)");
     await client.query("INSERT INTO teams(id,name) VALUES('t1','Equipo 1'),('t2','Equipo 2'),('t3','Equipo 3'),('t4','Equipo 4')");
