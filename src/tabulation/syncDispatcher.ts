@@ -52,7 +52,7 @@ async function dispatchRound(token: string, operation: PendingSyncOperation): Pr
   appendPanelPublishAcknowledgement(window.localStorage, {
     version: 1, operationId: operation.operationId,
     tabTournamentId: payload.tabTournamentId, tabulationRoundId: payload.tabulationRoundId,
-    managerRoundId: published.roundId, revision: published.revision,
+    managerRoundId: published.roundId, revision: published.revision, updatedAt: published.updatedAt,
     debateAssignments: published.debateAssignments,
   });
   return { status: 'acknowledged', response: published };
