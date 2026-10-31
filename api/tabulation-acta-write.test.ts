@@ -239,4 +239,40 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO tabulation_acta_sources"))).toBe(true);
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO idempotency_keys"))).toBe(false);
   });
+
+  it("creates a new immutable version and increments the server-derived rewrite count on confirmed replacement", async () => {
+    const baseImplementation = mocks.query.getMockImplementation();
+    const replacementSourceId = "00000000-0000-4000-8000-000000000004";
+    mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      const statement = String(sql).replace(/\\s+/g, " ").trim();
+      if (statement.startsWith("SELECT b.tournament_id")) {
+        const response = await baseImplementation!(sql, params);
+        return { ...response, rows: response.rows.map((row: Record<string, unknown>) => ({ ...row, current_source_id: ids.source })) };
+      }
+      if (statement.startsWith("INSERT INTO tabulation_acta_sources")) {
+        return { rows: [{ id: replacementSourceId, created_at: new Date(baseUpdatedAt + 1000) }] };
+      }
+      if (statement.startsWith("SELECT count(*)::int AS total_versions")) {
+        return { rows: [{ total_versions: 2, rewrite_count: 1 }] };
+      }
+      return baseImplementation!(sql, params);
+    });
+
+    const response = await saveTabulationActa(input({
+      expectedCurrentSourceId: ids.source,
+      confirmReplace: true,
+    }));
+
+    expect(response).toMatchObject({
+      sourceId: replacementSourceId,
+      currentVersionId: replacementSourceId,
+      replacedSourceId: ids.source,
+      totalVersions: 2,
+      rewriteCount: 1,
+    });
+    const insert = mocks.query.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO tabulation_acta_sources"));
+    expect((insert?.[1] as unknown[])[10]).toBe(ids.source);
+    expect(mocks.query).toHaveBeenCalledWith("COMMIT");
+    expect(mocks.query).not.toHaveBeenCalledWith("ROLLBACK");
+  });
 });
