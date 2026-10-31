@@ -329,6 +329,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   };
 
   const sortedTournaments = [...state.tournaments].sort((x, y) => y.updatedAt - x.updatedAt);
+  const pendingDiff = tournament && pendingReconciliation ? comparePanelRevisions(tournament, pendingReconciliation.base, pendingReconciliation.remote) : null;
 
   return <>
     <div className="page-heading"><div><p className="eyebrow">INICIO</p><h2>Tabulación del torneo</h2><p className="muted">Emparejamientos, jueces, actas, clasificación y eliminatorias para debate académico. Todo se calcula y se guarda en este navegador, sin servidor.</p></div></div>
@@ -338,6 +339,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       {pendingReconciliation && <>
         <Notice kind="warning">Hay una revisión remota nueva ({pendingReconciliation.remote.revision}) que requiere decisión. La versión local no se ha sobrescrito.</Notice>
         <p className="muted">Base: revisión {pendingReconciliation.base.revision} · Detectada: {new Date(pendingReconciliation.detectedAt).toLocaleString('es-ES')}. Al aceptar se crea una copia local y se aplican los datos compartidos del Gestor; las rondas y actas de Tabulación se preservan.</p>
+        <ul className="tab-list">{(pendingDiff?.changes ?? []).filter((item) => item.change !== 'unchanged').map((item) => <li key={item.kind + ':' + item.remoteId}>
+          <div><b>{item.kind} · {item.label}</b><small>Tipo: {item.change} · Campos: {item.fields.join(', ') || 'alta remota'}</small>
+            <small>Local: {JSON.stringify(item.local)}</small><small>Gestor: {JSON.stringify(item.remote)}</small></div>
+        </li>)}</ul>
         <div className="tab-actions"><button type="button" className="button primary" disabled={state.readOnly} onClick={applyPendingRemote}>Revisar y aplicar cambios del Gestor</button></div>
       </>}
     </section>}
