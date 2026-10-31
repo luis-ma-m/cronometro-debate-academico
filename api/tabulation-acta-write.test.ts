@@ -163,7 +163,7 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
       const response = await baseImplementation!(sql, params);
       if (String(sql).startsWith("SELECT b.tournament_id")) {
-        return { ...response, rows: response.rows.map((row) => ({ ...row, round_kind: "elimination" })) };
+        return { ...response, rows: response.rows.map((row: Record<string, unknown>) => ({ ...row, round_kind: "elimination" })) };
       }
       return response;
     });
