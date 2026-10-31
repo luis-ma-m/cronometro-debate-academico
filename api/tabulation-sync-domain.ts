@@ -1,6 +1,11 @@
 export interface PublishedRoundDebate {
   /** Stable Tabulation-local debate identity; never inferred from room/team ordering. */
   tabulationDebateId: string;
+  tabulationVenueId: string;
+  tabulationTeamFavorId: string;
+  tabulationTeamContraId: string;
+  tabulationJudgeIds: string[];
+  tabulationChairId: string;
   physicalRoomId: string;
   venueName: string;
   teamFavorId: string;
@@ -145,7 +150,33 @@ export function validatePublishedRoundPayload(
         issues.push(prefix + "el elemento no es válido.");
         continue;
       }
-      const { tabulationDebateId, physicalRoomId, venueName, teamFavorId, teamContraId, judgeIds, chairId, sidesProvisional } = raw;
+      const { tabulationDebateId, tabulationVenueId, tabulationTeamFavorId, tabulationTeamContraId,
+        tabulationJudgeIds, tabulationChairId, physicalRoomId, venueName, teamFavorId, teamContraId, judgeIds, chairId, sidesProvisional } = raw;
+      const identityMap = isRecord(value.entityIdMap) ? value.entityIdMap : {};
+      const teamMap = isRecord(identityMap.teams) ? identityMap.teams : {};
+      const judgeMap = isRecord(identityMap.judges) ? identityMap.judges : {};
+      const venueMap = isRecord(identityMap.venues) ? identityMap.venues : {};
+      if (!nonEmptyString(tabulationVenueId) || venueMap[tabulationVenueId] !== physicalRoomId) {
+        issues.push(prefix + "la correspondencia de la sala local no coincide con la sala física publicada.");
+      }
+      if (!nonEmptyString(tabulationTeamFavorId) || teamMap[tabulationTeamFavorId] !== teamFavorId
+        || !nonEmptyString(tabulationTeamContraId) || teamMap[tabulationTeamContraId] !== teamContraId) {
+        issues.push(prefix + "las correspondencias de equipos locales no coinciden con los equipos asignados.");
+      }
+      if (!Array.isArray(tabulationJudgeIds) || tabulationJudgeIds.some((id) => !nonEmptyString(id))) {
+        issues.push(prefix + "la lista de jueces locales no es válida.");
+      } else {
+        const mappedJudges = tabulationJudgeIds.map((id) => judgeMap[id]).sort();
+        const assignedJudges = Array.isArray(judgeIds) ? [...judgeIds].sort() : [];
+        if (mappedJudges.length !== assignedJudges.length || mappedJudges.some((id, i) => id !== assignedJudges[i])) {
+          issues.push(prefix + "las correspondencias de jueces locales no coinciden con el panel asignado.");
+        }
+      }
+      if (tabulationChairId === "") {
+        if (chairId !== "") issues.push(prefix + "la presidencia local no coincide con la presidencia publicada.");
+      } else if (!nonEmptyString(tabulationChairId) || judgeMap[tabulationChairId] !== chairId) {
+        issues.push(prefix + "la correspondencia de la presidencia local no coincide con el juez publicado.");
+      }
       if (!nonEmptyString(tabulationDebateId) || tabulationDebateId.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(tabulationDebateId)) {
         issues.push(prefix + "el identificador local del debate no es válido.");
       } else if (usedDebateIds.has(tabulationDebateId)) {
@@ -255,6 +286,11 @@ export function validatePublishedRoundPayload(
     })),
     debates: (value.debates as Record<string, unknown>[]).map((item) => ({
       tabulationDebateId: item.tabulationDebateId as string,
+      tabulationVenueId: item.tabulationVenueId as string,
+      tabulationTeamFavorId: item.tabulationTeamFavorId as string,
+      tabulationTeamContraId: item.tabulationTeamContraId as string,
+      tabulationJudgeIds: [...(item.tabulationJudgeIds as string[])],
+      tabulationChairId: item.tabulationChairId as string,
       physicalRoomId: item.physicalRoomId as string,
       venueName: item.venueName as string,
       teamFavorId: item.teamFavorId as string,
