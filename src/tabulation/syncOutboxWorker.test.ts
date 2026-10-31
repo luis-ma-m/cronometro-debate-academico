@@ -102,7 +102,7 @@ describe('automatic sync worker', () => {
   it('stops the dependent queue on a revision conflict without deleting the operation', async () => {
     const repository = new MemoryRepository();
     let id = 0;
-    const outbox = createSyncOutbox(repository, { now: () => 500, createOperationId: () => 'op-' + ++id });
+    const outbox = createSyncOutbox(repository, { now: () => 500, createOperationId: () => 'operation-' + ++id });
     const first = await outbox.enqueue({ tournamentId: 't', entityType: 'round', entityId: 'r1', operation: 'publish-round', baseRevision: 1, payload: {} });
     await outbox.enqueue({ tournamentId: 't', entityType: 'acta', entityId: 'a1', operation: 'replace-acta', baseRevision: 1, payload: {} });
     const worker = createSyncOutboxWorker({

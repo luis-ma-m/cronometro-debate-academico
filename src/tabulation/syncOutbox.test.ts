@@ -60,13 +60,13 @@ describe('durable sync outbox contract', () => {
 
   it('stores a revisioned, hashed operation envelope before any network action', async () => {
     const repository = new MemoryOutboxRepository();
-    const outbox = createSyncOutbox(repository, { now: () => 100, createOperationId: () => 'op-1' });
+    const outbox = createSyncOutbox(repository, { now: () => 100, createOperationId: () => 'op-000001' });
     const result = await outbox.enqueue({
       tournamentId: 'tournament-uuid', entityType: 'round', entityId: 'round-1',
       operation: 'publish-round', baseRevision: 7, payload: { assignments: [{ teamIds: ['a', 'b'] }] },
     });
     expect(result.duplicate).toBe(false);
-    expect(result.operation).toMatchObject({ operationId: 'op-1', status: 'pending', attempts: 0, createdAt: 100, baseRevision: 7 });
+    expect(result.operation).toMatchObject({ operationId: 'op-000001', status: 'pending', attempts: 0, createdAt: 100, baseRevision: 7 });
     expect(result.operation.payloadHash).toMatch(/^[a-f0-9]{64}$/);
     expect(await outbox.list('tournament-uuid')).toHaveLength(1);
   });
@@ -93,7 +93,7 @@ describe('durable sync outbox contract', () => {
 
   it('rejects reuse of an operation id with a different payload', async () => {
     const repository = new MemoryOutboxRepository();
-    const outbox = createSyncOutbox(repository, { createOperationId: () => 'same-id' });
+    const outbox = createSyncOutbox(repository, { createOperationId: () => 'same-id-0001' });
     const input = { tournamentId: 't', entityType: 'settings', entityId: 'settings', operation: 'settings' as const, baseRevision: 1 };
     await outbox.enqueue({ ...input, payload: { version: 1 } });
     await expect(outbox.enqueue({ ...input, payload: { version: 2 } })).rejects.toThrow('IDEMPOTENCY_MISMATCH');
@@ -102,7 +102,7 @@ describe('durable sync outbox contract', () => {
   it('serializes operations FIFO per tournament and blocks dependent operations on conflict', async () => {
     const repository = new MemoryOutboxRepository();
     let id = 0;
-    const outbox = createSyncOutbox(repository, { now: () => 200, createOperationId: () => 'op-' + ++id });
+    const outbox = createSyncOutbox(repository, { now: () => 200, createOperationId: () => 'operation-' + ++id });
     const first = await outbox.enqueue({ tournamentId: 't1', entityType: 'round', entityId: 'r1', operation: 'publish-round', baseRevision: 1, payload: {} });
     await outbox.enqueue({ tournamentId: 't1', entityType: 'acta', entityId: 'a1', operation: 'replace-acta', baseRevision: 1, payload: {} });
     const claimed = await outbox.claimNext('t1', 'worker-a');
@@ -133,7 +133,7 @@ describe('durable sync outbox contract', () => {
   it('recovers expired leases but does not steal a live worker operation', async () => {
     const repository = new MemoryOutboxRepository();
     let now = 1000;
-    const outbox = createSyncOutbox(repository, { now: () => now, leaseMs: 100, createOperationId: () => 'op' });
+    const outbox = createSyncOutbox(repository, { now: () => now, leaseMs: 100, createOperationId: () => 'operation-id' });
     await outbox.enqueue({ tournamentId: 't1', entityType: 'round', entityId: 'r1', operation: 'publish-round', baseRevision: 0, payload: {} });
     await outbox.claimNext('t1', 'worker');
     expect(await outbox.recoverExpiredLeases()).toBe(0);
