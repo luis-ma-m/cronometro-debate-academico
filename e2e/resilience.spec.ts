@@ -109,68 +109,23 @@ test('si el código de la página no llega a descargarse, lo dice en vez de qued
 
 test('F3: IndexedDB v1 migra a v2 sin perder la outbox y mantiene exclusión entre pestañas', async ({ page }) => {
   await page.goto('/tabulacion');
+  await page.waitForFunction(() => Boolean((window as Window & {
+    __LEDU_E2E_SYNC_OUTBOX__?: { run: () => Promise<unknown> };
+  }).__LEDU_E2E_SYNC_OUTBOX__));
+
   const result = await page.evaluate(async () => {
-    const databaseName = 'ledu-tabulation-sync-v1';
-    const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(databaseName, 1);
-      request.onupgradeneeded = () => request.result.createObjectStore('operations', { keyPath: 'operationId' });
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    await new Promise<void>((resolve, reject) => {
-      const transaction = legacy.transaction('operations', 'readwrite');
-      transaction.objectStore('operations').put({
-        operationId: 'legacy-pending-operation',
-        tournamentId: 'legacy-tournament',
-        entityType: 'round',
-        entityId: 'legacy-round',
-        operation: 'publish-round',
-        baseRevision: 7,
-        payload: { roundName: 'Ronda conservada' },
-        payloadHash: 'a'.repeat(64),
-        status: 'sending',
-        attempts: 1,
-        workerId: 'stale-worker',
-        leaseUntil: 1,
-        createdAt: 100,
-      });
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error);
-    });
-    legacy.close();
-
-    const module = await import('/src/tabulation/syncOutbox.ts');
-    const firstRepository = module.createIndexedDbSyncOutboxRepository();
-    const migratedRows = await firstRepository.list('legacy-tournament');
-    const firstOutbox = module.createSyncOutbox(firstRepository);
-    const secondOutbox = module.createSyncOutbox(module.createIndexedDbSyncOutboxRepository());
-    const recoveredLeases = await firstOutbox.recoverExpiredLeases();
-    const [firstClaim, secondClaim] = await Promise.all([
-      firstOutbox.claimNext('legacy-tournament', 'browser-tab-a'),
-      secondOutbox.claimNext('legacy-tournament', 'browser-tab-b'),
-    ]);
-
-    const upgraded = await new Promise<{ version: number; indexes: string[] }>((resolve, reject) => {
-      const request = indexedDB.open(databaseName);
-      request.onsuccess = () => {
-        const db = request.result;
-        const transaction = db.transaction('operations', 'readonly');
-        const indexes = Array.from(transaction.objectStore('operations').indexNames);
-        const version = db.version;
-        db.close();
-        resolve({ version, indexes });
-      };
-      request.onerror = () => reject(request.error);
-    });
-    return {
-      migratedCount: migratedRows.length,
-      migratedOperationId: migratedRows[0]?.operationId,
-      migratedPayload: migratedRows[0]?.payload,
-      recoveredLeases,
-      claimCount: Number(Boolean(firstClaim)) + Number(Boolean(secondClaim)),
-      upgraded,
-    };
+    const harness = (window as Window & {
+      __LEDU_E2E_SYNC_OUTBOX__?: { run: () => Promise<{
+        migratedCount: number;
+        migratedOperationId: string | undefined;
+        migratedPayload: unknown;
+        recoveredLeases: number;
+        claimCount: number;
+        upgraded: { version: number; indexes: string[] };
+      }> };
+    }).__LEDU_E2E_SYNC_OUTBOX__;
+    if (!harness) throw new Error('No se ha instalado el harness E2E de IndexedDB.');
+    return harness.run();
   });
 
   expect(result.migratedCount).toBe(1);
