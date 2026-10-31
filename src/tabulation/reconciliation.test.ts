@@ -84,4 +84,33 @@ describe('three-way panel reconciliation', () => {
     expect(result.requiresHistoricalReview).toBe(true);
     expect(result.changes[0].change).toBe('historical-review');
   });
+  it('requires historical review when a remote speaker edit affects a joint acta', () => {
+    const local = linkedTournament();
+    local.speakers = [{ id: 'local-speaker-1', teamId: 'local-team-1', name: 'Oradora' }];
+    local.panelLink!.idMap!.speakers = { 'local-speaker-1': 'speaker-1' };
+    local.rounds = [{
+      id: 'round-1', number: 1, name: 'Ronda 1', kind: 'qualifying', sideMode: 'balanced', panelSize: 1,
+      seed: 1, silent: false, createdAt: 100,
+      debates: [{
+        id: 'debate-1', venueId: 'venue-1', teamIds: ['local-team-1', 'other-team'],
+        judgeIds: [], chairId: '',
+        result: {
+          lineup: {}, ballots: [], penalties: {},
+          joint: { winnerTeamId: 'local-team-1', items: {}, speakers: {
+            'local-team-1': [{ speakerId: 'local-speaker-1', score: 8, roles: [] }],
+          } },
+          notes: '', updatedAt: 100,
+        },
+      }],
+    }];
+    const speakerBase: PanelHandoff = {
+      ...base, speakers: [{ id: 'speaker-1', name: 'Oradora', teamId: 'team-1' }],
+    };
+    const remote = { ...speakerBase, revision: 5, updatedAt: 200,
+      speakers: [{ id: 'speaker-1', name: 'Oradora renombrada', teamId: 'team-1' }] };
+    const result = comparePanelRevisions(local, speakerBase, remote);
+    expect(result.requiresHistoricalReview).toBe(true);
+    expect(result.changes.find((change) => change.kind === 'speakers')?.change).toBe('historical-review');
+  });
+
 });
