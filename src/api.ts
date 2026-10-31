@@ -149,6 +149,7 @@ export interface PreviewTabulationActaResponse {
   debateId: string;
   basePanelRevision: number;
   basePanelUpdatedAt: number;
+  settingsRevision: number;
   currentSourceId: string | null;
   currentSource: { id: string; sourceMode: string; sourcePayload: Record<string, unknown>; sourceHash: string; createdAt: number } | null;
   proposedSource: Record<string, unknown>;
@@ -180,6 +181,7 @@ export const saveTabulationActa = (
     source: Record<string, unknown>;
     expectedCurrentSourceId: string | null;
     confirmReplace: boolean;
+    expectedSettingsRevision: number;
   },
 ) => apiCall<SaveTabulationActaResponse>('saveTabulationActa', { token, ...input });
 
