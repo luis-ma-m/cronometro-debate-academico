@@ -183,6 +183,9 @@ export async function publishTabulationRound(rawOperation: unknown) {
       [nextRevision],
     );
     const nextUpdatedAt = num(revisionUpdate.rows[0]?.updated_at_ms);
+    if (!Number.isSafeInteger(nextUpdatedAt) || nextUpdatedAt <= 0) {
+      throw new ApiError("DATABASE_INTEGRITY", "No se ha podido recuperar el cursor actualizado tras publicar la ronda.", 500);
+    }
     const response = {
       tournamentId: canonicalTournamentId, tabTournamentId: validated.tabTournamentId, tabulationRoundId: validated.tabulationRoundId,
       roundId: operation.entityId, roundNumber: validated.roundNumber,
