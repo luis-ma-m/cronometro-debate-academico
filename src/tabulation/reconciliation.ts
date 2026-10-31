@@ -41,6 +41,32 @@ function localToRemoteMap(idMap: PanelEntityIdMap, kind: PanelEntityKind): Map<s
   return new Map(Object.entries(idMap[kind]).map(([localId, remoteId]) => [localId, remoteId]));
 }
 
+
+function comparableEntity(
+  row: Record<string, unknown>,
+  kind: PanelEntityKind,
+  remoteId: string,
+  fields: string[],
+  idMap: PanelEntityIdMap,
+  localSide: boolean,
+): Record<string, unknown> {
+  const reverse = (map: Record<string, string>, value: unknown) => {
+    if (typeof value !== 'string') return value;
+    return localSide ? map[value] ?? value : value;
+  };
+  const result: Record<string, unknown> = { id: remoteId };
+  for (const field of fields) {
+    let value = row[field];
+    if (localSide && (kind === 'teams' || kind === 'judges') && field === 'incompatibleJudgeIds' && Array.isArray(value)) {
+      const map = kind === 'teams' ? idMap.judges : idMap.judges;
+      value = value.map((id) => reverse(map, id));
+    }
+    if (localSide && kind === 'speakers' && field === 'teamId') value = reverse(idMap.teams, value);
+    result[field] = value;
+  }
+  return result;
+}
+
 function historicalIds(tournament: TabTournament, kind: PanelEntityKind): Set<string> {
   const ids = new Set<string>();
   for (const round of tournament.rounds) {
@@ -108,7 +134,9 @@ export function comparePanelRevisions(
         changes.push({ kind: definition.kind, localId, remoteId, label: remoteRow.name, change: 'unchanged', fields: [], base: baseValue, local: localValue, remote: remoteValue });
         continue;
       }
-      const localChanged = localValue !== null && stable({ ...baseRow, id: remoteId }) !== stable({ ...localValue, id: remoteId });
+      const comparableFields = [...new Set([...Object.keys(baseRow), ...Object.keys(remoteRow)])].filter((field) => field !== 'id');
+      const localChanged = localValue !== null && stable(comparableEntity(baseRow as Record<string, unknown>, definition.kind, remoteId, comparableFields, idMap, false))
+        !== stable(comparableEntity(localValue, definition.kind, remoteId, comparableFields, idMap, true));
       const fields = [...new Set([...Object.keys(baseRow), ...Object.keys(remoteRow)])]
         .filter((field) => stable((baseRow as Record<string, unknown>)[field]) !== stable(remoteValue[field]));
       const change: ReconciliationChangeKind = localChanged
