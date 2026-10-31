@@ -117,11 +117,13 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
     throw error;
   }
 
+  const knownTeamIds = new Set(teamsResult.rows.map((team) => str(team.id)));
   const teamMetadata = new Map<string, Record<string, unknown>>();
   for (const entry of metadata) {
     if (!isRecord(entry) || typeof entry.teamId !== "string" || teamMetadata.has(entry.teamId)) {
       throw new ApiError("ACTA_CONTEXT_INVALID", "La instantánea de metadatos contiene referencias duplicadas o inválidas.", 500);
     }
+    if (!knownTeamIds.has(entry.teamId)) throw new ApiError("ACTA_CONTEXT_INVALID", "La instantánea de metadatos referencia un equipo que ya no existe en el Gestor.", 409);
     teamMetadata.set(entry.teamId, entry);
   }
   const teams: TabTeam[] = teamsResult.rows.filter((team) => teamMetadata.has(str(team.id))).map((team) => {
