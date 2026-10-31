@@ -22,6 +22,8 @@ export interface PublishedRoundPayload {
   roundName: string;
   roundNumber: number;
   roundKind: 'qualifying' | 'elimination';
+  sideMode: 'draw' | 'balanced';
+  teamMetadata: Array<{ teamId: string; swing: boolean; breakEligible: boolean; fallenFromRound?: number }>;
   debates: PublishedRoundDebate[];
 }
 
@@ -74,6 +76,22 @@ export function validatePublishedRoundPayload(
   if (!nonEmptyString(value.roundName) || value.roundName.length > 200) issues.push("El nombre de la ronda debe contener entre 1 y 200 caracteres.");
   if (!Number.isSafeInteger(value.roundNumber) || (value.roundNumber as number) < 1 || (value.roundNumber as number) > 2_147_483_647) issues.push("El número de ronda debe ser un entero positivo dentro del rango admitido.");
   if (value.roundKind !== 'qualifying' && value.roundKind !== 'elimination') issues.push("El tipo de ronda no es válido.");
+  if (value.sideMode !== 'draw' && value.sideMode !== 'balanced') issues.push("El modo de posturas de la ronda no es válido.");
+  if (!Array.isArray(value.teamMetadata)) issues.push("Los metadatos de equipos deben ser una lista.");
+  const seenMetadataTeams = new Set<string>();
+  if (Array.isArray(value.teamMetadata)) {
+    for (const entry of value.teamMetadata) {
+      if (!isRecord(entry) || !nonEmptyString(entry.teamId) || !teams.has(entry.teamId)
+        || typeof entry.swing !== "boolean" || typeof entry.breakEligible !== "boolean"
+        || (entry.fallenFromRound !== undefined && (!Number.isSafeInteger(entry.fallenFromRound) || (entry.fallenFromRound as number) < 1))
+        || Object.keys(entry).some((key) => !["teamId", "swing", "breakEligible", "fallenFromRound"].includes(key))) {
+        issues.push("Los metadatos de un equipo contienen referencias o valores no válidos.");
+        continue;
+      }
+      if (seenMetadataTeams.has(entry.teamId)) issues.push("Los metadatos de equipos contienen identificadores duplicados.");
+      seenMetadataTeams.add(entry.teamId);
+    }
+  }
   if (!nonEmptyString(value.tabTournamentName) || value.tabTournamentName.length > 200) issues.push("El nombre del torneo de Tabulación debe contener entre 1 y 200 caracteres.");
   if (value.tournamentId !== context.canonicalTournamentId) {
     issues.push("La propuesta no pertenece a la identidad canónica del torneo.");
@@ -198,6 +216,11 @@ export function validatePublishedRoundPayload(
     roundName: value.roundName as string,
     roundNumber: value.roundNumber as number,
     roundKind: value.roundKind as 'qualifying' | 'elimination',
+    sideMode: value.sideMode as 'draw' | 'balanced',
+    teamMetadata: (value.teamMetadata as Array<Record<string, unknown>>).map((entry) => ({
+      teamId: entry.teamId as string, swing: entry.swing as boolean, breakEligible: entry.breakEligible as boolean,
+      ...(typeof entry.fallenFromRound === "number" ? { fallenFromRound: entry.fallenFromRound } : {}),
+    })),
     debates: (value.debates as Record<string, unknown>[]).map((item) => ({
       tabulationDebateId: item.tabulationDebateId as string,
       physicalRoomId: item.physicalRoomId as string,
