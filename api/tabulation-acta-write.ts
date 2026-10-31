@@ -156,6 +156,74 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
   };
 }
 
+export interface PreviewTabulationActaInput {
+  assignmentId: string;
+  source: unknown;
+}
+
+/** Read-only comparison preparation against the latest authoritative manager context. */
+export async function previewTabulationActa(input: PreviewTabulationActaInput) {
+  if (!uuid(input.assignmentId)) throw new ApiError("INVALID_PAYLOAD", "La asignación del acta no es válida.");
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const loaded = await loadActaContext(client, input.assignmentId);
+    if (!isRecord(input.source) || !isRecord(input.source.acta)) throw new ApiError("INVALID_ACTA_SOURCE", "La fuente del acta no tiene una estructura válida.");
+    const canonicalActa = canonicalizeTabulationActa(
+      { ...input.source.acta, ...(input.source.eliminationResult === undefined ? {} : { eliminationResult: input.source.eliminationResult }) },
+      loaded.idMap,
+      {
+        tournamentId: loaded.tournamentId, roundId: loaded.managerRoundId, debateId: loaded.context.debate.id,
+        teamIds: loaded.context.debate.teamIds, judgeIds: loaded.context.debate.judgeIds,
+        speakerIds: loaded.context.speakers.map((speaker) => speaker.id),
+      },
+    );
+    canonicalActa.basePanelRevision = loaded.context.currentRevision;
+    canonicalActa.basePanelUpdatedAt = loaded.context.currentUpdatedAt;
+    const validated = validateTabulationActaSource({
+      sourceMode: input.source.sourceMode,
+      acta: canonicalActa,
+      eliminationResult: canonicalActa.eliminationResult ?? input.source.eliminationResult,
+    }, loaded.context);
+    const proposedSource = {
+      sourceMode: validated.sourceMode,
+      acta: canonicalActa,
+      eliminationResult: validated.eliminationResult,
+    };
+    let currentSource: Record<string, unknown> | null = null;
+    if (loaded.currentSourceId) {
+      const existing = await client.query(
+        "SELECT id::text AS id, source_mode, source_payload, source_hash, created_at FROM tabulation_acta_sources WHERE id = $1 AND assignment_id = $2",
+        [loaded.currentSourceId, input.assignmentId],
+      );
+      const row = existing.rows[0];
+      if (!row) throw new ApiError("DATABASE_INTEGRITY", "El historial apunta a una versión inexistente.", 500);
+      currentSource = {
+        id: str(row.id), sourceMode: str(row.source_mode), sourcePayload: row.source_payload,
+        sourceHash: str(row.source_hash),
+        createdAt: row.created_at instanceof Date ? row.created_at.getTime() : new Date(String(row.created_at)).getTime(),
+      };
+    }
+    await client.query("COMMIT");
+    return {
+      assignmentId: input.assignmentId, tournamentId: loaded.tournamentId,
+      roundId: loaded.managerRoundId, debateId: loaded.context.debate.id,
+      basePanelRevision: loaded.context.currentRevision, basePanelUpdatedAt: loaded.context.currentUpdatedAt,
+      currentSourceId: loaded.currentSourceId, currentSource,
+      proposedSource, sourceMode: validated.sourceMode, winnerTeamId: validated.acta.winnerTeamId,
+      requiresReplacementConfirmation: Boolean(loaded.currentSourceId),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    if (error instanceof TabulationActaValidationError) throw new ApiError("INVALID_ACTA", error.message, 422);
+    if (error instanceof TabulationSettingsValidationError) throw new ApiError("ACTA_RULES_INVALID", error.message, 409);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export interface SaveTabulationActaInput {
   operationId: string;
   assignmentId: string;
