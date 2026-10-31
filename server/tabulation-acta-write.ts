@@ -230,8 +230,10 @@ export async function previewTabulationActa(input: PreviewTabulationActaInput) {
         speakerIds: loaded.context.speakers.map((speaker) => speaker.id),
       },
     );
-    canonicalActa.basePanelRevision = loaded.context.currentRevision;
-    canonicalActa.basePanelUpdatedAt = loaded.context.currentUpdatedAt;
+    if (canonicalActa.basePanelRevision !== loaded.context.currentRevision
+      || canonicalActa.basePanelUpdatedAt !== loaded.context.currentUpdatedAt) {
+      throw new ApiError("ACTA_REVISION_CONFLICT", "El Gestor ha cambiado desde la última sincronización de Tabulación. Reconcilia los datos y vuelve a revisar el acta antes de publicarla.", 409);
+    }
     const validated = validateTabulationActaSource({
       sourceMode: input.source.sourceMode,
       acta: canonicalActa,
