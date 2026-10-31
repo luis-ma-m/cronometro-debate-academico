@@ -9,6 +9,9 @@ test('sin conexión: la mesa hace una ronda entera y el juez solo necesita red p
   await page.getByRole('button', { name: 'Nueva ronda (Ronda 1)' }).click();
   await confirmOpenDraft(page);
   await expect(page.locator('.tab-round-screen')).toContainText('frente a');
+  // The desk can generate the snapshot offline; opening the public acta URL
+  // is a network navigation, so reconnect before testing that hand-off.
+  await context.setOffline(false);
   await page.locator('.tab-whatsapp summary').click();
   const actaPopupPromise = page.waitForEvent('popup');
   await page.getByRole('button', { name: 'Abrir el acta' }).first().click();
