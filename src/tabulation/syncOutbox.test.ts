@@ -123,6 +123,15 @@ describe('durable sync outbox contract', () => {
     expect((await outbox.list('t1'))[0].nextAttemptAt).toBeGreaterThan(1_100);
   });
 
+  it('honors Retry-After even when it exceeds the exponential delay', async () => {
+    const repository = new MemoryOutboxRepository();
+    const outbox = createSyncOutbox(repository, { now: () => 1_000, random: () => 0.5, createOperationId: () => 'retry-after-op' });
+    await outbox.enqueue({ tournamentId: 't1', entityType: 'round', entityId: 'r1', operation: 'publish-round', baseRevision: 0, payload: {} });
+    const claimed = await outbox.claimNext('t1', 'worker');
+    await outbox.retry('retry-after-op', 'worker', { code: 'RATE_LIMITED', message: 'Espera' }, claimed?.attempts, 8_000);
+    expect((await outbox.list('t1'))[0].nextAttemptAt).toBe(9_000);
+  });
+
   it('rejects invalid revisions and unserializable or oversized payloads', async () => {
     const outbox = createSyncOutbox(new MemoryOutboxRepository());
     await expect(outbox.enqueue({ tournamentId: 't', entityType: 'round', entityId: 'r', operation: 'publish-round', baseRevision: -1, payload: {} })).rejects.toThrow('revisión base');
