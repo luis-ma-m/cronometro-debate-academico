@@ -835,3 +835,13 @@ La migración 0019 amplía la clave natural del mapping para incluir el torneo l
 - Si el almacenamiento local no permite guardar el nuevo snapshot base, se elimina el snapshot antiguo (reconstruible) para evitar comparar el torneo actualizado contra una base obsoleta.
 - El guardado del acta comprueba de nuevo revision y updatedAt del Gestor dentro de la transacción; una carrera entre preview y save se devuelve como conflicto recuperable.
 - La cola no hace busy polling cuando una operación está bloqueada por un conflicto previo. La sesión del Gestor se vuelve a leer periódicamente para reactivar el worker tras un login/refresh en la misma pestaña.
+
+
+## Bloqueos funcionales detectados en la auditoría
+
+1. **Reglas oficiales no sincronizadas con Tabulación:** TabulationRulesPanel lee/escribe el registro persistido, pero HomeView/TabulationApp no consumen getTabulationSettings. La operativa local sigue calculando con tournament.settings propio; puede divergir de las reglas que el servidor usa al validar actas.
+2. **Aplicación temporal de reglas incompleta:** la pantalla del Gestor guarda una nueva revisión, pero no ofrece la elección aprobada de aplicar desde ahora o retroactivamente con confirmación y auditoría específica. Tampoco hay snapshot de reglas efectivo por ronda para preservar resultados anteriores cuando se elige “desde ahora”.
+3. **Edición local aún habilitada:** RulesView sigue siendo editable desde Tabulación aunque el torneo esté vinculado al Gestor. Eso contradice la autoridad de reglas aprobada y permite divergencias locales.
+4. **Cambio de formato con rondas existentes:** TabulationRulesPanel construye un torneo auxiliar sin rondas para reutilizar RulesView; por ello la comprobación hasRounds no ve las rondas reales y puede permitir cambiar stage/preset aunque el torneo operativo ya tenga rondas.
+
+Estos puntos bloquean declarar completa la sincronización de reglas. No se han modificado en esta iteración porque requieren implementar el contrato de aplicación temporal aprobado, no solo ocultar controles: hay que versionar el modo de aplicación, propagar la revisión a Tabulación, mantener snapshots efectivos por ronda y hacer que preview/save de actas comparen el resultado calculado por ambos lados.
