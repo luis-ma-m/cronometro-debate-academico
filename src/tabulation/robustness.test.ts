@@ -88,18 +88,20 @@ describe('hostile or broken input from the phones', () => {
 
   it('keeps only well-formed values of a malformed acta and never breaks the tabulation', () => {
     const { tournament, link } = setup();
+    const teamA = link.teams[0];
+    const rubricId = link.rules.rubric[0].id;
     const hostile = {
       favor: 5, winner: null,
-      items: { a: { coherencia: 'x', veracidad: Number.NaN, evidencias: 4 }, intruso: { coherencia: 5 } },
+      items: { [teamA.id]: { [rubricId]: 4, coherencia: 'x', veracidad: Number.NaN }, intruso: { coherencia: 5 } },
       quickTotals: 'nada',
-      penalties: { a: { warnings: -3, minors: 2.7, majors: 'x', disqualified: 'sí' }, b: 'nada' },
-      speakers: { a: [{ speakerId: 5 }, { speakerId: 'a-s1', score: 'x' }, { speakerId: 'a-s2', score: 7, roles: ['pirata', 'concluder'] }], b: 'nada' },
+      penalties: { [teamA.id]: { warnings: -3, minors: 2.7, majors: 'x', disqualified: 'sí' }, [link.teams[1].id]: 'nada' },
+      speakers: { [teamA.id]: [{ speakerId: 5 }, { speakerId: teamA.members[0].id, score: 'x' }, { speakerId: teamA.members[1].id, score: 7, roles: ['pirata', 'concluder'] }], [link.teams[1].id]: 'nada' },
       notes: 'x'.repeat(5000), signedBy: 42, sentAt: 'ayer',
     } as unknown as ActaEntry;
     const received = readActaCode(tournament, encodeActaCode(link, hostile));
     expect(received.error).toBeNull();
     expect(received.payload).toMatchObject({
-      favor: '', winner: '', items: { a: { evidencias: 4 }, intruso: { coherencia: 5 } }, penalties: { a: { warnings: 0, minors: 2, majors: 0, disqualified: false } },
+      favor: '', winner: '', items: { a: { [rubricId]: 4 } }, penalties: { a: { warnings: 0, minors: 2, majors: 0, disqualified: false } },
       speakers: { a: [{ speakerId: 'a-s2', score: 7, roles: ['concluder'] }], b: [] }, signedBy: '', sentAt: 0,
     });
     expect(received.payload!.notes).toHaveLength(2000);
