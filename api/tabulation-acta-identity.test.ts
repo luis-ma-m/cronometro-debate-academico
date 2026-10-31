@@ -35,7 +35,7 @@ function acta() {
 
 describe("canonicalizeTabulationActa", () => {
   it("rewrites all identity references and takes scope from the manager lookup", () => {
-    const mapped = canonicalizeTabulationActa(acta(), idMap, targets) as any;
+    const mapped = canonicalizeTabulationActa(acta(), idMap, targets) as { tournamentId: string; roundId: string; debateId: string; result: Record<string, unknown> };
     expect(mapped).toMatchObject({
       tournamentId: "canonical-tournament", roundId: "manager-round", debateId: "manager-assignment",
       result: {
@@ -63,20 +63,22 @@ describe("canonicalizeTabulationActa", () => {
   });
 
   it("maps joint acta teams and speaker references without losing rubric values", () => {
-    const joint = acta();
-    joint.result = {
-      lineup: { localA: { introductor: "localSpeaker" } },
-      ballots: [],
-      penalties: {},
-      joint: {
-        winnerTeamId: "localA",
-        items: { localA: { argument: 7 }, localB: { argument: 6 } },
-        speakers: { localA: [{ speakerId: "localSpeaker", score: 8, roles: ["introductor"] }], localB: [] },
+    const joint = {
+      ...acta(),
+      result: {
+        lineup: { localA: { introductor: "localSpeaker" } },
+        ballots: [],
+        penalties: {},
+        joint: {
+          winnerTeamId: "localA",
+          items: { localA: { argument: 7 }, localB: { argument: 6 } },
+          speakers: { localA: [{ speakerId: "localSpeaker", score: 8, roles: ["introductor"] }], localB: [] },
+        },
+        notes: "",
+        updatedAt: 1800000000000,
       },
-      notes: "",
-      updatedAt: 1800000000000,
     };
-    const mapped = canonicalizeTabulationActa(joint, idMap, targets) as any;
+    const mapped = canonicalizeTabulationActa(joint, idMap, targets) as { result: { joint: Record<string, unknown> } };
     expect(mapped.result.joint).toEqual({
       winnerTeamId: "remoteA",
       items: { remoteA: { argument: 7 }, remoteB: { argument: 6 } },
