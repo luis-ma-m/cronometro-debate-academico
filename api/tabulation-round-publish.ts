@@ -68,10 +68,16 @@ export async function publishTabulationRound(rawOperation: unknown) {
 
     const [roomsResult, teamsResult, judgesResult] = await Promise.all([
       client.query("SELECT id, active FROM physical_rooms"),
-      client.query(`SELECT t.id, t.name, t.active, i.name AS institution, t.incompatible_judge_ids
-                     FROM teams t LEFT JOIN institutions i ON i.id = t.institution_id`),
-      client.query(`SELECT j.id, j.name, j.active, i.name AS institution, j.incompatible_judge_ids
-                     FROM judges j LEFT JOIN institutions i ON i.id = j.institution_id`),
+      client.query(`SELECT t.id, t.name, t.active, i.name AS institution,
+                            COALESCE(array_agg(tji.judge_id) FILTER (WHERE tji.judge_id IS NOT NULL), ARRAY[]::text[]) AS incompatible_judge_ids
+                     FROM teams t LEFT JOIN institutions i ON i.id = t.institution_id
+                     LEFT JOIN team_judge_incompatibilities tji ON tji.team_id = t.id
+                     GROUP BY t.id, i.name`),
+      client.query(`SELECT j.id, j.name, j.active, i.name AS institution,
+                            COALESCE(array_agg(ji.incompatible_judge_id) FILTER (WHERE ji.incompatible_judge_id IS NOT NULL), ARRAY[]::text[]) AS incompatible_judge_ids
+                     FROM judges j LEFT JOIN institutions i ON i.id = j.institution_id
+                     LEFT JOIN judge_incompatibilities ji ON ji.judge_id = j.id
+                     GROUP BY j.id, i.name`),
     ]);
     const validated = validatePublishedRoundPayload(proposal, {
       canonicalTournamentId,
