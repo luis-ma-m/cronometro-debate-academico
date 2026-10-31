@@ -812,3 +812,16 @@ La migración 0019 amplía la clave natural del mapping para incluir el torneo l
 - La caducidad se configura a 1, 7, 30, 90 o 365 días y puede actualizarse desde la gestión de enlaces. Se permiten revocaciones individual, múltiple y global por torneo.
 - Si la creación no está disponible, el cliente usa A2 autocontenido; no adjunta A2 automáticamente cuando S8 se crea correctamente. La resolución S8 requiere servidor.
 - Migración append-only: `db/migrations/0020_acta_short_links.sql`.
+
+
+## Auditoría incremental de sincronización y short links — 31/10/2026
+
+- Los enlaces S8 (/acta#S8-XXXXXXXX) almacenan en Neon el snapshot A2 expandido y validan su hash antes de resolverlo. Los enlaces A1/A2 autocontenidos siguen siendo compatibles.
+- La migración 0021_acta_short_link_rate_limits.sql añade limitación de resolución por IP en PostgreSQL. La resolución pública no depende de Redis ni de la contraseña del panel; la creación, inventario, caducidad y revocación siguen exigiendo sesión de Gestor.
+- La validación del snapshot comprueba ahora estructura y límites de equipos, integrantes, jurado, ronda y reglas. La rúbrica puede omitirse en el payload compacto cuando coincide con ADUMA, porque el decodificador A2 la reconstruye desde el preset.
+- La página del juez vuelve a validar el snapshot recibido antes de renderizarlo.
+- La vista de cola evita el sondeo rápido cuando una operación pendiente está bloqueada por un conflicto/operación fallida anterior de la misma entidad.
+- La reconciliación histórica contempla también los oradores referenciados en actas conjuntas.
+- La previsualización de un acta ya no rebasea silenciosamente una revisión obsoleta del Gestor: devuelve ACTA_REVISION_CONFLICT y exige reconciliar antes de publicar.
+
+**Validación pendiente:** ejecutar CI del HEAD actual, aplicar 0021 en Neon Preview y probar creación/resolución/expiración/revocación S8 con Redis apagado; después ejecutar pruebas de concurrencia y multi-dispositivo contra infraestructura aislada. No ejecutar migraciones ni escrituras en Production.
