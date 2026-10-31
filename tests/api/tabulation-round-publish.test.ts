@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => {
 });
 const { stored, query } = mocks;
 
-vi.mock("./db.js", () => ({
+vi.mock("../../server/db.js", () => ({
   getPool: () => ({ connect: async () => mocks.client }),
 }));
 

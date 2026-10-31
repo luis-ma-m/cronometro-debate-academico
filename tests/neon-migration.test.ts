@@ -100,7 +100,7 @@ describe("Neon migration artifacts", () => {
 
   it("routes operational API persistence through PostgreSQL without a Sheets dependency", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(api).toContain("loadPostgresSheetData");
     expect(api).toContain("writePostgresTables");
     expect(api).not.toMatch(/GOOGLE_SERVICE_ACCOUNT_JSON|sheets\\.googleapis\\.com|googleAccessToken|batchUpdateSpreadsheet/);
@@ -111,7 +111,7 @@ describe("Neon migration artifacts", () => {
 
   it("limits tournament writes to changed entity sets and batches relation inserts", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(api).toContain("const candidateReplacements");
     expect(api).toContain("if (roomsChanged) replacements.Salas");
     expect(api).toContain("if (formatsChanged) replacements.Formatos");
@@ -124,7 +124,7 @@ describe("Neon migration artifacts", () => {
 
   it("persists timer audit and idempotency in the same write transaction", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(api).toContain("readIdempotentResponse(idempotencyKey, idempotencyScope)");
     expect(api).toContain("idempotencyResponse: response");
     expect(store).toContain("INSERT INTO audit_events");
@@ -136,7 +136,7 @@ describe("Neon migration artifacts", () => {
 
   it("normalizes incompatibilities into foreign-key-backed relationships", async () => {
     const sql = await readFile(resolve("db/migrations/0003_normalize_incompatibilities.sql"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS team_judge_incompatibilities");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS judge_incompatibilities");
     expect(sql).toContain("ALTER TABLE teams DROP COLUMN incompatible_judge_ids");
@@ -158,7 +158,7 @@ describe("Neon migration artifacts", () => {
 
   it("normalizes room claims so full saves can swap physical rooms atomically", async () => {
     const sql = await readFile(resolve("db/migrations/0005_normalize_assignment_claims.sql"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS round_room_claims");
     expect(sql).toContain("DROP CONSTRAINT IF EXISTS room_assignments_round_id_physical_room_id_key");
     expect(sql).toContain("DROP INDEX IF EXISTS room_assignments_team_favor_round_uq");
@@ -207,7 +207,7 @@ describe("Neon migration artifacts", () => {
 
   it("protects scored assignment judges and phase snapshots from mutation", async () => {
     const sql = await readFile(resolve("db/migrations/0008_preserve_scored_assignment_snapshots.sql"), "utf8");
-    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const store = await readFile(resolve("server/postgres-store.ts"), "utf8");
     expect(sql).toContain("scored_assignment_judges_immutable");
     expect(sql).toContain("scored_assignment_phases_immutable");
     expect(store).toContain("SCORED_ASSIGNMENT_PHASES_IMMUTABLE");

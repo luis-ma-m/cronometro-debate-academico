@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => {
   const client = { query, release: vi.fn() };
   return { query, client };
 });
-vi.mock("./db.js", () => ({ getPool: () => ({ connect: async () => mocks.client }) }));
+vi.mock("../../server/db.js", () => ({ getPool: () => ({ connect: async () => mocks.client }) }));
 
 function input(overrides: Record<string, unknown> = {}) {
   return {
