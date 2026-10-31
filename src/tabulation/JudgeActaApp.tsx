@@ -43,17 +43,21 @@ function sanitizeDraft(value: unknown, link: ActaLink): PhoneDraft {
   const rubricIds = new Set(link.rules.rubric.map((item) => item.id));
   const stringRecord = (input: unknown, allowed: Set<string>, nested?: Set<string>): Record<string, Record<string, string>> | Record<string, string> => {
     if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
-    const output: Record<string, string | Record<string, string>> = {};
-    for (const [key, item] of Object.entries(input as Record<string, unknown>)) {
-      if (!allowed.has(key)) continue;
-      if (nested) {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    if (nested) {
+      const output: Record<string, Record<string, string>> = {};
+      for (const [key, item] of Object.entries(input as Record<string, unknown>)) {
+        if (!allowed.has(key) || !item || typeof item !== 'object' || Array.isArray(item)) continue;
         const values: Record<string, string> = {};
         for (const [childKey, childValue] of Object.entries(item as Record<string, unknown>)) {
           if (nested.has(childKey) && typeof childValue === 'string') values[childKey] = childValue.slice(0, 40);
         }
         output[key] = values;
-      } else if (typeof item === 'string') output[key] = item.slice(0, 40);
+      }
+      return output;
+    }
+    const output: Record<string, string> = {};
+    for (const [key, item] of Object.entries(input as Record<string, unknown>)) {
+      if (allowed.has(key) && typeof item === 'string') output[key] = item.slice(0, 40);
     }
     return output;
   };
@@ -79,7 +83,9 @@ function sanitizeDraft(value: unknown, link: ActaLink): PhoneDraft {
         const entry = rawEntry as Record<string, unknown>;
         teamEntries[speakerId] = {
           score: typeof entry.score === 'string' ? entry.score.slice(0, 20) : '',
-          roles: Array.isArray(entry.roles) ? SPEAKER_ROLES.filter((role) => entry.roles?.includes(role)) : [],
+          roles: Array.isArray(entry.roles)
+            ? SPEAKER_ROLES.filter((role) => (entry.roles as unknown[]).includes(role))
+            : [],
         };
       }
       speakers[teamId] = teamEntries;
