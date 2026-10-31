@@ -189,6 +189,26 @@ export const saveTabulationActa = (
 export const getTabulationActaHistory = (token: string, assignmentId: string) =>
   apiCall<TabulationActaHistory>('getTabulationActaHistory', { token, assignmentId });
 
+export interface TabulationActaVersionDetail {
+  id: string;
+  assignmentId: string;
+  tournamentId: string;
+  sourceMode: 'judges' | 'joint' | 'elimination';
+  roundKind: 'qualifying' | 'elimination';
+  baseRevision: number;
+  sourceHash: string;
+  sourcePayload: Record<string, unknown>;
+  eliminationResult: Record<string, unknown> | null;
+  rulesSnapshot: Record<string, unknown>;
+  operationId: string;
+  supersedesSourceId: string | null;
+  createdBy: string;
+  createdAt: number;
+}
+
+export const getTabulationActaVersion = (token: string, assignmentId: string, versionId: string) =>
+  apiCall<TabulationActaVersionDetail>('getTabulationActaVersion', { token, assignmentId, versionId });
+
 export interface TabulationRoundPublishOperation {
   protocolVersion: 1;
   operationId: string;

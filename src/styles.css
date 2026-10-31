@@ -900,3 +900,10 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .room-acta-history-list small,.room-acta-history-list code { color:var(--muted, #777); font-size:.78rem; }
 .room-acta-history-list code { width:fit-content; }
 @media(max-width:640px){.room-acta-history .panel-title{flex-direction:column;}}
+
+
+/* Official acta version inspection (read-only). */
+.room-acta-version-details { display:grid; gap:.5rem; margin-top:.45rem; }
+.room-acta-version-details > button { justify-self:start; }
+.room-acta-version-details pre { max-height:24rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; padding:.75rem; border:1px solid var(--border, rgba(128,128,128,.25)); border-radius:.5rem; background:var(--surface-muted, rgba(128,128,128,.06)); font-size:.75rem; line-height:1.45; }
+.room-acta-version-details .muted { font-size:.78rem; }

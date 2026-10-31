@@ -4,8 +4,9 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory, publishTabulationRound as apiPublishTabulationRound } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory, getTabulationActaVersion, publishTabulationRound as apiPublishTabulationRound } from './api';
 import type { RoundActivationPreview, RoomConnectionStatus, TabulationActaHistory as TabulationActaHistoryData } from './api';
+import { ActaVersionDetails } from './components/ActaVersionDetails';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibilities';
@@ -1544,6 +1545,7 @@ export default function App() {
                        <small>{version.sourceMode === 'elimination' ? 'Resultado de eliminatoria' : version.sourceMode === 'joint' ? 'Acta conjunta' : 'Papeletas individuales'} · {version.roundKind === 'elimination' ? 'Eliminatoria' : 'Clasificatoria'} · {version.createdBy}</small>
                        {version.eliminationResult && <small>Ganador: {data.teams.find((team) => team.id === version.eliminationResult?.winnerTeamId)?.name ?? String(version.eliminationResult.winnerTeamId)} · Perdedor: {data.teams.find((team) => team.id === version.eliminationResult?.loserTeamId)?.name ?? String(version.eliminationResult.loserTeamId)} · Avanzan: {(Array.isArray(version.eliminationResult.advancingTeamIds) ? version.eliminationResult.advancingTeamIds : []).map((teamId) => data.teams.find((team) => team.id === teamId)?.name ?? String(teamId)).join(', ')}</small>}
                        <code title={version.sourceHash}>{version.sourceHash.slice(0, 12)}…</code>
+                       {session?.token && room.assignmentId && <ActaVersionDetails token={session.token} assignmentId={room.assignmentId} versionId={version.id} />}
                      </li>)}
                    </ol> : <p className="muted">Todavía no hay actas oficiales sincronizadas.</p>}
                  </div>}
