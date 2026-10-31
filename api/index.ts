@@ -1350,7 +1350,9 @@ async function resolveActaShortLink(req:RequestLike):Promise<unknown>{
    throw new ApiError("MIGRATION_REQUIRED","Falta aplicar la migración 0021_acta_short_link_rate_limits.sql.",503);
   throw error;
  }
- if(num(limit.rows[0]?.request_count)>60)throw new ApiError("RATE_LIMITED","Demasiadas consultas de enlaces. Espera al siguiente minuto.",429);
+ const requestCount=num(limit.rows[0]?.request_count);
+ if(requestCount%100===1)await pool.query("DELETE FROM acta_short_link_resolution_limits WHERE window_started_at < now()-interval '1 day'");
+ if(requestCount>60)throw new ApiError("RATE_LIMITED","Demasiadas consultas de enlaces. Espera al siguiente minuto.",429);
  const raw=Array.isArray(req.query?.id)?req.query?.id[0]:req.query?.id;
  const id=str(raw).toUpperCase();
  if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);
