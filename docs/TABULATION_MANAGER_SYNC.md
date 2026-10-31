@@ -743,20 +743,29 @@ Se añade un worker de sincronización para las operaciones que ya tienen un flu
 
 ### F3 — Reconciliación y offline
 
-El worker de outbox implementa push automático de `publish-round`, leases, reintentos con backoff y recuperación de operaciones pendientes. Esto no cierra F3.
+Se ha conectado el pull remoto autenticado al ciclo de vida de Tabulación. El gestor sigue siendo autoridad de equipos, oradores, jueces y salas; Tabulación conserva su dominio local de rondas, debates, actas, resultados y atributos exclusivos de tabulación.
 
-Se ha añadido `src/tabulation/reconciliation.ts` como primer bloque de dominio para comparar tres versiones: último snapshot remoto confirmado, estado local y snapshot remoto nuevo. Clasifica cambios independientes, conflictos simultáneos, altas remotas y cambios que requieren revisión histórica. Su contrato está cubierto por `src/tabulation/reconciliation.test.ts`.
+**Implementación añadida:**
+- `HomeView` consulta `getTournament` usando la sesión privada existente del gestor. No usa el hand-off de `localStorage` como transporte entre dispositivos.
+- El pull se ejecuta al abrir el torneo vinculado, cada 30 segundos, al recuperar foco/visibilidad y al recibir `online`. Las consultas se serializan por instancia, no se solapan y se cancelan al desmontar o cambiar de torneo.
+- Se persiste por torneo local el último snapshot remoto reconocido y, por separado, cualquier reconciliación pendiente. Un snapshot pendiente sobrevive a recarga/cierre y se vuelve a mostrar sin sobrescribir el torneo local.
+- Para vínculos creados antes de esta mejora, `buildLocalPanelBase` reconstruye una base conservadora a partir de la copia local y del `idMap`; no se declara que la copia remota histórica sea recuperable si nunca se almacenó.
+- `comparePanelRevisions` compara base/local/remoto y detecta cambios remotos independientes, altas remotas, cambios locales exclusivos, conflictos simultáneos y cambios sobre entidades referenciadas por debates históricos. También detecta divergencia local aunque la revisión remota no haya cambiado.
+- Solo se aplican automáticamente cambios remotos sin divergencias locales ni impacto histórico. Antes se crea una copia local; se aplica el merge y se confirma el guardado local mediante `store.flush()`. El cursor remoto solo avanza después de ese guardado.
+- Si hay conflicto o impacto histórico, el sistema conserva el snapshot remoto pendiente, muestra un diff por entidad/campos y exige confirmación. La resolución acepta la versión del Gestor (autoridad de las entidades compartidas), crea copia previa, registra la decisión y conserva rondas/actas. No se descarta la versión local anterior.
+- El merge sincroniza también el estado activo/inactivo de equipos, jueces y salas, preservando los campos exclusivos de Tabulación (rating, presidencia, disponibilidad, swing, break eligibility, rondas y actas).
+- La revisión remota confirmada se guarda en `panelLink.remoteRevision/remoteUpdatedAt`, incluso si el snapshot no contiene cambios de entidades, para que las futuras publicaciones no utilicen una revisión base obsoleta.
+- Los errores de red, sesión caducada y fallos 5xx no avanzan el cursor. Se respeta `Retry-After` también en respuestas 5xx; la outbox conserva operación e idempotencia para reintentar.
+- Se añaden pruebas para la base reconstruida de vínculos antiguos, persistencia de snapshots/conflictos, detección de cambios locales exclusivos, conflictos simultáneos, impacto histórico y flags activos.
 
-**Limitación actual:** este comparador todavía no está conectado al ciclo de vida de Tabulación. No existe aún una base snapshot remota persistida por torneo, un pull autenticado periódico/por foco ni una interfaz que permita aceptar/rechazar cada cambio y resolver conflictos conservando ambas versiones. Tampoco hay prueba multi-dispositivo contra Neon. Por tanto, F3 permanece abierta y no debe marcarse como completada.
+**Límites deliberados y pendientes de validación:**
+- El modelo actual del gestor no expone tombstones de entidades. Por tanto, la ausencia de una entidad en un snapshot nunca se interpreta como borrado; no se elimina nada. Los borrados solo podrán procesarse cuando exista tombstone explícito, como exige el contrato.
+- La resolución de conflictos sigue la autoridad acordada: aceptar la versión del Gestor o posponer la decisión. No se ofrece «forzar local» porque no existe una operación autorizada de push genérico para entidades compartidas.
+- El worker de push despacha únicamente `publish-round`; no hay upsert genérico ni escritura de entidades desde Tabulación.
+- La prueba automatizada multi-dispositivo real contra Neon Preview, la validación de la migración IndexedDB 1→2 en navegador y el E2E de cierre/reapertura con backend conectado siguen pendientes. No se han ejecutado migraciones ni escrituras de Neon/Production.
+- La validación CI del último HEAD debe completarse antes de cerrar formalmente F3. El último estado consultado no mostraba un run nuevo de GitHub Actions; Vercel reportaba `build-rate-limit`, no un error de compilación atribuible al código.
 
-Orden restante de F3:
-1. Persistir el último snapshot remoto confirmado junto al vínculo, con revisión y hash.
-2. Implementar pull autenticado incremental usando la sesión del operador; nunca usar un handoff de localStorage como sustituto del transporte entre dispositivos.
-3. Comparar base/local/remoto mediante el módulo de reconciliación.
-4. Aplicar automáticamente solo cambios compatibles y no históricos; exigir revisión para cambios históricos y decisión para conflictos.
-5. Guardar las dos propuestas y la decisión del operador en el log local; actualizar la base solo después de aplicar/aceptar la revisión remota.
-6. Reanudar push únicamente cuando dependencias y revisión base estén confirmadas.
-7. Probar dos dispositivos, recarga, cierre/reapertura, timeout ambiguo, migración IndexedDB 1→2 y recuperación real con Neon Preview.
+**Conclusión de estado:** el pull autenticado, persistencia de base, diff, UI de revisión, aplicación segura y reintentos ya están implementados. No se debe declarar F3 validada al 100 % hasta que CI y las pruebas multi-dispositivo/Neon Preview anteriores pasen. La PR permanece Draft.
 
 ### F4 — Actas oficiales
 
