@@ -19,6 +19,13 @@ export async function guardNetwork(context: BrowserContext, baseURL: string): Pr
       });
       return;
     }
+    // The desk intentionally opens WhatsApp as a top-level navigation. Keep that
+    // navigation local to the test runner (no real WhatsApp request), while still
+    // blocking external data/subresource traffic.
+    if (url.hostname === 'wa.me' && route.request().resourceType() === 'document' && route.request().method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>WhatsApp navigation stub</title>' });
+      return;
+    }
     if (url.origin !== origin || url.pathname.startsWith('/api')) {
       forbidden.push(route.request().method() + ' ' + url.href.slice(0, 120));
       await route.abort();
