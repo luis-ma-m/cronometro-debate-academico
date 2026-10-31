@@ -82,6 +82,22 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     });
   });
 
+  it("rejects an acta whose local tournament, round or debate differs from the persisted mapping", async () => {
+    const request = input();
+    const wrongSource = {
+      ...(request.source as Record<string, unknown>),
+      acta: {
+        ...((request.source as Record<string, unknown>).acta as Record<string, unknown>),
+        debateId: "another-local-debate",
+      },
+    };
+    await expect(previewTabulationActa({ assignmentId: ids.assignment, source: wrongSource }))
+      .rejects.toMatchObject({ code: "ACTA_IDENTITY_MISMATCH", status: 409 });
+    await expect(saveTabulationActa(input({ source: wrongSource })))
+      .rejects.toMatchObject({ code: "ACTA_IDENTITY_MISMATCH", status: 409 });
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO tabulation_acta_sources"))).toBe(false);
+  });
+
   it("previews the proposed acta against current server rules without persisting it", async () => {
     const preview = await previewTabulationActa({ assignmentId: ids.assignment, source: input().source });
     expect(preview).toMatchObject({
