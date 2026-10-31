@@ -78,20 +78,6 @@ export function validatePublishedRoundPayload(
   if (value.roundKind !== 'qualifying' && value.roundKind !== 'elimination') issues.push("El tipo de ronda no es válido.");
   if (value.sideMode !== 'draw' && value.sideMode !== 'balanced') issues.push("El modo de posturas de la ronda no es válido.");
   if (!Array.isArray(value.teamMetadata)) issues.push("Los metadatos de equipos deben ser una lista.");
-  const seenMetadataTeams = new Set<string>();
-  if (Array.isArray(value.teamMetadata)) {
-    for (const entry of value.teamMetadata) {
-      if (!isRecord(entry) || !nonEmptyString(entry.teamId) || !teams.has(entry.teamId)
-        || typeof entry.swing !== "boolean" || typeof entry.breakEligible !== "boolean"
-        || (entry.fallenFromRound !== undefined && (!Number.isSafeInteger(entry.fallenFromRound) || (entry.fallenFromRound as number) < 1))
-        || Object.keys(entry).some((key) => !["teamId", "swing", "breakEligible", "fallenFromRound"].includes(key))) {
-        issues.push("Los metadatos de un equipo contienen referencias o valores no válidos.");
-        continue;
-      }
-      if (seenMetadataTeams.has(entry.teamId)) issues.push("Los metadatos de equipos contienen identificadores duplicados.");
-      seenMetadataTeams.add(entry.teamId);
-    }
-  }
   if (!nonEmptyString(value.tabTournamentName) || value.tabTournamentName.length > 200) issues.push("El nombre del torneo de Tabulación debe contener entre 1 y 200 caracteres.");
   if (value.tournamentId !== context.canonicalTournamentId) {
     issues.push("La propuesta no pertenece a la identidad canónica del torneo.");
@@ -108,6 +94,28 @@ export function validatePublishedRoundPayload(
 
   const rooms = new Map(context.physicalRooms.map((item) => [item.id, item]));
   const teams = new Map(context.teams.map((item) => [item.id, item]));
+  if (value.sideMode !== 'draw' && value.sideMode !== 'balanced') issues.push("El modo de posturas de la ronda no es válido.");
+  if (!Array.isArray(value.teamMetadata)) issues.push("Los metadatos de equipos deben ser una lista.");
+  const seenMetadataTeams = new Set<string>();
+  if (Array.isArray(value.teamMetadata)) {
+    for (const entry of value.teamMetadata) {
+      if (!isRecord(entry) || !nonEmptyString(entry.teamId) || !teams.has(entry.teamId)
+        || typeof entry.swing !== "boolean" || typeof entry.breakEligible !== "boolean"
+        || (entry.fallenFromRound !== undefined && (!Number.isSafeInteger(entry.fallenFromRound) || (entry.fallenFromRound as number) < 1))
+        || Object.keys(entry).some((key) => !["teamId", "swing", "breakEligible", "fallenFromRound"].includes(key))) {
+        issues.push("Los metadatos de un equipo contienen referencias o valores no válidos.");
+        continue;
+      }
+      if (seenMetadataTeams.has(entry.teamId)) issues.push("Los metadatos de equipos contienen identificadores duplicados.");
+      seenMetadataTeams.add(entry.teamId);
+    }
+  }
+  if (Array.isArray(value.teamMetadata)) {
+    const activeTeamIds = new Set(context.teams.filter((team) => team.active).map((team) => team.id));
+    if (seenMetadataTeams.size !== activeTeamIds.size || [...activeTeamIds].some((id) => !seenMetadataTeams.has(id))) {
+      issues.push("La propuesta debe incluir exactamente los metadatos de todos los equipos activos del gestor.");
+    }
+  }
   const judges = new Map(context.judges.map((item) => [item.id, item]));
   const usedDebateIds = new Set<string>();
   const usedRooms = new Set<string>();
