@@ -275,20 +275,28 @@ export async function saveTabulationActa(input: SaveTabulationActaInput) {
   if (input.expectedCurrentSourceId !== null && !uuid(input.expectedCurrentSourceId)) throw new ApiError("INVALID_PAYLOAD", "La versión vigente esperada no es válida.");
   if (typeof input.confirmReplace !== "boolean") throw new ApiError("INVALID_PAYLOAD", "Falta la confirmación explícita de sustitución.");
   if (!Number.isSafeInteger(input.expectedSettingsRevision) || input.expectedSettingsRevision < 0) throw new ApiError("INVALID_PAYLOAD", "La revisión de reglas esperada no es válida.");
+  const scope = "tabulation-save-acta:" + input.assignmentId + ":" + hash({
+    source: input.source, expectedCurrentSourceId: input.expectedCurrentSourceId, confirmReplace: input.confirmReplace,
+    expectedSettingsRevision: input.expectedSettingsRevision,
+  });
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
-    const loaded = await loadActaContext(client, input.assignmentId);
-    const scope = "tabulation-save-acta:" + input.assignmentId + ":" + hash({
-      source: input.source, expectedCurrentSourceId: input.expectedCurrentSourceId, confirmReplace: input.confirmReplace,
-      expectedSettingsRevision: input.expectedSettingsRevision,
-    });
-    const prior = await client.query("SELECT scope, response FROM idempotency_keys WHERE operation_key = $1", [input.operationId]);
-    if (prior.rows[0]) {
-      if (str(prior.rows[0].scope) !== scope) throw new ApiError("IDEMPOTENCY_MISMATCH", "El operationId ya se utilizó con otra acta.", 409);
-      if (!prior.rows[0].response) throw new ApiError("IDEMPOTENCY_INCOMPLETE", "La operación previa no tiene una confirmación recuperable.", 409);
+    const priorBeforeLock = await client.query("SELECT scope, response FROM idempotency_keys WHERE operation_key = $1", [input.operationId]);
+    if (priorBeforeLock.rows[0]) {
+      if (str(priorBeforeLock.rows[0].scope) !== scope) throw new ApiError("IDEMPOTENCY_MISMATCH", "El operationId ya se utilizó con otra acta.", 409);
+      if (!priorBeforeLock.rows[0].response) throw new ApiError("IDEMPOTENCY_INCOMPLETE", "La operación previa no tiene una confirmación recuperable.", 409);
       await client.query("COMMIT");
-      return prior.rows[0].response;
+      return priorBeforeLock.rows[0].response;
+    }
+    const loaded = await loadActaContext(client, input.assignmentId);
+    // A concurrent request with this operationId may have committed while we waited for the assignment lock.
+    const priorAfterLock = await client.query("SELECT scope, response FROM idempotency_keys WHERE operation_key = $1", [input.operationId]);
+    if (priorAfterLock.rows[0]) {
+      if (str(priorAfterLock.rows[0].scope) !== scope) throw new ApiError("IDEMPOTENCY_MISMATCH", "El operationId ya se utilizó con otra acta.", 409);
+      if (!priorAfterLock.rows[0].response) throw new ApiError("IDEMPOTENCY_INCOMPLETE", "La operación previa no tiene una confirmación recuperable.", 409);
+      await client.query("COMMIT");
+      return priorAfterLock.rows[0].response;
     }
     if (loaded.settingsRevision !== input.expectedSettingsRevision) throw new ApiError("ACTA_RULES_REVISION_CONFLICT", "Las reglas de Tabulación han cambiado desde la comparación. Vuelve a revisar el acta con las reglas actuales.", 409);
     if (loaded.currentSourceId !== input.expectedCurrentSourceId) {
