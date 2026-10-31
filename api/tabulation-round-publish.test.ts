@@ -80,6 +80,13 @@ describe("transactional Tabulation round publication", () => {
       ] };
       if (statement.startsWith("SELECT COALESCE(MAX(number)")) return { rows: [{ next_number: 1 }] };
       if (statement.startsWith("SELECT id FROM rounds")) return { rows: [] };
+      if (statement.startsWith("SELECT id FROM format_presets")) return { rows: [{ id: "format-default" }] };
+      if (statement.startsWith("SELECT phase_id, phase_order")) return { rows: [
+        { phase_id: "phase-1", phase_order: 0, name: "Exposición", side: "favor", speaker: "Equipo a favor",
+          description: "", duration_seconds: 240, phase_type: "opening", warning_thresholds_seconds: [60, 30, 10], allow_overtime_display: true },
+        { phase_id: "phase-2", phase_order: 1, name: "Conclusión", side: "contra", speaker: "Equipo en contra",
+          description: "", duration_seconds: 180, phase_type: "conclusion", warning_thresholds_seconds: [60, 30], allow_overtime_display: true },
+      ] };
       if (statement.startsWith("INSERT INTO idempotency_keys")) {
         stored.scope = String(params[1]);
         stored.response = JSON.parse(String(params[2]));
@@ -96,6 +103,9 @@ describe("transactional Tabulation round publication", () => {
     });
     expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO rounds"))).toBe(true);
     expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO room_assignments"))).toBe(true);
+    expect(query.mock.calls.some(([sql, params]) => String(sql).includes("INSERT INTO rounds") && (params as unknown[])[4] === "format-default")).toBe(true);
+    expect(query.mock.calls.some(([sql, params]) => String(sql).includes("INSERT INTO room_assignments") && (params as unknown[])[3] === "format-default" && (params as unknown[])[6] === 240)).toBe(true);
+    expect(query.mock.calls.filter(([sql]) => String(sql).includes("INSERT INTO assignment_phases"))).toHaveLength(2);
     expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO assignment_judges"))).toBe(true);
     expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO audit_events"))).toBe(true);
     expect(query.mock.calls.some(([sql]) => String(sql) === "COMMIT")).toBe(true);

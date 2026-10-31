@@ -96,10 +96,27 @@ export async function publishTabulationRound(rawOperation: unknown) {
     const existingRound = await client.query("SELECT id FROM rounds WHERE id = $1 OR number = $2", [operation.entityId, validated.roundNumber]);
     if (existingRound.rows.length) throw new ApiError("REVISION_CONFLICT", "Ya existe una ronda con ese identificador o número.", 409);
 
+    // Every new assignment must inherit a real manager format snapshot. An empty
+    // assignment_phases array would make the timer load with zero phases/seconds.
+    const formatResult = await client.query("SELECT id FROM format_presets ORDER BY name, id LIMIT 1");
+    const defaultFormatId = str(formatResult.rows[0]?.id);
+    if (!defaultFormatId) throw new ApiError("FORMAT_NOT_CONFIGURED", "El gestor no tiene un formato de debate configurado. No se ha publicado la ronda.", 503);
+    const phasesResult = await client.query(
+      `SELECT phase_id, phase_order, name, side, speaker, description, duration_seconds,
+              phase_type, warning_thresholds_seconds, allow_overtime_display
+         FROM format_phases WHERE format_id = $1 ORDER BY phase_order`,
+      [defaultFormatId],
+    );
+    const phases = phasesResult.rows as Array<Record<string, unknown>>;
+    const firstPhaseDuration = num(phases[0]?.duration_seconds);
+    if (!phases.length || !Number.isSafeInteger(firstPhaseDuration) || firstPhaseDuration < 1) {
+      throw new ApiError("FORMAT_NOT_CONFIGURED", "El formato predeterminado del gestor no contiene intervenciones válidas. No se ha publicado la ronda.", 503);
+    }
+
     const roundKind = validated.roundKind;
     await client.query(
-      "INSERT INTO rounds(id, number, name, score_type, is_active) VALUES ($1, $2, $3, $4, false)",
-      [operation.entityId, validated.roundNumber, validated.roundName, roundKind],
+      "INSERT INTO rounds(id, number, name, score_type, default_format_id, is_active) VALUES ($1, $2, $3, $4, $5, false)",
+      [operation.entityId, validated.roundNumber, validated.roundName, roundKind, defaultFormatId],
     );
 
     const assignmentIds: string[] = [];
@@ -107,11 +124,23 @@ export async function publishTabulationRound(rawOperation: unknown) {
       const assignmentId = randomUUID();
       assignmentIds.push(assignmentId);
       await client.query(
-        `INSERT INTO room_assignments(id, round_id, physical_room_id, team_favor_id, team_contra_id, notes)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [assignmentId, operation.entityId, debate.physicalRoomId, debate.teamFavorId, debate.teamContraId,
-          debate.sidesProvisional ? "Posturas provisionales: revisar antes de activar la ronda." : ""],
+        `INSERT INTO room_assignments(id, round_id, physical_room_id, format_id, team_favor_id, team_contra_id, remaining_seconds, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [assignmentId, operation.entityId, debate.physicalRoomId, defaultFormatId, debate.teamFavorId, debate.teamContraId,
+          firstPhaseDuration, debate.sidesProvisional ? "Posturas provisionales: revisar antes de activar la ronda." : ""],
       );
+      for (const phase of phases) {
+        await client.query(
+          `INSERT INTO assignment_phases(
+             assignment_id, phase_id, phase_order, name, side, speaker, description, duration_seconds,
+             phase_type, warning_thresholds_seconds, allow_overtime_display
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+          [assignmentId, str(phase.phase_id), num(phase.phase_order), str(phase.name), str(phase.side), str(phase.speaker),
+            str(phase.description), num(phase.duration_seconds), str(phase.phase_type),
+            Array.isArray(phase.warning_thresholds_seconds) ? phase.warning_thresholds_seconds.map(Number) : [],
+            bool(phase.allow_overtime_display)],
+        );
+      }
       for (const judgeId of debate.judgeIds) {
         await client.query("INSERT INTO assignment_judges(assignment_id, judge_id) VALUES ($1, $2)", [assignmentId, judgeId]);
       }
