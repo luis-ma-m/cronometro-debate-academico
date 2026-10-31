@@ -1302,10 +1302,12 @@ function validActaSnapshot(value:unknown):value is Record<string,unknown>{
     ||!rules.rubric.every(item=>!!item&&typeof item==="object"&&!Array.isArray(item)
       &&typeof (item as Record<string,unknown>).id==="string"&&typeof (item as Record<string,unknown>).name==="string"
       &&typeof (item as Record<string,unknown>).section==="string")))return false;
-  const numericRules=["itemMin","itemMax","speakerScoreMin","speakerScoreMax","speakerScoreStep","warningConversion","minorEscalation","minorPoints","minorsPerMajor","majorPoints"];
+  const numericRules=["itemMin","itemMax","speakerScoreMin","speakerScoreMax","speakerScoreStep","minorPoints","minorsPerMajor","majorPoints"];
   if(numericRules.some(key=>rules[key]!==undefined&&(typeof rules[key]!=="number"||!Number.isFinite(rules[key]))))return false;
   if(rules.speakerScores!==undefined&&typeof rules.speakerScores!=="boolean")return false;
-  if(rules.majorMode!==undefined&&typeof rules.majorMode!=="string")return false;
+  if(rules.warningConversion!==undefined&&!["ledu","pairs","aduma","none"].includes(String(rules.warningConversion)))return false;
+  if(rules.minorEscalation!==undefined&&!["blocks","aduma"].includes(String(rules.minorEscalation)))return false;
+  if(rules.majorMode!==undefined&&!["forfeit","points"].includes(String(rules.majorMode)))return false;
   return true;
 }
 function shortLinkId():string{const a="0123456789ABCDEFGHJKMNPQRSTVWXYZ";let n=0n;for(const b of randomBytes(5))n=(n<<8n)|BigInt(b);let s="";for(let i=0;i<8;i++){s=a[Number(n&31n)]+s;n>>=5n;}return s;}
