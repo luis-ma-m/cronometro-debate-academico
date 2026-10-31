@@ -26,6 +26,7 @@ export interface PublishedRoundPayload {
   roundKind: 'qualifying' | 'elimination';
   sideMode: 'draw' | 'balanced';
   teamMetadata: Array<{ teamId: string; swing: boolean; breakEligible: boolean; fallenFromRound?: number }>;
+  entityIdMap: { teams: Record<string, string>; judges: Record<string, string>; speakers: Record<string, string>; venues: Record<string, string> };
   debates: PublishedRoundDebate[];
 }
 
@@ -93,6 +94,15 @@ export function validatePublishedRoundPayload(
   }
   if (value.basePanelUpdatedAt !== undefined && value.basePanelUpdatedAt !== context.currentUpdatedAt) {
     issues.push("La fecha base de la propuesta no coincide con la última actualización del gestor.");
+  }
+  if (!isRecord(value.entityIdMap)) issues.push("Falta el mapa revisado de identidades de entidades.");
+  else for (const kind of ["teams", "judges", "speakers", "venues"] as const) {
+    const map = value.entityIdMap[kind];
+    if (!isRecord(map) || Object.entries(map).some(([localId, remoteId]) =>
+      !nonEmptyString(localId) || localId.length > 128 || !nonEmptyString(remoteId) || remoteId.length > 128)
+      || (isRecord(map) && new Set(Object.values(map)).size !== Object.values(map).length)) {
+      issues.push("El mapa de identidades de " + kind + " no es válido o contiene colisiones.");
+    }
   }
   if (!Array.isArray(value.debates) || value.debates.length === 0) {
     issues.push("La propuesta debe contener al menos un debate.");
@@ -233,6 +243,12 @@ export function validatePublishedRoundPayload(
     roundNumber: value.roundNumber as number,
     roundKind: value.roundKind as 'qualifying' | 'elimination',
     sideMode: value.sideMode as 'draw' | 'balanced',
+    entityIdMap: {
+      teams: { ...(value.entityIdMap as Record<string, Record<string, string>>).teams },
+      judges: { ...(value.entityIdMap as Record<string, Record<string, string>>).judges },
+      speakers: { ...(value.entityIdMap as Record<string, Record<string, string>>).speakers },
+      venues: { ...(value.entityIdMap as Record<string, Record<string, string>>).venues },
+    },
     teamMetadata: (value.teamMetadata as Array<Record<string, unknown>>).map((entry) => ({
       teamId: entry.teamId as string, swing: entry.swing as boolean, breakEligible: entry.breakEligible as boolean,
       ...(typeof entry.fallenFromRound === "number" ? { fallenFromRound: entry.fallenFromRound } : {}),
