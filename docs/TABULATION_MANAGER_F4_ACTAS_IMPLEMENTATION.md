@@ -38,8 +38,9 @@ F4 dispone ya de una implementación funcional en código para el flujo de previ
 
 - Al expandir una sala del Gestor, se consulta automáticamente su historial oficial si todavía no está cargado. El contador de reescrituras queda visible también en la cabecera de la tarjeta de sala una vez recuperado el historial; la consulta sigue siendo de solo lectura y no se ejecuta mientras existan cambios locales sin guardar.
 - Se añade una prueba de regresión de F4 que fuerza un fallo al insertar el evento de auditoría después de insertar la fuente inmutable. La prueba exige `ROLLBACK`, prohíbe `COMMIT` y comprueba que no se registra la clave de idempotencia incompleta. Es una prueba de contrato con cliente PostgreSQL simulado; no sustituye la prueba de rollback en Neon Preview.
+- Se añade también una prueba de sustitución confirmada: verifica que se crea una nueva versión inmutable enlazada a la anterior, que el contador de reescrituras procede del servidor y que la transacción confirma correctamente.
 
-F3: la implementación de pull/reconciliación, snapshot base, conflictos persistentes y cola de publicación de rondas ya está incorporada en este HEAD. No se identifica un bloque adicional de código F3 que pueda cerrarse responsablemente sin la prueba de navegador multi-dispositivo y la validación de IndexedDB en un navegador real. Esas pruebas permanecen como criterios de salida, no se etiquetan como implementadas.
+F3: la implementación de pull/reconciliación, snapshot base, conflictos persistentes y cola de publicación de rondas ya está incorporada en este HEAD. Se añade E2E real de navegador para la migración IndexedDB v1→v2, conservación de una operación antigua, creación del índice, recuperación de lease expirado y exclusión de dos repositorios/pestañas. Esto cubre el contrato local del navegador; no sustituye la validación de dos dispositivos contra Neon Preview ni la revisión con perfiles de datos reales.
 
 ## Nota de Vercel (no bloqueante para la implementación)
 
