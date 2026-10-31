@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, CloudUpload, RefreshCw } from 'lucide-reac
 import { apiConfigured, previewTabulationActa, saveTabulationActa, type PreviewTabulationActaResponse, type SaveTabulationActaResponse } from '../api';
 import { computeDebateOutcome, outcomeContext } from './results';
 import { makeTabId, type TabDebate, type TabDebateResult, type TabRound, type TabTournament } from './types';
+import { lookups } from './ui';
 import { Notice } from './ui';
 import type { TabStore } from './store';
 
@@ -44,6 +45,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
   const [pendingSave, setPendingSave] = useState<PendingSave | null>(null);
   const [lastSaved, setLastSaved] = useState<SaveTabulationActaResponse | null>(null);
   const context = useMemo(() => outcomeContext(tournament), [tournament]);
+  const look = useMemo(() => lookups(tournament), [tournament]);
   const outcome = useMemo(() => computeDebateOutcome(round, { ...debate, result }, context), [round, debate, result, context]);
   const assignmentId = debate.managerAssignmentId;
   const canPublish = Boolean(apiConfigured && token && tournament.panelLink?.remoteId && round.managerRoundId && assignmentId);
@@ -104,10 +106,11 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
         basePanelUpdatedAt: preview.basePanelUpdatedAt,
       },
     };
-    const pending: PendingSave = pendingSave ?? {
-      operationId: makeTabId('acta-op'),
+    const operationId = pendingSave?.input.operationId ?? makeTabId('acta-op');
+    const stablePending: PendingSave = pendingSave ?? {
+      operationId,
       input: {
-        operationId: makeTabId('acta-op'),
+        operationId,
         assignmentId,
         source: confirmedSource,
         expectedCurrentSourceId: preview.currentSourceId,
@@ -115,8 +118,6 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
         expectedSettingsRevision: preview.settingsRevision,
       },
     };
-    // Keep the same operationId and body if the network response is lost; a retry is idempotent.
-    const stablePending = pendingSave ?? { ...pending, operationId: pending.input.operationId };
     setPendingSave(stablePending);
     try {
       const saved = await saveTabulationActa(token, stablePending.input);
@@ -154,12 +155,20 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
             </div>
             {preview && <div className="notice tab-info-notice" role="status">
               <b>{preview.currentSourceId ? 'Comparación de sustitución' : 'Primera publicación'}</b>
-              <p>Ganador propuesto: <b>{outcome.winnerTeamId}</b> · modalidad: {preview.sourceMode} · revisión del Gestor: {preview.basePanelRevision}.</p>
+              <p>Ganador propuesto: <b>{look.teamName(outcome.winnerTeamId ?? '')}</b> · modalidad: {preview.sourceMode} · revisión del Gestor: {preview.basePanelRevision}.</p>
               {preview.currentSource
                 ? <p>Versión vigente: {preview.currentSource.id} · {preview.currentSource.sourceMode} · {ballotCount(preview.currentSource)} papeletas · hash {preview.currentSource.sourceHash.slice(0, 12)}…</p>
                 : <p>No existe una versión oficial previa para esta asignación.</p>}
               <p>Propuesta: {result.ballots.length} papeletas · {Object.keys(result.penalties).length} equipos con registro de sanciones.</p>
               {preview.currentSourceId && <p><AlertTriangle size={14} /> La confirmación sustituirá la versión vigente y aumentará el contador de reescrituras.</p>}
+              {preview.currentSourceId && <div className="tab-acta-diff" aria-label="Diferencias con el acta oficial">
+                <b>Cambios detectados ({preview.changes.length}{preview.changes.length === 40 ? '+' : ''})</b>
+                {preview.changes.length
+                  ? <ul>{preview.changes.slice(0, 12).map((change) => <li key={change.path}>
+                      <code>{change.path}</code>: <span>{JSON.stringify(change.before) ?? '—'}</span> → <b>{JSON.stringify(change.after) ?? '—'}</b>
+                    </li>)}</ul>
+                  : <p>El contenido coincide con la versión oficial.</p>}
+              </div>}
               <div className="tab-actions">
                 <button type="button" className="button primary" onClick={() => void publish()} disabled={busy}>
                   <CheckCircle2 size={15} /> {busy && pendingSave ? 'Publicando…' : preview.currentSourceId ? 'Confirmar sustitución oficial' : 'Confirmar primera publicación'}
