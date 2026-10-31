@@ -11,6 +11,8 @@ export interface PublishedRoundDebate {
 }
 
 export interface PublishedRoundPayload {
+  tabTournamentId: string;
+  tabulationRoundId: string;
   format: "ledu-tabulacion-outbox";
   version: 1;
   createdAt: number;
@@ -67,6 +69,10 @@ export function validatePublishedRoundPayload(
   const issues: string[] = [];
   if (!isRecord(value)) throw new SyncDomainValidationError(["La propuesta de ronda debe ser un objeto."]);
 
+  if (!nonEmptyString(value.tabTournamentId) || value.tabTournamentId.length > 128
+    || !/^[a-zA-Z0-9_-]+$/.test(value.tabTournamentId)) issues.push("La identidad local del torneo de Tabulación no es válida.");
+  if (!nonEmptyString(value.tabulationRoundId) || value.tabulationRoundId.length > 128
+    || !/^[a-zA-Z0-9_-]+$/.test(value.tabulationRoundId)) issues.push("La identidad local de la ronda de Tabulación no es válida.");
   if (value.format !== "ledu-tabulacion-outbox" || value.version !== 1) {
     issues.push("El formato o la versión de la propuesta de ronda no están soportados.");
   }
@@ -215,6 +221,8 @@ export function validatePublishedRoundPayload(
   return {
     format: "ledu-tabulacion-outbox",
     version: 1,
+    tabTournamentId: value.tabTournamentId as string,
+    tabulationRoundId: value.tabulationRoundId as string,
     createdAt: value.createdAt as number,
     tournamentId: value.tournamentId as string,
     basePanelRevision: value.basePanelRevision as number,
