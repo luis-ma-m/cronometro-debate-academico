@@ -45,6 +45,13 @@ const validPayload = (): PublishedRoundPayload => ({
   roundNumber: 1,
   roundKind: "qualifying",
   sideMode: "balanced",
+    entityIdMap: {
+      teams: { "local-a": "team-a", "local-b": "team-b" },
+      judges: { "local-judge": "judge-a" },
+      speakers: { "local-speaker": "speaker-a" },
+      venues: { "local-room": "room-a" },
+    },
+
   teamMetadata: [
     { teamId: "team-a", swing: false, breakEligible: true },
     { teamId: "team-b", swing: false, breakEligible: true },
