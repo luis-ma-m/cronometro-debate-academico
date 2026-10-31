@@ -210,6 +210,18 @@ describe('panel → tabulation', () => {
 });
 
 describe('tabulation → panel', () => {
+  it('synchronizes manager-owned active flags without overwriting tabulation-only judge fields', () => {
+    const source = panel();
+    const tab = tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1);
+    source.teams[0].active = false;
+    source.judges[0].active = false;
+    source.physicalRooms[0].active = false;
+    const merged = mergeHandoff(tab, buildPanelHandoff(source, now), now);
+    expect(merged.tournament.teams.find((team) => team.id === 't1')?.active).toBe(false);
+    expect(merged.tournament.judges.find((judge) => judge.id === 'j1')).toMatchObject({ active: false, rating: 3, canChair: true });
+    expect(merged.tournament.venues.find((venue) => venue.id === 'physical-a1')?.active).toBe(false);
+  });
+
   it('creates the assignments of an empty round and passes the panel and API validation', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
