@@ -142,6 +142,13 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
     id: str(speaker.id), teamId: str(speaker.team_id), name: str(speaker.name),
   }));
   const judgeIds = judges.map((judge) => judge.id);
+  for (const teamId of [teamFavorId, teamContraId]) {
+    const team = teams.find((item) => item.id === teamId);
+    if (!team?.active) throw new ApiError("ACTA_CONTEXT_INVALID", "Uno de los equipos asignados ya no está activo en el Gestor.", 409);
+  }
+  if (judges.some((judge) => !judge.active)) {
+    throw new ApiError("ACTA_CONTEXT_INVALID", "El panel de jueces de la asignación contiene jueces inactivos en el Gestor.", 409);
+  }
   const persistedChairId = str(row.chair_judge_id);
   if (persistedChairId && !judgeIds.includes(persistedChairId)) {
     throw new ApiError("ACTA_CONTEXT_INVALID", "La presidencia guardada al publicar la ronda ya no pertenece al panel de jueces actual. Revisa y vuelve a publicar la asignación antes de enviar el acta.", 409);
