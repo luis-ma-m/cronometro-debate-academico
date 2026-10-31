@@ -223,4 +223,20 @@ describe("authoritative transactional Tabulation acta persistence", () => {
       .rejects.toMatchObject({ code: "ACTA_REPLACEMENT_CONFIRMATION_REQUIRED", status: 409 });
     expect(mocks.query).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO tabulation_acta_sources"), expect.anything());
   });
+
+  it("rolls back the immutable source when audit persistence fails", async () => {
+    const baseImplementation = mocks.query.getMockImplementation();
+    mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      if (String(sql).startsWith("INSERT INTO audit_events")) {
+        throw new Error("audit storage unavailable");
+      }
+      return baseImplementation!(sql, params);
+    });
+
+    await expect(saveTabulationActa(input())).rejects.toThrow("audit storage unavailable");
+    expect(mocks.query).toHaveBeenCalledWith("ROLLBACK");
+    expect(mocks.query).not.toHaveBeenCalledWith("COMMIT");
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO tabulation_acta_sources"))).toBe(true);
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO idempotency_keys"))).toBe(false);
+  });
 });
