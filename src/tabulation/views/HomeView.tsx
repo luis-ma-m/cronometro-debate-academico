@@ -194,7 +194,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [tournament?.id, tournament?.panelLink?.remoteId, tournament?.panelLink?.remoteRevision, tournament?.revision, state.readOnly, store, notify]);
+  }, [tournament, state.readOnly, store, notify]);
 
   const debates = tournament?.rounds.flatMap((round) => round.debates.map((debate) => ({ debate, round }))) ?? [];
   const teams = tournament ? new Map(tournament.teams.map((team) => [team.id, team])) : new Map();
