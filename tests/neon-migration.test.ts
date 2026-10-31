@@ -237,6 +237,17 @@ describe("Neon migration artifacts", () => {
     expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
   });
 
+  it("uses PostgreSQL rate limits so public short-link resolution does not require Redis", async () => {
+    const sql = await readFile(resolve("db/migrations/0021_acta_short_link_rate_limits.sql"), "utf8");
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS acta_short_link_resolution_limits");
+    expect(sql).toContain("PRIMARY KEY");
+    expect(api).toContain("databaseConfigured()");
+    expect(api).toContain("ON CONFLICT(ip_hash)");
+    expect(sql).not.toMatch(/\\bDROP\\s+TABLE\\b/i);
+    expect(sql).not.toMatch(/\\bTRUNCATE\\b/i);
+  });
+
   it("exposes authenticated short-link management and a public integrity-checked resolver", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
     const client = await readFile(resolve("src/api.ts"), "utf8");
@@ -248,7 +259,8 @@ describe("Neon migration artifacts", () => {
     expect(api).toContain('action === "resolveActaShortLink"');
     expect(api).toContain("randomBytes(5)");
     expect(api).toContain("snapshot_sha256");
-    expect(api).toContain('["INCR",key]');
+    expect(api).toContain("acta_short_link_resolution_limits");
+    expect(api).toContain("ON CONFLICT(ip_hash)");
     expect(api).toContain("SHORT_LINK_REVOKED");
     expect(api).toContain("SHORT_LINK_EXPIRED");
     expect(view).toContain("#S8-");
