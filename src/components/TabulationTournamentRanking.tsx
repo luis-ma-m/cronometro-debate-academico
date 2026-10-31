@@ -93,7 +93,6 @@ export function TabulationTournamentRanking({ remoteId, managerTeams, fallback }
   const canonicalTeamName = (localId: string, fallbackName: string) => managerTeamsById.get(canonicalTeamId(localId)) ?? fallbackName;
   const unmappedTeams = tournament ? tournament.teams.filter((team) => !managerTeamsById.has(canonicalTeamId(team.id))).length : 0;
   const joint = tournament?.settings.ballotMode === 'joint';
-  const columns = joint ? 7 : 8 + (tournament?.settings.speakerScores ? 1 : 0);
 
   if (!tournament) return <>{fallback}</>;
 
