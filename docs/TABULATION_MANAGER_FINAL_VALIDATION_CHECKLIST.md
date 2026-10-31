@@ -116,11 +116,15 @@ Completar en cada ejecución:
 
 ## Nuevos controles de identidad/contexto F3-F4
 
-- [ ] Aplicar y verificar migraciones 0014 y 0015 únicamente en entorno Preview.
+- [ ] Aplicar y verificar migraciones 0014, 0015 y 0016 únicamente en entorno Preview.
 - [ ] Publicar una ronda y comprobar que cada tabulationDebateId devuelve el assignmentId correcto.
 - [ ] Reintentar la misma publicación y verificar que la respuesta idempotente conserva exactamente el mismo mapping.
 - [ ] Confirmar rollback completo si falla la escritura de una relación de identidad o de metadatos.
 - [ ] Verificar que la instantánea incluye todos los equipos activos, sin duplicados ni referencias ajenas.
 - [ ] Cambiar swing, breakEligible, fallenFromRound o sideMode y comprobar que el contexto persistido es el que utiliza el cálculo server-side del acta.
 - [x] Conectar la respuesta del servidor al modelo local y al outbox durable mediante ACK compartido, guardar managerRoundId/managerAssignmentId y conservar ACK si falla el guardado local. Pendiente: prueba E2E de pérdida de respuesta y recuperación por operationId.
-- [ ] No permitir publicar/sustituir actas hasta que el contexto server-side se recupere desde estas tablas.
+- [x] Resolver contexto server-side, canonicalizar IDs y validar resultado con reglas/metadatos persistidos.
+- [x] Implementar preview no mutante con versión oficial vigente, hash y revisiones.
+- [x] Implementar primer guardado/sustitución transaccional con compare-and-swap de head y de revisión de reglas, historial inmutable, trigger de head, auditoría e idempotencia.
+- [x] Añadir UI de comparación y confirmación explícita para papeletas individuales y actas conjuntas.
+- [ ] Probar en Neon Preview rollback, concurrencia, contador de reescrituras y pérdida de respuesta con recuperación por operationId.
