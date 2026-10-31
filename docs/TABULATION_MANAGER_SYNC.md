@@ -786,3 +786,12 @@ La publicación remota de una ronda debe incluir el ID local estable de cada deb
 La publicación incluye además una instantánea autenticada de sideMode y de los metadatos de equipos activos (swing, breakEligible, fallenFromRound). El servidor valida que la instantánea cubra exactamente todos los equipos activos y la persiste por ronda. La futura validación de actas debe recuperar estos valores desde la base de datos; no debe aceptar swing, caídos, postura o presidencia reenviados por el cliente como contexto de decisión del ganador.
 
 Migraciones nuevas: 0014_tabulation_debate_assignments.sql y 0015_tabulation_round_metadata.sql. Su aplicación en producción requiere validación previa y autorización independiente.
+
+
+## F4: contexto autoritativo, comparación y publicación oficial
+
+El backend ya resuelve la identidad de cada debate mediante `tabulation_debate_assignments`, carga el contexto de acta desde PostgreSQL y canonicaliza las referencias usando el mapa revisado persistido en `tabulation_round_metadata.entity_id_map`. La migración 0016 añade ese mapa.
+
+El flujo implementado es: borrador local → preview validado y no mutante → comparación de la versión oficial → confirmación explícita → guardado transaccional append-only. La transacción comprueba el head vigente y la revisión independiente de reglas de Tabulación, recalcula el ganador, conserva la fuente completa, avanza el head, registra auditoría y devuelve una respuesta idempotente. Se añadió UI para ambos modos de acta.
+
+Esto acredita implementación de código, no validación operativa completa. Quedan pendientes Neon Preview, concurrencia/rollback en PostgreSQL real, E2E en navegador y recuperación de pérdida de respuesta. No se han aplicado migraciones a Production; la PR permanece Draft hasta esas pruebas.
