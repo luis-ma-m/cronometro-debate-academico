@@ -78,8 +78,11 @@ function historicalIds(tournament: TabTournament, kind: PanelEntityKind): Set<st
   }
   if (kind === 'speakers') {
     for (const speaker of tournament.speakers) {
-      if (tournament.rounds.some((round) => round.debates.some((debate) => debate.result?.ballots.some((ballot) =>
-        Object.keys(ballot.speeches ?? {}).includes(speaker.id))))) ids.add(speaker.id);
+      if (tournament.rounds.some((round) => round.debates.some((debate) => {
+        const lineupUsesSpeaker = Object.values(debate.result?.lineup ?? {}).some((roles) => Object.values(roles).includes(speaker.id));
+        const ballotUsesSpeaker = debate.result?.ballots.some((ballot) => Object.keys(ballot.speeches ?? {}).includes(speaker.id));
+        return lineupUsesSpeaker || ballotUsesSpeaker;
+      }))) ids.add(speaker.id);
     }
   }
   return ids;
