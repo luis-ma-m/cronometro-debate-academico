@@ -62,6 +62,17 @@ describe("canonicalizeTabulationActa", () => {
     expect(() => canonicalizeTabulationActa(acta(), duplicate, targets)).toThrow("misma entidad remota");
   });
 
+  it("maps explicit elimination winner, loser and advancing teams", () => {
+    const source = {
+      ...acta(),
+      eliminationResult: { winnerTeamId: "localA", loserTeamId: "localB", advancingTeamIds: ["localA"] },
+    };
+    const mapped = canonicalizeTabulationActa(source, idMap, targets) as { eliminationResult: Record<string, unknown> };
+    expect(mapped.eliminationResult).toEqual({
+      winnerTeamId: "remoteA", loserTeamId: "remoteB", advancingTeamIds: ["remoteA"],
+    });
+  });
+
   it("maps joint acta teams and speaker references without losing rubric values", () => {
     const joint = {
       ...acta(),
