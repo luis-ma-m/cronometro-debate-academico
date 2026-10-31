@@ -116,7 +116,7 @@ Completar en cada ejecución:
 
 ## Nuevos controles de identidad/contexto F3-F4
 
-- [ ] Aplicar y verificar migraciones 0014, 0015, 0016 y 0017 únicamente en entorno Preview.
+- [ ] Aplicar y verificar migraciones 0014, 0015, 0016, 0017 y 0018 únicamente en entorno Preview.
 - [ ] Publicar una ronda y comprobar que cada tabulationDebateId devuelve el assignmentId correcto.
 - [ ] Reintentar la misma publicación y verificar que la respuesta idempotente conserva exactamente el mismo mapping.
 - [ ] Confirmar rollback completo si falla la escritura de una relación de identidad o de metadatos.
@@ -128,3 +128,5 @@ Completar en cada ejecución:
 - [x] Implementar primer guardado/sustitución transaccional con compare-and-swap de head y de revisión de reglas, historial inmutable, trigger de head, auditoría e idempotencia.
 - [x] Añadir UI de comparación y confirmación explícita para papeletas individuales y actas conjuntas.
 - [ ] Probar en Neon Preview rollback, concurrencia, contador de reescrituras y pérdida de respuesta con recuperación por operationId.
+
+- [ ] Verificar que el torneo, ronda y debate locales del acta coinciden con la identidad persistida para el assignmentId.
