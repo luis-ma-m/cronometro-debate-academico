@@ -41,6 +41,8 @@ interface LoadedActaContext {
   context: TabulationActaDomainContext;
   idMap: TabulationActaIdMap;
   assignmentId: string;
+  tabTournamentId: string;
+  tabulationRoundId: string;
   managerRoundId: string;
   tournamentId: string;
   currentSourceId: string | null;
@@ -51,7 +53,7 @@ interface LoadedActaContext {
 /** Load all authoritative inputs from PostgreSQL. No outcome-affecting metadata is accepted from the acta request. */
 async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActaContext> {
   const assignmentResult = await db.query(
-    `SELECT b.tournament_id::text AS tournament_id, b.tabulation_round_id, b.tabulation_debate_id,
+    `SELECT b.tournament_id::text AS tournament_id, b.tab_tournament_id, b.tabulation_round_id, b.tabulation_debate_id,
             b.manager_round_id, b.assignment_id, b.chair_judge_id, b.sides_provisional,
             r.number AS round_number, r.score_type AS round_kind,
             ra.team_favor_id, ra.team_contra_id, m.side_mode, m.team_metadata, m.entity_id_map,
@@ -182,7 +184,8 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
     sidesProvisional: bool(row.sides_provisional),
   };
   return {
-    context, idMap, assignmentId, managerRoundId: str(row.manager_round_id),
+    context, idMap, assignmentId, tabTournamentId: str(row.tab_tournament_id),
+    tabulationRoundId: str(row.tabulation_round_id), managerRoundId: str(row.manager_round_id),
     tournamentId: str(row.canonical_tournament_id),
     currentSourceId: str(row.current_source_id) || null,
     settingsRevision: num(settingsRow.revision),
@@ -203,6 +206,11 @@ export async function previewTabulationActa(input: PreviewTabulationActaInput) {
     await client.query("BEGIN");
     const loaded = await loadActaContext(client, input.assignmentId);
     if (!isRecord(input.source) || !isRecord(input.source.acta)) throw new ApiError("INVALID_ACTA_SOURCE", "La fuente del acta no tiene una estructura válida.");
+    if (input.source.acta.tournamentId !== loaded.tabTournamentId
+      || input.source.acta.roundId !== loaded.tabulationRoundId
+      || input.source.acta.debateId !== loaded.context.debate.id) {
+      throw new ApiError("ACTA_IDENTITY_MISMATCH", "El acta local no coincide con el torneo, ronda y debate vinculados a esta asignación del Gestor.", 409);
+    }
     const canonicalActa = canonicalizeTabulationActa(
       { ...input.source.acta, ...(input.source.eliminationResult === undefined ? {} : { eliminationResult: input.source.eliminationResult }) },
       loaded.idMap,
