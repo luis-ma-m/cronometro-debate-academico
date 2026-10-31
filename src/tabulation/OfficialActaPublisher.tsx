@@ -6,7 +6,7 @@ import { makeTabId, type TabDebate, type TabDebateResult, type TabRound, type Ta
 import { lookups } from './ui';
 import { Notice } from './ui';
 import type { TabStore } from './store';
-import { createIndexedDbSyncOutboxRepository, createSyncOutbox, SYNC_OUTBOX_UPDATED_EVENT } from './syncOutbox';
+import { createIndexedDbSyncOutboxRepository, createSyncOutbox, SYNC_OUTBOX_STATE_EVENT, SYNC_OUTBOX_UPDATED_EVENT } from './syncOutbox';
 import { ACTA_SYNC_ACK_EVENT } from './syncDispatcher';
 
 interface Props {
@@ -48,7 +48,7 @@ function readPendingSave(assignmentId: string): PendingSave | null {
   } catch { return null; }
 }
 
-async function enqueueActaOperation(tournamentId: string, assignmentId: string, pending: PendingSave): Promise<void> {
+async function enqueueActaOperation(tournamentId: string, assignmentId: string, pending: PendingSave, supersedeOperationId?: string | null): Promise<void> {
   const outbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
   const payload = pending.mode === 'first-save'
     ? { mode: 'first-save', assignmentId, source: pending.input.source }
@@ -62,6 +62,9 @@ async function enqueueActaOperation(tournamentId: string, assignmentId: string, 
     baseRevision: pending.input.expectedSettingsRevision,
     payload,
   });
+  if (supersedeOperationId && !await outbox.supersede(supersedeOperationId, pending.operationId)) {
+    throw new Error('La operación anterior sigue bloqueando la cola. Actualiza su estado y vuelve a resolver el conflicto.');
+  }
   window.dispatchEvent(new Event(SYNC_OUTBOX_UPDATED_EVENT));
 }
 
@@ -90,6 +93,9 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
   const pendingSaveRef = useRef(pendingSave);
   pendingSaveRef.current = pendingSave;
   const [lastSaved, setLastSaved] = useState<SaveTabulationActaResponse | null>(null);
+  const [queueStatus, setQueueStatus] = useState<'pending' | 'sending' | 'conflict' | 'failed' | 'superseded' | null>(null);
+  const [supersedeOperationId, setSupersedeOperationId] = useState<string | null>(null);
+  const supersededCandidateRef = useRef<PendingSave | null>(null);
   const automaticAttemptRef = useRef('');
   const context = useMemo(() => outcomeContext(tournament), [tournament]);
   const look = useMemo(() => lookups(tournament), [tournament]);
@@ -108,13 +114,35 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
     }
   }, [assignmentId, pendingSave]);
   useEffect(() => {
+    const remoteId = tournament.panelLink?.remoteId;
+    if (!remoteId || !pendingSave?.operationId) { setQueueStatus(null); return; }
+    let disposed = false;
+    const refresh = async () => {
+      try {
+        const rows = await createSyncOutbox(createIndexedDbSyncOutboxRepository()).list(remoteId);
+        if (disposed) return;
+        setQueueStatus(rows.find((row) => row.operationId === pendingSave.operationId)?.status ?? null);
+      } catch { if (!disposed) setQueueStatus(null); }
+    };
+    const onState = (event: Event) => {
+      const rows = (event as CustomEvent<Array<{ operationId: string; status: 'pending' | 'sending' | 'conflict' | 'failed' | 'superseded' }>>).detail;
+      if (Array.isArray(rows)) setQueueStatus(rows.find((row) => row.operationId === pendingSave.operationId)?.status ?? null);
+    };
+    void refresh();
+    window.addEventListener(SYNC_OUTBOX_STATE_EVENT, onState);
+    return () => { disposed = true; window.removeEventListener(SYNC_OUTBOX_STATE_EVENT, onState); };
+  }, [pendingSave?.operationId, tournament.panelLink?.remoteId]);
+
+  useEffect(() => {
     if (!pendingSave || !tournament.panelLink?.remoteId || !assignmentId) return;
     let disposed = false;
-    void enqueueActaOperation(tournament.panelLink.remoteId, assignmentId, pendingSave).catch((error) => {
+    void enqueueActaOperation(tournament.panelLink.remoteId, assignmentId, pendingSave, supersedeOperationId).then(() => {
+      if (supersedeOperationId) { setSupersedeOperationId(null); supersededCandidateRef.current = null; }
+    }).catch((error) => {
       if (!disposed) notify('El acta sigue guardada localmente, pero no se pudo abrir la cola IndexedDB: ' + (error instanceof Error ? error.message : 'error desconocido') + '.', 'error');
     });
     return () => { disposed = true; };
-  }, [assignmentId, pendingSave?.operationId, pendingSave?.mode, tournament.panelLink?.remoteId, notify]);
+  }, [assignmentId, pendingSave?.operationId, pendingSave?.mode, tournament.panelLink?.remoteId, supersedeOperationId, notify]);
 
   useEffect(() => {
     const onAcknowledged = (event: Event) => {
@@ -264,21 +292,52 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
   }, [assignmentId, canPublish, debate.id, lastSaved, notify, outcome.status, round.managerRoundId, round.name, source, store, token, tournament.panelLink?.remoteId]);
 
   const compare = async () => {
-    if (!token || !assignmentId || !source || !canPublish) return;
+    if (!token || !assignmentId || !source || !canPublish || !tournament.panelLink?.remoteId) return;
+    const previous = pendingSave;
     setBusy(true);
     setLastSaved(null);
     try {
+      if (previous) {
+        const rows = await createSyncOutbox(createIndexedDbSyncOutboxRepository()).list(tournament.panelLink.remoteId);
+        const queued = rows.find((row) => row.operationId === previous.operationId);
+        if (!queued || (queued.status !== 'conflict' && queued.status !== 'failed')) {
+          notify('La operación todavía no está en conflicto ni ha fallado. Reanúdala en lugar de crear una segunda publicación.', 'warning');
+          return;
+        }
+      }
       const next = await previewTabulationActa(token, assignmentId, source);
-      if (next.assignmentId !== assignmentId || next.tournamentId !== tournament.panelLink?.remoteId
+      if (next.assignmentId !== assignmentId || next.tournamentId !== tournament.panelLink.remoteId
         || next.roundId !== round.managerRoundId || next.debateId !== debate.id) {
         throw new Error('La comparación devuelta no corresponde a esta asignación y torneo.');
       }
+      if (previous && next.currentSourceId && next.changes.length === 0) {
+        const outbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
+        if (!await outbox.supersede(previous.operationId)) throw new Error('No se pudo archivar el conflicto ya resuelto.');
+        setPendingSave(null);
+        setPreview(null);
+        setQueueStatus(null);
+        notify('El Gestor ya contiene exactamente esta acta. Se ha archivado el conflicto sin crear una reescritura.', 'success');
+        return;
+      }
+      if (previous) {
+        supersededCandidateRef.current = previous;
+        setSupersedeOperationId(previous.operationId);
+        setPendingSave(null);
+      }
       setPreview(next);
-      setPendingSave(null);
     } catch (error) {
       setPreview(null);
       notify(error instanceof Error ? error.message : 'No se ha podido comparar el acta con el Gestor.', 'error');
     } finally { setBusy(false); }
+  };
+
+  const cancelComparison = () => {
+    setPreview(null);
+    if (supersededCandidateRef.current) {
+      setPendingSave(supersededCandidateRef.current);
+      setSupersedeOperationId(null);
+      supersededCandidateRef.current = null;
+    }
   };
 
   const publish = async () => {
@@ -314,6 +373,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
 
   const retryPending = async () => {
     if (!pendingSave) return;
+    if (queueStatus === 'conflict' || queueStatus === 'failed') { await compare(); return; }
     window.dispatchEvent(new Event(SYNC_OUTBOX_UPDATED_EVENT));
     notify('Se ha solicitado al worker que reanude la misma operación pendiente.', 'success');
   };
@@ -330,11 +390,11 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
         : outcome.status !== 'complete' || !source ? <Notice kind="warning">Completa y guarda un acta válida antes de compararla con el Gestor.</Notice>
           : <div className="tab-official-acta-content">
             <div className="tab-actions">
-              <button type="button" className="button secondary" onClick={() => void compare()} disabled={busy || Boolean(pendingSave)}>
-                <RefreshCw size={15} /> {busy && !pendingSave ? 'Comparando…' : 'Comparar con el acta oficial'}
+              <button type="button" className="button secondary" onClick={() => void compare()} disabled={busy || Boolean(pendingSave && queueStatus !== 'conflict' && queueStatus !== 'failed')}>
+                <RefreshCw size={15} /> {busy && !pendingSave ? 'Comparando…' : pendingSave && (queueStatus === 'conflict' || queueStatus === 'failed') ? 'Revisar conflicto' : 'Comparar con el acta oficial'}
               </button>
-              {pendingSave && <><span className="muted">Publicación pendiente: operación persistida en IndexedDB y reintentada automáticamente al recuperar conexión.</span>
-                <button type="button" className="button primary" onClick={() => void retryPending()} disabled={busy}>Reanudar sincronización</button></>}
+              {pendingSave && <><span className="muted">Publicación pendiente: ' + (queueStatus === 'conflict' ? 'conflicto que requiere revisión' : queueStatus === 'failed' ? 'error que requiere corrección' : 'operación persistida en IndexedDB; se reintentará al recuperar conexión') + '</span>
+                <button type="button" className="button primary" onClick={() => void retryPending()} disabled={busy}>{queueStatus === 'conflict' || queueStatus === 'failed' ? 'Revisar y resolver' : 'Reanudar sincronización'}</button></>}
             </div>
             {preview && <div className="notice tab-info-notice" role="status">
               <b>{preview.currentSourceId ? 'Comparación de sustitución' : 'Primera publicación'}</b>
@@ -356,7 +416,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
                 <button type="button" className="button primary" onClick={() => void publish()} disabled={busy}>
                   <CheckCircle2 size={15} /> {busy && pendingSave ? 'Publicando…' : preview.currentSourceId ? 'Confirmar sustitución oficial' : 'Confirmar primera publicación'}
                 </button>
-                <button type="button" className="text-button" disabled={Boolean(pendingSave)} onClick={() => setPreview(null)}>Cancelar comparación</button>
+                <button type="button" className="text-button" disabled={Boolean(pendingSave)} onClick={cancelComparison}>Cancelar comparación</button>
               </div>
             </div>}
             {lastSaved && <Notice kind="success">Versión oficial {lastSaved.sourceId} guardada. Total de versiones: {lastSaved.totalVersions}; reescrituras: {lastSaved.rewriteCount}.</Notice>}
