@@ -5,7 +5,7 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory, publishTabulationRound as apiPublishTabulationRound } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory } from './api';
 import type { RoundActivationPreview, RoomConnectionStatus, TabulationActaHistory as TabulationActaHistoryData } from './api';
 import { ActaVersionDetails } from './components/ActaVersionDetails';
 import { readDemo, writeDemo } from './demo';
@@ -16,10 +16,11 @@ import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundSco
 import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 import { SearchableEntityPicker } from './components/SearchableEntityPicker';
-import { appendPanelPublishAcknowledgement, applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
+import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox, hashSyncPayload, SYNC_OUTBOX_UPDATED_EVENT } from './tabulation/syncOutbox';
 import type { PendingSyncOperation } from './tabulation/syncOutbox';
 import { createSyncOutboxWorker } from './tabulation/syncOutboxWorker';
+import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from './tabulation/syncDispatcher';
 
 const SESSION_KEY = 'ledu-admin-session';
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
@@ -369,46 +370,18 @@ export default function App() {
       outbox,
       tournamentId: data.remoteId,
       workerId: makeId('sync-worker'),
-      dispatch: async (operation) => {
-        if (operation.operation !== 'publish-round' || operation.entityType !== 'round') {
-          return { status: 'pause', error: { code: 'UNSUPPORTED_OPERATION', message: 'Esta operación necesita un adaptador de sincronización específico; se conserva en cola.' } };
-        }
-        try {
-          const payload = operation.payload as Record<string, unknown>;
-          const published = await apiPublishTabulationRound(session.token, {
-            protocolVersion: 1, operationId: operation.operationId, tournamentId: operation.tournamentId,
-            entityType: 'round', entityId: operation.entityId, operation: 'publish-round',
-            baseRevision: operation.baseRevision, payload, payloadHash: operation.payloadHash,
-          });
-          if (!Array.isArray(published.debateAssignments)
-            || typeof payload.tabTournamentId !== 'string' || typeof payload.tabulationRoundId !== 'string') {
-            throw new Error('El servidor confirmó la ronda, pero no devolvió el mapping de debates esperado. Se requiere reconciliación por operationId.');
-          }
-          appendPanelPublishAcknowledgement(window.localStorage, {
-            version: 1, operationId: operation.operationId,
-            tabTournamentId: payload.tabTournamentId, tabulationRoundId: payload.tabulationRoundId,
-            managerRoundId: published.roundId, revision: published.revision,
-            debateAssignments: published.debateAssignments,
-          });
-          return { status: 'acknowledged' };
-        } catch (error) {
-          const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
-          const message = error instanceof Error ? error.message : 'No se ha podido confirmar la sincronización.';
-          if (code === 'UNAUTHORIZED') {
-            localStorage.removeItem(SESSION_KEY);
-            setSession(null);
-            setServerError('La sesión ha caducado. Inicia sesión para reanudar la sincronización.');
-            return { status: 'pause', error: { code, message }, retryAfterMs: 60_000 };
-          }
-          if (['REVISION_CONFLICT', 'TOURNAMENT_MISMATCH', 'IDEMPOTENCY_MISMATCH'].includes(code)) return { status: 'conflict', error: { code, message } };
-          if (['INVALID_PAYLOAD', 'INVALID_RELATION', 'OPERATION_NOT_ALLOWED', 'FORMAT_NOT_CONFIGURED'].includes(code)) return { status: 'failed', error: { code, message } };
-          const retryAfterMs = error && typeof error === 'object' && 'retryAfterMs' in error ? Number((error as { retryAfterMs?: unknown }).retryAfterMs) || 0 : 0;
-          return { status: 'retry', error: { code: code || 'NETWORK_ERROR', message }, retryAfterMs };
-        }
-      },
+      dispatch: createTabulationSyncDispatcher({
+        token: session.token,
+        onUnauthorized: () => {
+          localStorage.removeItem(SESSION_KEY);
+          setSession(null);
+          setServerError('La sesión ha caducado. Inicia sesión para reanudar la sincronización.');
+        },
+      }),
       onQueueChange: (operations) => { if (!disposed) setSyncQueue(operations); },
-      onAcknowledged: (operation) => {
+      onAcknowledged: (operation, response) => {
         if (disposed) return;
+        notifyTabulationSyncAcknowledged(operation, response);
         setTabulationNotice('La operación ' + operation.operationId + ' se ha confirmado en el servidor. La cola se ha actualizado.');
         void reloadAdmin();
       },
