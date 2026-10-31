@@ -25,6 +25,7 @@ interface PendingSave {
     source: Record<string, unknown>;
     expectedCurrentSourceId: string | null;
     confirmReplace: boolean;
+    expectedSettingsRevision: number;
   };
 }
 
