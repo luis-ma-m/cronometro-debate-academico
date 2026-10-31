@@ -115,7 +115,7 @@ export function createSyncOutboxWorker(options: SyncOutboxWorkerOptions) {
       window.addEventListener('focus', wake);
       document.addEventListener('visibilitychange', onVisibility);
       pollTimer = window.setInterval(wake, pollIntervalMs);
-      void runOnce();
+      void refresh().then(() => runOnce()).catch((error) => options.onError?.(error));
     },
     wake,
     async runOnce() { await runOnce(true); },
