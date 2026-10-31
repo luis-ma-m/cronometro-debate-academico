@@ -378,6 +378,7 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
         source: payload.source,
         expectedCurrentSourceId: payload.expectedCurrentSourceId === null ? null : str(payload.expectedCurrentSourceId),
         confirmReplace: payload.confirmReplace === true,
+        expectedSettingsRevision: num(payload.expectedSettingsRevision),
       });
     case "publishTabulationRound":
       await requireSession(payload.token);
