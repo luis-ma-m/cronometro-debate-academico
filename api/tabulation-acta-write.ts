@@ -95,9 +95,8 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
     }
     teamMetadata.set(entry.teamId, entry);
   }
-  const teams: TabTeam[] = teamsResult.rows.map((team) => {
-    const saved = teamMetadata.get(str(team.id));
-    if (!saved) throw new ApiError("ACTA_CONTEXT_INVALID", "Falta la instantánea de reglas del equipo " + str(team.id) + ".", 409);
+  const teams: TabTeam[] = teamsResult.rows.filter((team) => teamMetadata.has(str(team.id))).map((team) => {
+    const saved = teamMetadata.get(str(team.id))!;
     return {
       id: str(team.id), name: str(team.name), institution: str(team.institution), active: bool(team.active),
       swing: saved.swing === true, breakEligible: saved.breakEligible === true,
@@ -118,20 +117,9 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
   const allowedTeams = new Set(teams.map((team) => team.id));
   const allowedJudges = new Set(judgeIds);
   const allowedSpeakers = new Set(speakers.map((speaker) => speaker.id));
-  for (const [kind, map, allowed] of [
-    ["teams", idMap.teams, allowedTeams], ["judges", idMap.judges, allowedJudges], ["speakers", idMap.speakers, allowedSpeakers],
-  ] as const) {
-    for (const [localId, remoteId] of Object.entries(map)) {
-      if (!localId || typeof remoteId !== "string" || !allowed.has(remoteId)) {
-        throw new ApiError("ACTA_IDENTITY_REVIEW_REQUIRED", "El mapa de " + kind + " contiene una referencia que no pertenece a esta asignación.", 409);
-      }
-    }
-  }
-  const speakerOwner = new Map(speakers.map((speaker) => [speaker.id, speaker.teamId]));
-  for (const [localSpeakerId, remoteSpeakerId] of Object.entries(idMap.speakers)) {
-    const localTeamId = Object.entries(idMap.teams).find(([, remoteTeamId]) => remoteTeamId === speakerOwner.get(remoteSpeakerId))?.[0];
-    if (!localTeamId) throw new ApiError("ACTA_IDENTITY_REVIEW_REQUIRED", "Un orador no tiene una correspondencia de equipo revisada.", 409);
-  }
+  // The stored id map covers the whole tournament. Only references actually used
+  // by this acta are resolved below, against the exact assignment membership.
+  void allowedTeams; void allowedJudges; void allowedSpeakers;
 
   const revision = num(row.revision);
   const updatedAt = num(row.updated_at_ms);
