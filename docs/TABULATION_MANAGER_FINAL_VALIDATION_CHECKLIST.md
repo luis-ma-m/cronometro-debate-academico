@@ -122,5 +122,5 @@ Completar en cada ejecución:
 - [ ] Confirmar rollback completo si falla la escritura de una relación de identidad o de metadatos.
 - [ ] Verificar que la instantánea incluye todos los equipos activos, sin duplicados ni referencias ajenas.
 - [ ] Cambiar swing, breakEligible, fallenFromRound o sideMode y comprobar que el contexto persistido es el que utiliza el cálculo server-side del acta.
-- [ ] Conectar la respuesta del servidor al modelo local y al outbox durable; probar pérdida de respuesta y recuperación por operationId.
+- [x] Conectar la respuesta del servidor al modelo local y al outbox durable mediante ACK compartido, guardar managerRoundId/managerAssignmentId y conservar ACK si falla el guardado local. Pendiente: prueba E2E de pérdida de respuesta y recuperación por operationId.
 - [ ] No permitir publicar/sustituir actas hasta que el contexto server-side se recupere desde estas tablas.
