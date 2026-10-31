@@ -80,6 +80,20 @@ describe('Tabulation offline sync dispatcher', () => {
     expect(mocks.save).toHaveBeenCalledWith('manager-token', input);
   });
 
+  it('sends semantic 4xx errors to intervention and rate limits back to retry', async () => {
+    mocks.preview.mockRejectedValueOnce(Object.assign(new Error('Acta inválida'), { code: 'ACTA_INVALID', status: 422 }));
+    const failed = await createTabulationSyncDispatcher({ token: 'manager-token' })(
+      operation({ mode: 'first-save', assignmentId: 'assignment-1', source: {} }),
+    );
+    expect(failed).toMatchObject({ status: 'failed', error: { code: 'ACTA_INVALID' } });
+
+    mocks.preview.mockRejectedValueOnce(Object.assign(new Error('Rate limited'), { code: 'RATE_LIMITED', status: 429, retryAfterMs: 12_000 }));
+    const retry = await createTabulationSyncDispatcher({ token: 'manager-token' })(
+      operation({ mode: 'first-save', assignmentId: 'assignment-1', source: {} }),
+    );
+    expect(retry).toMatchObject({ status: 'retry', error: { code: 'RATE_LIMITED' }, retryAfterMs: 12_000 });
+  });
+
   it('retries transient failures and pauses when the manager session expires', async () => {
     mocks.preview.mockRejectedValueOnce(new ApiError('Timeout', 'NETWORK_ERROR', 4000));
     const dispatch = createTabulationSyncDispatcher({ token: 'manager-token' });
