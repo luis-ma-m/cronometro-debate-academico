@@ -250,6 +250,12 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       notify('No se han podido aplicar los datos del panel en esta pestaña.', 'error');
       return;
     }
+    if (handoff.tournamentId) {
+      if (!store.flush()) { notify('No se ha podido confirmar el guardado local.', 'error'); return; }
+      writePanelSyncBase(window.localStorage, tournament.id, handoff);
+      clearPendingPanelReconciliation(window.localStorage, tournament.id);
+      setPendingReconciliation(null);
+    }
     clearHandoff(window.localStorage);
     setHandoffVersion((value) => value + 1);
     notify('Participantes actualizados: ' + merged.added + ' nuevos y ' + merged.updated + ' modificados.' + (merged.warnings.length ? ' ' + merged.warnings.join(' ') : ''), merged.warnings.length ? 'warning' : 'success');
