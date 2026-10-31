@@ -1268,7 +1268,7 @@ function canonicalShortLinkJson(value:unknown):string {
   if(value && typeof value==="object"){const r=value as Record<string,unknown>;return "{"+Object.keys(r).sort().map(k=>JSON.stringify(k)+":"+canonicalShortLinkJson(r[k])).join(",")+"}";}
   return JSON.stringify(value) ?? "null";
 }
-function validActaSnapshot(value:unknown):value is Record<string,unknown>{
+export function validActaSnapshot(value:unknown):value is Record<string,unknown>{
   if(!value||typeof value!=="object"||Array.isArray(value))return false;
   const v=value as Record<string,unknown>;
   const round=v.round&&typeof v.round==="object"&&!Array.isArray(v.round)?v.round as Record<string,unknown>:null;
