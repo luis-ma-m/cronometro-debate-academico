@@ -115,6 +115,48 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
   }, [assignmentId, pendingSave]);
   useEffect(() => {
     const remoteId = tournament.panelLink?.remoteId;
+    if (pendingSave || !remoteId || !assignmentId) return;
+    let disposed = false;
+    void createSyncOutbox(createIndexedDbSyncOutboxRepository()).list(remoteId).then((rows) => {
+      if (disposed) return;
+      const queued = rows.find((row) => row.entityType === 'acta' && row.entityId === assignmentId
+        && row.operation === 'replace-acta' && row.status !== 'superseded');
+      if (!queued) return;
+      const payload = asRecord(queued.payload);
+      if (payload?.mode === 'first-save' && asRecord(payload.source)) {
+        setPendingSave({
+          operationId: queued.operationId,
+          mode: 'first-save',
+          input: {
+            operationId: queued.operationId, assignmentId, source: payload.source,
+            expectedCurrentSourceId: null, confirmReplace: false, expectedSettingsRevision: queued.baseRevision,
+          },
+        });
+        return;
+      }
+      const input = asRecord(payload?.input);
+      if (payload?.mode === 'confirmed' && input && input.operationId === queued.operationId
+        && input.assignmentId === assignmentId && asRecord(input.source)
+        && Number.isSafeInteger(input.expectedSettingsRevision)
+        && typeof input.confirmReplace === 'boolean'
+        && (input.expectedCurrentSourceId === null || typeof input.expectedCurrentSourceId === 'string')) {
+        setPendingSave({
+          operationId: queued.operationId,
+          mode: 'confirmed',
+          input: {
+            operationId: queued.operationId, assignmentId, source: input.source,
+            expectedCurrentSourceId: input.expectedCurrentSourceId as string | null,
+            confirmReplace: input.confirmReplace,
+            expectedSettingsRevision: input.expectedSettingsRevision as number,
+          },
+        });
+      }
+    }).catch(() => { /* IndexedDB remains the source of truth; the sidebar still reports the queue state. */ });
+    return () => { disposed = true; };
+  }, [assignmentId, pendingSave?.operationId, tournament.panelLink?.remoteId]);
+
+  useEffect(() => {
+    const remoteId = tournament.panelLink?.remoteId;
     if (!remoteId || !pendingSave?.operationId) { setQueueStatus(null); return; }
     let disposed = false;
     const refresh = async () => {
