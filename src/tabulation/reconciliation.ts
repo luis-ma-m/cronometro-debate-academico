@@ -130,6 +130,13 @@ export function buildLocalPanelBase(tournament: TabTournament): PanelHandoff | n
  * incompatible edit is a conflict, while a remote change to an entity used by historical
  * debates is held for explicit review even if the local copy was untouched.
  */
+export function hasRemoteCursorAdvanced(base: Pick<PanelHandoff, 'revision' | 'updatedAt'>, remote: Pick<PanelHandoff, 'revision' | 'updatedAt'>): boolean {
+  const baseRevision = base.revision ?? 0;
+  const remoteRevision = remote.revision ?? 0;
+  return remoteRevision > baseRevision
+    || (remoteRevision === baseRevision && (remote.updatedAt ?? 0) > (base.updatedAt ?? 0));
+}
+
 export function comparePanelRevisions(
   tournament: TabTournament,
   base: PanelHandoff,
