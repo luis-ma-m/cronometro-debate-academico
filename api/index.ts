@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured, getPool } from "./db.js";
 import { readTabulationActaHistory, readTabulationActaVersion } from "./tabulation-acta-history.js";
+import { saveTabulationActa } from "./tabulation-acta-write.js";
 import { publishTabulationRound as publishTabulationRoundOperation } from "./tabulation-round-publish.js";
 import { presetSettings } from "../src/tabulation/presets.js";
 import { validateTabulationSettings as validateTabulationSettingsPayload, TabulationSettingsValidationError } from "./tabulation-settings-validation.js";
@@ -366,6 +367,15 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "getTabulationActaVersion":
       await requireSession(payload.token);
       return getTabulationActaVersion(payload);
+    case "saveTabulationActa":
+      await requireSession(payload.token);
+      return saveTabulationActa({
+        operationId: str(payload.operationId),
+        assignmentId: str(payload.assignmentId),
+        source: payload.source,
+        expectedCurrentSourceId: payload.expectedCurrentSourceId === null ? null : str(payload.expectedCurrentSourceId),
+        confirmReplace: payload.confirmReplace === true,
+      });
     case "publishTabulationRound":
       await requireSession(payload.token);
       return publishTabulationRoundOperation(payload.operation);
