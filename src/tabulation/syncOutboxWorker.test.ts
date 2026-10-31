@@ -16,11 +16,14 @@ class MemoryRepository implements SyncOutboxRepository {
       .map((row) => structuredClone(row));
   }
   async claimNext(tournamentId: string, workerId: string, now: number, leaseMs: number) {
-    const oldest = [...this.rows.values()].filter((row) => row.tournamentId === tournamentId)
-      .sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId))
-      .find((row) => row.status !== 'superseded');
-    if (!oldest || oldest.status !== 'pending' || (oldest.nextAttemptAt ?? 0) > now) return null;
-    const claimed = { ...oldest, status: 'sending' as const, attempts: oldest.attempts + 1, lastAttemptAt: now, workerId, leaseUntil: now + leaseMs };
+    const ordered = [...this.rows.values()].filter((row) => row.tournamentId === tournamentId)
+      .sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId));
+    const candidate = ordered.find((row, index) => row.status === 'pending' && (row.nextAttemptAt ?? 0) <= now
+      && !ordered.slice(0, index).some((prior) => prior.status !== 'superseded'
+        && prior.entityType === row.entityType && prior.entityId === row.entityId)
+      && !(row.dependsOnOperationId && ordered.some((prior) => prior.operationId === row.dependsOnOperationId && prior.status !== 'superseded')));
+    if (!candidate) return null;
+    const claimed = { ...candidate, status: 'sending' as const, attempts: candidate.attempts + 1, lastAttemptAt: now, workerId, leaseUntil: now + leaseMs };
     this.rows.set(claimed.operationId, claimed);
     return structuredClone(claimed);
   }
@@ -110,19 +113,24 @@ describe('automatic sync worker', () => {
     second.stop();
   });
 
-  it('stops the dependent queue on a revision conflict without deleting the operation', async () => {
+  it('stops the same-entity chain on conflict while allowing unrelated actas to continue', async () => {
     const repository = new MemoryRepository();
     let id = 0;
     const outbox = createSyncOutbox(repository, { now: () => 500, createOperationId: () => 'operation-' + ++id });
-    const first = await outbox.enqueue({ tournamentId: 't', entityType: 'round', entityId: 'r1', operation: 'publish-round', baseRevision: 1, payload: {} });
-    await outbox.enqueue({ tournamentId: 't', entityType: 'acta', entityId: 'a1', operation: 'replace-acta', baseRevision: 1, payload: {} });
+    const first = await outbox.enqueue({ tournamentId: 't', entityType: 'acta', entityId: 'a1', operation: 'replace-acta', baseRevision: 1, payload: {} });
+    await outbox.enqueue({ tournamentId: 't', entityType: 'acta', entityId: 'a1', operation: 'replace-acta', baseRevision: 2, payload: {} });
+    const unrelated = await outbox.enqueue({ tournamentId: 't', entityType: 'acta', entityId: 'a2', operation: 'replace-acta', baseRevision: 1, payload: {} });
     const worker = createSyncOutboxWorker({
       outbox, tournamentId: 't', workerId: 'worker',
       dispatch: async () => ({ status: 'conflict', error: { code: 'REVISION_CONFLICT', message: 'La revisión remota cambió.' } }),
     });
     await worker.runOnce();
-    expect((await outbox.list('t')).map((row) => row.status)).toEqual(['conflict', 'pending']);
     expect((await outbox.list('t'))[0].operationId).toBe(first.operation.operationId);
+    expect((await outbox.list('t'))[0].status).toBe('conflict');
+    const next = await outbox.claimNext('t', 'other-worker');
+    expect(next?.operationId).toBe(unrelated.operation.operationId);
+    expect((await outbox.list('t')).filter((row) => row.status === 'pending')).toHaveLength(1);
     worker.stop();
   });
+
 });

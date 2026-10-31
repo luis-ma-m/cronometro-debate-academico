@@ -19,10 +19,14 @@ class MemoryOutboxRepository implements SyncOutboxRepository {
       .map((row) => structuredClone(row));
   }
   async claimNext(tournamentId: string, workerId: string, now: number, leaseMs: number) {
-    const oldest = (await this.list(tournamentId)).find((row) => row.status !== 'superseded');
-    if (!oldest || oldest.status !== 'pending' || (oldest.nextAttemptAt ?? 0) > now) return null;
+    const ordered = await this.list(tournamentId);
+    const candidate = ordered.find((row, index) => row.status === 'pending' && (row.nextAttemptAt ?? 0) <= now
+      && !ordered.slice(0, index).some((prior) => prior.status !== 'superseded'
+        && prior.entityType === row.entityType && prior.entityId === row.entityId)
+      && !(row.dependsOnOperationId && ordered.some((prior) => prior.operationId === row.dependsOnOperationId && prior.status !== 'superseded')));
+    if (!candidate) return null;
     const claimed: PendingSyncOperation = {
-      ...oldest, status: 'sending', attempts: oldest.attempts + 1,
+      ...candidate, status: 'sending', attempts: candidate.attempts + 1,
       workerId, lastAttemptAt: now, leaseUntil: now + leaseMs,
     };
     this.rows.set(claimed.operationId, claimed);
@@ -109,18 +113,17 @@ describe('durable sync outbox contract', () => {
     await expect(outbox.enqueue({ ...input, payload: { version: 2 } })).rejects.toThrow('IDEMPOTENCY_MISMATCH');
   });
 
-  it('serializes operations FIFO per tournament and blocks dependent operations on conflict', async () => {
+  it('blocks a conflicted entity chain but still claims unrelated operations', async () => {
     const repository = new MemoryOutboxRepository();
-    let id = 0;
-    const outbox = createSyncOutbox(repository, { now: () => 200, createOperationId: () => 'operation-' + ++id });
-    const first = await outbox.enqueue({ tournamentId: 't1', entityType: 'round', entityId: 'r1', operation: 'publish-round', baseRevision: 1, payload: {} });
-    await outbox.enqueue({ tournamentId: 't1', entityType: 'acta', entityId: 'a1', operation: 'replace-acta', baseRevision: 1, payload: {} });
+    const outbox = createSyncOutbox(repository, { now: () => 200, createOperationId: (() => { let id = 0; return () => 'operation-' + ++id; })() });
+    const first = await outbox.enqueue({ tournamentId: 't1', entityType: 'acta', entityId: 'a1', operation: 'replace-acta', baseRevision: 1, payload: { version: 1 } });
+    await outbox.enqueue({ tournamentId: 't1', entityType: 'acta', entityId: 'a1', operation: 'replace-acta', baseRevision: 2, payload: { version: 2 } });
+    const unrelated = await outbox.enqueue({ tournamentId: 't1', entityType: 'acta', entityId: 'a2', operation: 'replace-acta', baseRevision: 1, payload: { version: 1 } });
     const claimed = await outbox.claimNext('t1', 'worker-a');
     expect(claimed?.operationId).toBe(first.operation.operationId);
-    expect(await outbox.claimNext('t1', 'worker-b')).toBeNull();
     expect(await outbox.markConflict(first.operation.operationId, 'worker-a', { code: 'REVISION_CONFLICT', message: 'Cambió el gestor.' })).toBe(true);
-    expect(await outbox.claimNext('t1', 'worker-a')).toBeNull();
-    expect((await outbox.list('t1')).map((row) => row.status)).toEqual(['conflict', 'pending']);
+    expect((await outbox.claimNext('t1', 'worker-b'))?.operationId).toBe(unrelated.operation.operationId);
+    expect((await outbox.list('t1')).map((row) => row.status)).toEqual(['conflict', 'pending', 'sending']);
   });
 
   it('archives a resolved conflict and unblocks only its same-entity replacement', async () => {
