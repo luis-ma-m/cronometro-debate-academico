@@ -4,12 +4,16 @@ import { publishTabulationRound } from "./tabulation-round-publish.js";
 
 const tournamentId = "00000000-0000-4000-8000-000000000001";
 const baseUpdatedAt = 1_800_000_000_000;
-const stored = { scope: "", response: null as unknown };
-const query = vi.fn();
-const client = { query, release: vi.fn() };
+const mocks = vi.hoisted(() => {
+  const stored = { scope: "", response: null as unknown };
+  const query = vi.fn();
+  const client = { query, release: vi.fn() };
+  return { stored, query, client };
+});
+const { stored, query, client } = mocks;
 
 vi.mock("./db.js", () => ({
-  getPool: () => ({ connect: async () => client }),
+  getPool: () => ({ connect: async () => mocks.client }),
 }));
 
 function payload() {
