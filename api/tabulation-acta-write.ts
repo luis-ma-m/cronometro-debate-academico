@@ -26,6 +26,7 @@ interface LoadedActaContext {
   managerRoundId: string;
   tournamentId: string;
   currentSourceId: string | null;
+  settingsRevision: number;
   rulesSnapshot: Record<string, unknown>;
 }
 
@@ -76,7 +77,7 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
              FROM judges j LEFT JOIN institutions i ON i.id = j.institution_id
              JOIN assignment_judges aj ON aj.judge_id = j.id WHERE aj.assignment_id = $1`, [assignmentId]),
     db.query(`SELECT s.id, s.team_id, s.name FROM speakers s WHERE s.team_id = ANY($1::text[])`, [[teamFavorId, teamContraId]]),
-    db.query("SELECT schema_version, settings FROM tabulation_settings WHERE id = 1 FOR SHARE"),
+    db.query("SELECT schema_version, revision, settings FROM tabulation_settings WHERE id = 1 FOR SHARE"),
   ]);
   const settingsRow = settingsResult.rows[0];
   if (!settingsRow) throw new ApiError("MIGRATION_REQUIRED", "Falta la configuración persistida de Tabulación. No se puede validar un acta sin sus reglas.", 503);
@@ -152,6 +153,7 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
     context, idMap, assignmentId, managerRoundId: str(row.manager_round_id),
     tournamentId: str(row.canonical_tournament_id),
     currentSourceId: str(row.current_source_id) || null,
+    settingsRevision: num(settingsRow.revision),
     rulesSnapshot,
   };
 }
@@ -209,6 +211,7 @@ export async function previewTabulationActa(input: PreviewTabulationActaInput) {
       assignmentId: input.assignmentId, tournamentId: loaded.tournamentId,
       roundId: loaded.managerRoundId, debateId: loaded.context.debate.id,
       basePanelRevision: loaded.context.currentRevision, basePanelUpdatedAt: loaded.context.currentUpdatedAt,
+      settingsRevision: loaded.settingsRevision,
       currentSourceId: loaded.currentSourceId, currentSource,
       proposedSource, sourceMode: validated.sourceMode, winnerTeamId: validated.acta.winnerTeamId,
       requiresReplacementConfirmation: Boolean(loaded.currentSourceId),
@@ -230,6 +233,7 @@ export interface SaveTabulationActaInput {
   source: unknown;
   expectedCurrentSourceId: string | null;
   confirmReplace: boolean;
+  expectedSettingsRevision: number;
 }
 
 /** First-save/replacement transaction. Immutable source, head trigger, audit and idempotency commit together. */
@@ -238,6 +242,7 @@ export async function saveTabulationActa(input: SaveTabulationActaInput) {
   if (!uuid(input.assignmentId)) throw new ApiError("INVALID_PAYLOAD", "La asignación del acta no es válida.");
   if (input.expectedCurrentSourceId !== null && !uuid(input.expectedCurrentSourceId)) throw new ApiError("INVALID_PAYLOAD", "La versión vigente esperada no es válida.");
   if (typeof input.confirmReplace !== "boolean") throw new ApiError("INVALID_PAYLOAD", "Falta la confirmación explícita de sustitución.");
+  if (!Number.isSafeInteger(input.expectedSettingsRevision) || input.expectedSettingsRevision < 0) throw new ApiError("INVALID_PAYLOAD", "La revisión de reglas esperada no es válida.");
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -252,6 +257,7 @@ export async function saveTabulationActa(input: SaveTabulationActaInput) {
       await client.query("COMMIT");
       return prior.rows[0].response;
     }
+    if (loaded.settingsRevision !== input.expectedSettingsRevision) throw new ApiError("ACTA_RULES_REVISION_CONFLICT", "Las reglas de Tabulación han cambiado desde la comparación. Vuelve a revisar el acta con las reglas actuales.", 409);
     if (loaded.currentSourceId !== input.expectedCurrentSourceId) {
       throw new ApiError("ACTA_REVISION_CONFLICT", "El acta vigente ha cambiado desde la última comparación. Recarga el historial y vuelve a revisar la sustitución.", 409);
     }
