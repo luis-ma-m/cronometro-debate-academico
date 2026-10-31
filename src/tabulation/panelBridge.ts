@@ -128,6 +128,8 @@ export interface PanelOutbox {
   roundName: string;
   roundNumber: number;
   roundKind: 'qualifying' | 'elimination';
+  sideMode: 'draw' | 'balanced';
+  teamMetadata: Array<{ teamId: string; swing: boolean; breakEligible: boolean; fallenFromRound?: number }>;
   debates: PanelOutboxDebate[];
 }
 
@@ -418,6 +420,13 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       roundName: round.name,
       roundNumber: round.number,
       roundKind: round.kind,
+      sideMode: round.sideMode,
+      teamMetadata: tournament.teams.filter((team) => team.active).map((team) => {
+        const teamId = remoteId('teams', team.id);
+        if (!teamId) issues.push('El equipo «' + team.name + '» no tiene correspondencia con el gestor; no se pueden sincronizar sus metadatos de resultado.');
+        return { teamId: teamId ?? team.id, swing: team.swing, breakEligible: team.breakEligible,
+          ...(typeof team.fallenFromRound === 'number' ? { fallenFromRound: team.fallenFromRound } : {}) };
+      }),
       debates,
     },
     issues,
