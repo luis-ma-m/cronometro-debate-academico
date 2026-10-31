@@ -123,6 +123,39 @@ describe('durable sync outbox contract', () => {
     expect((await outbox.list('t1')).map((row) => row.status)).toEqual(['conflict', 'pending']);
   });
 
+  it('archives a resolved conflict and unblocks only its same-entity replacement', async () => {
+    const repository = new MemoryOutboxRepository();
+    const outbox = createSyncOutbox(repository, { now: () => 400 });
+    const first = await outbox.enqueue({
+      operationId: 'acta-conflict-01', tournamentId: 't1', entityType: 'acta', entityId: 'assignment-1',
+      operation: 'replace-acta', baseRevision: 1, payload: { version: 1 },
+    });
+    const claimed = await outbox.claimNext('t1', 'worker');
+    expect(claimed?.operationId).toBe(first.operation.operationId);
+    await outbox.markConflict(first.operation.operationId, 'worker', { code: 'ACTA_REVISION_CONFLICT', message: 'Cambió el acta oficial.' });
+    const replacement = await outbox.enqueue({
+      operationId: 'acta-replacement-01', tournamentId: 't1', entityType: 'acta', entityId: 'assignment-1',
+      operation: 'replace-acta', baseRevision: 2, payload: { version: 2 },
+    });
+    expect(await outbox.supersede(first.operation.operationId, replacement.operation.operationId)).toBe(true);
+    expect((await outbox.list('t1'))[0]).toMatchObject({ status: 'superseded', supersededBy: replacement.operation.operationId });
+    expect((await outbox.claimNext('t1', 'worker'))?.operationId).toBe(replacement.operation.operationId);
+  });
+
+  it('can resolve an operation as already-current without creating a replacement', async () => {
+    const repository = new MemoryOutboxRepository();
+    const outbox = createSyncOutbox(repository, { now: () => 500 });
+    await outbox.enqueue({
+      operationId: 'acta-conflict-02', tournamentId: 't1', entityType: 'acta', entityId: 'assignment-2',
+      operation: 'replace-acta', baseRevision: 1, payload: { version: 1 },
+    });
+    await outbox.claimNext('t1', 'worker');
+    await outbox.markConflict('acta-conflict-02', 'worker', { code: 'ACTA_REVISION_CONFLICT', message: 'Ya existe.' });
+    expect(await outbox.supersede('acta-conflict-02')).toBe(true);
+    expect((await outbox.list('t1'))[0].status).toBe('superseded');
+    expect(await outbox.claimNext('t1', 'worker')).toBeNull();
+  });
+
   it('retries with the same operation id and deletes only after confirmed acknowledgement', async () => {
     const repository = new MemoryOutboxRepository();
     let now = 300;
