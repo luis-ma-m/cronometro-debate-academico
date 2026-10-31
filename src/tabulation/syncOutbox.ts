@@ -3,13 +3,13 @@
  * This module does not send HTTP requests: acknowledgement requires a confirmed server commit.
  */
 export type SyncOperationKind = 'upsert' | 'publish-round' | 'replace-acta' | 'settings';
-export type SyncOperationStatus = 'pending' | 'sending' | 'conflict' | 'failed';
+export type SyncOperationStatus = 'pending' | 'sending' | 'conflict' | 'failed' | 'superseded';
 export interface SyncOperationError { code: string; message: string }
 export interface PendingSyncOperation {
   operationId: string; tournamentId: string; entityType: string; entityId: string;
   operation: SyncOperationKind; baseRevision: number; payload: unknown; payloadHash: string;
   status: SyncOperationStatus; attempts: number; createdAt: number; lastAttemptAt?: number;
-  lastError?: SyncOperationError; workerId?: string; leaseUntil?: number; nextAttemptAt?: number;
+  lastError?: SyncOperationError; workerId?: string; leaseUntil?: number; nextAttemptAt?: number; supersededBy?: string;
 }
 export interface EnqueueSyncOperation {
   /** Caller-supplied id for operations already persisted by a domain workflow. */
@@ -23,6 +23,7 @@ export interface SyncOutboxRepository {
   claimNext(tournamentId: string, workerId: string, now: number, leaseMs: number): Promise<PendingSyncOperation | null>;
   transition(operationId: string, workerId: string, status: 'pending' | 'conflict' | 'failed', error?: SyncOperationError, nextAttemptAt?: number): Promise<boolean>;
   acknowledge(operationId: string, workerId: string): Promise<boolean>;
+  supersede(operationId: string, replacementOperationId?: string): Promise<boolean>;
   recoverExpired(now: number): Promise<number>;
 }
 export interface SyncOutbox {
@@ -33,6 +34,8 @@ export interface SyncOutbox {
   markConflict(operationId: string, workerId: string, error: SyncOperationError): Promise<boolean>;
   markFailed(operationId: string, workerId: string, error: SyncOperationError): Promise<boolean>;
   acknowledge(operationId: string, workerId: string): Promise<boolean>;
+  /** Archives a terminal operation after an operator has resolved it or created a replacement. */
+  supersede(operationId: string, replacementOperationId?: string): Promise<boolean>;
   recoverExpiredLeases(): Promise<number>;
 }
 
@@ -156,6 +159,7 @@ export function createSyncOutbox(
     markConflict: (id, worker, error) => repository.transition(id, worker, 'conflict', error),
     markFailed: (id, worker, error) => repository.transition(id, worker, 'failed', error),
     acknowledge: (id, worker) => repository.acknowledge(id, worker),
+    supersede: (id, replacementId) => repository.supersede(id, replacementId),
     recoverExpiredLeases: () => repository.recoverExpired(now()),
   };
 }
@@ -232,7 +236,8 @@ export function createIndexedDbSyncOutboxRepository(factory: IDBFactory = global
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
           const rows = request.result as PendingSyncOperation[];
-          const oldest = rows.sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId))[0];
+          const oldest = rows.sort((a, b) => a.createdAt - b.createdAt || a.operationId.localeCompare(b.operationId))
+            .find((row) => row.status !== 'superseded');
           if (!oldest || oldest.status !== 'pending' || (oldest.nextAttemptAt ?? 0) > timestamp) return;
           result = { ...oldest, status: 'sending', attempts: oldest.attempts + 1, lastAttemptAt: timestamp,
             workerId, leaseUntil: timestamp + leaseMs, lastError: undefined, nextAttemptAt: undefined };
@@ -264,6 +269,30 @@ export function createIndexedDbSyncOutboxRepository(factory: IDBFactory = global
           const current = request.result as PendingSyncOperation | undefined;
           if (!current || current.status !== 'sending' || current.workerId !== workerId) return;
           store.delete(operationId); changed = true;
+        };
+      }));
+    },
+    supersede(operationId, replacementOperationId) {
+      return database.then((db) => new Promise<boolean>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite'); const store = tx.objectStore(STORE_NAME);
+        let changed = false; tx.oncomplete = () => resolve(changed); transactionError(tx, reject);
+        const currentRequest = store.get(operationId);
+        currentRequest.onerror = () => reject(currentRequest.error);
+        currentRequest.onsuccess = () => {
+          const current = currentRequest.result as PendingSyncOperation | undefined;
+          if (!current || (current.status !== 'conflict' && current.status !== 'failed')) return;
+          const finish = (replacement?: PendingSyncOperation) => {
+            if (replacementOperationId && (!replacement || replacement.status !== 'pending'
+              || replacement.tournamentId !== current.tournamentId
+              || replacement.entityType !== current.entityType || replacement.entityId !== current.entityId)) return;
+            store.put({ ...current, status: 'superseded', workerId: undefined, leaseUntil: undefined,
+              nextAttemptAt: undefined, ...(replacementOperationId ? { supersededBy: replacementOperationId } : {}) });
+            changed = true;
+          };
+          if (!replacementOperationId) { finish(); return; }
+          const replacementRequest = store.get(replacementOperationId);
+          replacementRequest.onerror = () => reject(replacementRequest.error);
+          replacementRequest.onsuccess = () => finish(replacementRequest.result as PendingSyncOperation | undefined);
         };
       }));
     },
