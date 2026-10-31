@@ -43,6 +43,7 @@ const validPayload = (): PublishedRoundPayload => ({
   roundNumber: 1,
   roundKind: "qualifying",
   debates: [{
+    tabulationDebateId: "tab-debate-1",
     physicalRoomId: "room-a",
     venueName: "Sala A",
     teamFavorId: "team-a",
@@ -69,6 +70,18 @@ describe("published round domain validation", () => {
       ...payload,
       basePanelRevision: context.currentRevision - 1,
     }, context)).toThrow(/revisión base/);
+  });
+
+  it("requires a unique stable local debate identity", () => {
+    const payload = validPayload();
+    expect(() => validatePublishedRoundPayload({
+      ...payload,
+      debates: [{ ...payload.debates[0], tabulationDebateId: "" }],
+    }, context)).toThrow(/identificador local del debate no es válido/);
+    expect(() => validatePublishedRoundPayload({
+      ...payload,
+      debates: [payload.debates[0], { ...payload.debates[0], physicalRoomId: "room-b", venueName: "Sala B", teamFavorId: "team-c", tabulationDebateId: "tab-debate-1" }],
+    }, context)).toThrow(/identificador local del debate está duplicado/);
   });
 
   it("rejects unknown, inactive and duplicate physical rooms", () => {
