@@ -57,6 +57,8 @@ export interface PhysicalRoom {
 
 export interface Room {
   id: string;
+  /** Canonical room_assignments.id; populated by the authenticated PostgreSQL snapshot. */
+  assignmentId?: string;
   name: string;
   roundId: string;
   physicalRoomId: string;

@@ -889,3 +889,14 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .tab-manager-connection-dot { width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:6px; background:#b42318; box-shadow:0 0 0 2px rgba(180,35,24,.12); }
 .tab-manager-connection.is-connected .tab-manager-connection-dot { background:#16803c; box-shadow:0 0 0 2px rgba(22,128,60,.12); }
 .tab-manager-connection.is-disconnected { color:#b42318; border-color:rgba(180,35,24,.35); background:rgba(180,35,24,.06); }
+
+
+.room-acta-history { margin-top: 1rem; padding: 1rem; }
+.room-acta-history .panel-title { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; }
+.room-acta-history-summary { display:grid; gap:.65rem; margin-top:.75rem; }
+.room-acta-history-list { display:grid; gap:.55rem; list-style:none; margin:0; padding:0; }
+.room-acta-history-list li { display:grid; gap:.25rem; padding:.7rem 0; border-top:1px solid var(--border, rgba(128,128,128,.25)); }
+.room-acta-history-list li > div { display:flex; justify-content:space-between; gap:.75rem; flex-wrap:wrap; }
+.room-acta-history-list small,.room-acta-history-list code { color:var(--muted, #777); font-size:.78rem; }
+.room-acta-history-list code { width:fit-content; }
+@media(max-width:640px){.room-acta-history .panel-title{flex-direction:column;}}

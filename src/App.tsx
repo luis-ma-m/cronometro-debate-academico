@@ -4,8 +4,8 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
-import type { RoundActivationPreview, RoomConnectionStatus } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory } from './api';
+import type { RoundActivationPreview, RoomConnectionStatus, TabulationActaHistory as TabulationActaHistoryData } from './api';
 import { readDemo, writeDemo } from './demo';
 import { createTimer, formatTime, LEDU_PHASES, resolvePhases, secondsLeft, transitionTimer, validateAssignments, withRoomStatus } from './timer';
 import { findAssignmentConflicts, setJudgeIncompatibility } from './incompatibilities';
@@ -98,6 +98,9 @@ export default function App() {
   const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
   const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([]);
   const [expandedJudgeIds, setExpandedJudgeIds] = useState<string[]>([]);
+  const [actaHistories, setActaHistories] = useState<Record<string, TabulationActaHistoryData>>({});
+  const [actaHistoryLoading, setActaHistoryLoading] = useState<Record<string, boolean>>({});
+  const [actaHistoryErrors, setActaHistoryErrors] = useState<Record<string, string>>({});
   const [now, setNow] = useState(Date.now());
   const [snapshot, setSnapshot] = useState<PublicRoom | null>(null);
   const [saving, setSaving] = useState(false);
@@ -350,6 +353,32 @@ export default function App() {
       setSelectedFormatId(data.formats[0]?.id ?? '');
     }
   }, [data.formats, selectedFormatId]);
+
+  const loadActaHistory = async (room: Room) => {
+    const assignmentId = room.assignmentId;
+    if (!apiConfigured || !session || !data.remoteId || !assignmentId || hasUnsavedRef.current) {
+      const reason = !apiConfigured ? 'El historial solo está disponible con backend.'
+        : !session ? 'Inicia sesión para consultar el historial.'
+        : !data.remoteId ? 'El torneo aún no tiene identidad remota verificable.'
+        : !assignmentId ? 'Esta asignación aún no tiene identidad remota verificable.'
+        : 'Guarda o descarta los cambios locales antes de consultar el historial remoto.';
+      setActaHistoryErrors((current) => ({ ...current, [room.id]: reason }));
+      return;
+    }
+    setActaHistoryLoading((current) => ({ ...current, [room.id]: true }));
+    setActaHistoryErrors((current) => { const next = { ...current }; delete next[room.id]; return next; });
+    try {
+      const history = await getTabulationActaHistory(session.token, assignmentId);
+      if (history.assignmentId !== assignmentId || history.tournamentId !== data.remoteId) {
+        throw new Error('El historial devuelto no corresponde al torneo y asignación actuales.');
+      }
+      setActaHistories((current) => ({ ...current, [room.id]: history }));
+    } catch (error) {
+      setActaHistoryErrors((current) => ({ ...current, [room.id]: error instanceof Error ? error.message : 'No se ha podido consultar el historial.' }));
+    } finally {
+      setActaHistoryLoading((current) => ({ ...current, [room.id]: false }));
+    }
+  };
 
   const updateData = (updater: (current: Tournament) => Tournament) => {
     setPreparedRoomLink(null);
@@ -1333,7 +1362,28 @@ export default function App() {
                 const reason = conflict ? 'Institución incompatible con ' + conflict.name : teamConflict ? 'Incompatible con el equipo ' + teamConflict.name : judgeConflict ? 'Incompatible con ' + judgeConflict.name : undefined;
                 return { id: judge.id, name: judge.name, active: judge.active, disabledReason: reason };
               })} value={room.judgeIds} onChange={(value) => updateRoom(room.id, { judgeIds: value as string[] })} /></div>
-              <div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div>
+              <section className="panel room-acta-history" aria-label={'Historial del acta de ' + room.name}>
+                 <div className="panel-title"><div><h3>Historial del acta</h3><p>Versiones oficiales sincronizadas desde Tabulación.</p></div>
+                   <button type="button" className="button secondary" disabled={Boolean(actaHistoryLoading[room.id]) || saving || hasUnsavedChanges || !apiConfigured || !session || !data.remoteId || !room.assignmentId} onClick={() => void loadActaHistory(room)}>
+                     <RefreshCw size={14} /> {actaHistoryLoading[room.id] ? 'Consultando…' : 'Consultar historial'}
+                   </button>
+                 </div>
+                 {actaHistoryErrors[room.id] && <p className="muted" role="status">{actaHistoryErrors[room.id]}</p>}
+                 {actaHistories[room.id] && <div className="room-acta-history-summary">
+                   <strong>{actaHistories[room.id].rewriteCount > 0 ? 'Acta reescrita ' + actaHistories[room.id].rewriteCount + (actaHistories[room.id].rewriteCount === 1 ? ' vez' : ' veces') : 'Sin reescrituras oficiales'}</strong>
+                   <span>{actaHistories[room.id].totalVersions} {actaHistories[room.id].totalVersions === 1 ? 'versión' : 'versiones'}</span>
+                   {actaHistories[room.id].truncated && <small>Se muestran las 100 versiones más recientes.</small>}
+                   {actaHistories[room.id].versions.length > 0 ? <ol className="room-acta-history-list">
+                     {actaHistories[room.id].versions.map((version) => <li key={version.id}>
+                       <div><b>{version.id === actaHistories[room.id].currentVersionId ? 'Versión vigente' : 'Versión anterior'}</b><span>{new Date(version.createdAt).toLocaleString('es-ES')}</span></div>
+                       <small>{version.sourceMode === 'joint' ? 'Acta conjunta' : 'Papeletas individuales'} · {version.roundKind === 'elimination' ? 'Eliminatoria' : 'Clasificatoria'} · {version.createdBy}</small>
+                       <code title={version.sourceHash}>{version.sourceHash.slice(0, 12)}…</code>
+                     </li>)}
+                   </ol> : <p className="muted">Todavía no hay actas oficiales sincronizadas.</p>}
+                 </div>}
+                 {!actaHistories[room.id] && !actaHistoryErrors[room.id] && <p className="muted">Consulta el historial y el contador de reescrituras de esta sala.</p>}
+               </section>
+               <div className="room-editor-footer"><span className={'state-pill ' + room.status}>{room.status === 'ready' ? 'Preparada' : room.status === 'unassigned' ? 'Pendiente' : room.status === 'running' ? 'En curso' : room.status === 'paused' ? 'Pausada' : 'Finalizada'}</span><button className="text-button" onClick={() => void openRoom(room.id)}>Abrir cronómetro <ChevronRight size={15} /></button></div>
             </div>
           </div>
         </section>;

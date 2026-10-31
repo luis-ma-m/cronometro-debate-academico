@@ -114,6 +114,29 @@ export const updateTimer = (
   roomId, action, expectedRevision, controlKey, assignmentId, expectedActivationRevision,
 });
 
+export interface TabulationActaHistoryVersion {
+  id: string;
+  sourceMode: 'judges' | 'joint';
+  roundKind: 'qualifying' | 'elimination';
+  baseRevision: number;
+  sourceHash: string;
+  operationId: string;
+  supersedesSourceId: string | null;
+  createdBy: string;
+  createdAt: number;
+}
+export interface TabulationActaHistory {
+  tournamentId: string;
+  assignmentId: string;
+  currentVersionId: string | null;
+  totalVersions: number;
+  rewriteCount: number;
+  truncated: boolean;
+  versions: TabulationActaHistoryVersion[];
+}
+export const getTabulationActaHistory = (token: string, assignmentId: string) =>
+  apiCall<TabulationActaHistory>('getTabulationActaHistory', { token, assignmentId });
+
 export interface PersistedTabulationSettings {
   schemaVersion: number;
   tournamentId: string;
