@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateTournamentInput } from '../../api/core';
+import { validateTournamentInput } from '../../server/core.js';
 import type { Room, Tournament } from '../domain';
 import { createTimer, LEDU_PHASES } from '../timer';
 import { appendPanelPublishAcknowledgement, applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, readPanelPublishAcknowledgements, removePanelPublishAcknowledgements, PANEL_PUBLISH_ACK_KEY, suggestPanelEntityMatches, validatePanelEntityIdMap, tournamentFromHandoff, writeHandoff } from './panelBridge';

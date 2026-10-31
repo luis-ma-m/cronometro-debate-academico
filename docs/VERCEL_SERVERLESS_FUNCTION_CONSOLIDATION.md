@@ -51,7 +51,7 @@ El entrypoint conserva el contrato existente:
 
 Los imports del entrypoint apuntan a `../server/*.js`. Al estar `server/` al mismo nivel que `api/`, los imports internos a `../src/` y los imports relativos entre módulos de backend mantienen su profundidad.
 
-El script `typecheck:api` apunta a los módulos bajo `server/`. Las pruebas movidas a `tests/api/` actualizan imports a `../../server/` y `../../src/`, manteniendo Vitest.
+El script `typecheck:api` apunta a los módulos bajo `server/`. `tsconfig.app.json` incluye ahora `server/` y `tests/` para que el proyecto compuesto de TypeScript no rechace los imports del backend y las pruebas movidas. Las pruebas bajo `tests/api/` actualizan imports a `../../server/` y `../../src/`; dos pruebas del frontend que dependían de helpers antiguos de `api/` también apuntan a `server/`.
 
 ## Riesgos y validación
 

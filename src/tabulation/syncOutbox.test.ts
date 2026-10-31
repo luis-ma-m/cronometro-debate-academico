@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createSyncPayloadHash as createServerSyncPayloadHash } from '../../api/sync-operation-validation.js';
+import { createSyncPayloadHash as createServerSyncPayloadHash } from '../../server/sync-operation-validation.js';
 import {
   createSyncOutbox, hashSyncPayload, serializeSyncPayload,
   type PendingSyncOperation, type SyncOutboxRepository,
