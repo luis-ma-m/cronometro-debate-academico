@@ -7,7 +7,7 @@ function validSnapshot(value: unknown): value is PanelHandoff {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<PanelHandoff>;
   return snapshot.format === 'ledu-tabulacion-handoff' && snapshot.version === 1
-    && typeof snapshot.tournamentName === 'string'
+    && typeof snapshot.tournamentId === 'string' && typeof snapshot.tournamentName === 'string'
     && Array.isArray(snapshot.teams) && Array.isArray(snapshot.speakers)
     && Array.isArray(snapshot.judges) && Array.isArray(snapshot.venues)
     && typeof snapshot.revision === 'number' && typeof snapshot.updatedAt === 'number';
