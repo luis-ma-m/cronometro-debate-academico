@@ -10,10 +10,11 @@ export interface ActaHistoryQueryable {
 
 export interface TabulationActaHistoryVersion {
   id: string;
-  sourceMode: "judges" | "joint";
+  sourceMode: "judges" | "joint" | "elimination";
   roundKind: "qualifying" | "elimination";
   baseRevision: number;
   sourceHash: string;
+  eliminationResult?: Record<string, unknown> | null;
   operationId: string;
   supersedesSourceId: string | null;
   createdBy: string;
@@ -61,7 +62,7 @@ export async function readTabulationActaHistory(
       [assignmentId],
     ),
     db.query(
-      "SELECT id::text AS id, source_mode, round_kind, base_revision, source_hash, operation_id, supersedes_source_id::text AS supersedes_source_id, created_by, created_at FROM tabulation_acta_sources WHERE assignment_id = $1 AND tournament_id = $2 ORDER BY created_at DESC, id DESC LIMIT 101",
+      "SELECT id::text AS id, source_mode, round_kind, base_revision, source_hash, elimination_result, operation_id, supersedes_source_id::text AS supersedes_source_id, created_by, created_at FROM tabulation_acta_sources WHERE assignment_id = $1 AND tournament_id = $2 ORDER BY created_at DESC, id DESC LIMIT 101",
       [assignmentId, tournamentId],
     ),
   ]);
@@ -76,10 +77,11 @@ export async function readTabulationActaHistory(
   const rows = historyResult.rows.slice(0, 100);
   const versions = rows.map((row): TabulationActaHistoryVersion => ({
     id: asText(row.id),
-    sourceMode: row.source_mode === "joint" ? "joint" : "judges",
+    sourceMode: row.source_mode === "joint" ? "joint" : row.source_mode === "elimination" ? "elimination" : "judges",
     roundKind: row.round_kind === "elimination" ? "elimination" : "qualifying",
     baseRevision: Number(row.base_revision),
     sourceHash: asText(row.source_hash),
+    eliminationResult: row.elimination_result && typeof row.elimination_result === "object" ? asObject(row.elimination_result) : null,
     operationId: asText(row.operation_id),
     supersedesSourceId: asText(row.supersedes_source_id) || null,
     createdBy: asText(row.created_by),
@@ -101,11 +103,12 @@ export interface TabulationActaVersionDetail {
   id: string;
   assignmentId: string;
   tournamentId: string;
-  sourceMode: "judges" | "joint";
+  sourceMode: "judges" | "joint" | "elimination";
   roundKind: "qualifying" | "elimination";
   baseRevision: number;
   sourceHash: string;
   sourcePayload: Record<string, unknown>;
+  eliminationResult: Record<string, unknown> | null;
   rulesSnapshot: Record<string, unknown>;
   operationId: string;
   supersedesSourceId: string | null;
@@ -120,7 +123,7 @@ export async function readTabulationActaVersion(
   versionId: string,
 ): Promise<TabulationActaVersionDetail> {
   const result = await db.query(
-    "SELECT s.id::text AS id, s.assignment_id, s.tournament_id::text AS tournament_id, s.source_mode, s.round_kind, s.base_revision, s.source_hash, s.source_payload, s.rules_snapshot, s.operation_id, s.supersedes_source_id::text AS supersedes_source_id, s.created_by, s.created_at FROM tabulation_acta_sources s JOIN tournament_identity ti ON ti.tournament_id = s.tournament_id WHERE ti.id = 1 AND s.assignment_id = $1 AND s.id = $2",
+    "SELECT s.id::text AS id, s.assignment_id, s.tournament_id::text AS tournament_id, s.source_mode, s.round_kind, s.base_revision, s.source_hash, s.source_payload, s.rules_snapshot, s.elimination_result, s.operation_id, s.supersedes_source_id::text AS supersedes_source_id, s.created_by, s.created_at FROM tabulation_acta_sources s JOIN tournament_identity ti ON ti.tournament_id = s.tournament_id WHERE ti.id = 1 AND s.assignment_id = $1 AND s.id = $2",
     [assignmentId, versionId],
   );
   const row = result.rows[0];
@@ -129,11 +132,12 @@ export async function readTabulationActaVersion(
     id: asText(row.id),
     assignmentId: asText(row.assignment_id),
     tournamentId: asText(row.tournament_id),
-    sourceMode: row.source_mode === "joint" ? "joint" : "judges",
+    sourceMode: row.source_mode === "joint" ? "joint" : row.source_mode === "elimination" ? "elimination" : "judges",
     roundKind: row.round_kind === "elimination" ? "elimination" : "qualifying",
     baseRevision: Number(row.base_revision),
     sourceHash: asText(row.source_hash),
     sourcePayload: asObject(row.source_payload),
+    eliminationResult: row.elimination_result && typeof row.elimination_result === "object" ? asObject(row.elimination_result) : null,
     rulesSnapshot: asObject(row.rules_snapshot),
     operationId: asText(row.operation_id),
     supersedesSourceId: asText(row.supersedes_source_id) || null,
