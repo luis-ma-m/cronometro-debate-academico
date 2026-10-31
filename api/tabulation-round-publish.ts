@@ -139,7 +139,7 @@ export async function publishTabulationRound(rawOperation: unknown) {
         `INSERT INTO tabulation_debate_assignments
           (tournament_id, tabulation_round_id, tabulation_debate_id, manager_round_id, assignment_id, chair_judge_id, sides_provisional)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [canonicalTournamentId, operation.entityId, debate.tabulationDebateId, operation.entityId, assignmentId, debate.chairId || null, debate.sidesProvisional],
+        [canonicalTournamentId, validated.tabulationRoundId, debate.tabulationDebateId, operation.entityId, assignmentId, debate.chairId || null, debate.sidesProvisional],
       );
       for (const phase of phases) {
         await client.query(
@@ -167,7 +167,8 @@ export async function publishTabulationRound(rawOperation: unknown) {
     const nextRevision = currentRevision + 1;
     await client.query("UPDATE tournament_settings SET revision = $1, updated_at = now() WHERE id = 1", [nextRevision]);
     const response = {
-      tournamentId: canonicalTournamentId, roundId: operation.entityId, roundNumber: validated.roundNumber,
+      tournamentId: canonicalTournamentId, tabTournamentId: validated.tabTournamentId, tabulationRoundId: validated.tabulationRoundId,
+      roundId: operation.entityId, roundNumber: validated.roundNumber,
       roundName: validated.roundName, roundKind, assignmentIds,
       debateAssignments: validated.debates.map((debate, index) => ({ tabulationDebateId: debate.tabulationDebateId, assignmentId: assignmentIds[index] })),
       revision: nextRevision, operationId: operation.operationId,
