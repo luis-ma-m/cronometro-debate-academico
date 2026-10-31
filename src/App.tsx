@@ -15,7 +15,9 @@ import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 import { SearchableEntityPicker } from './components/SearchableEntityPicker';
 import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
-import { createIndexedDbSyncOutboxRepository, createSyncOutbox, hashSyncPayload } from './tabulation/syncOutbox';
+import { createIndexedDbSyncOutboxRepository, createSyncOutbox, hashSyncPayload, SYNC_OUTBOX_UPDATED_EVENT } from './tabulation/syncOutbox';
+import type { PendingSyncOperation } from './tabulation/syncOutbox';
+import { createSyncOutboxWorker } from './tabulation/syncOutboxWorker';
 
 const SESSION_KEY = 'ledu-admin-session';
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
@@ -109,6 +111,7 @@ export default function App() {
   const [preparedRoomLink, setPreparedRoomLink] = useState<{ roomName: string; href: string } | null>(null);
   const [tabulationNotice, setTabulationNotice] = useState('');
   const [publishingTabulationRound, setPublishingTabulationRound] = useState(false);
+  const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   // Reuse already fetched room-control links for the lifetime of this admin session.
   const preparedRoomLinksRef = useRef<Record<string, { roomName: string; href: string }>>({});
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -347,6 +350,60 @@ export default function App() {
     }
   }, [roomId, session, reloadAdmin, reloadRoom]);
 
+  useEffect(() => {
+    if (roomId || !apiConfigured || !session?.token || !data.remoteId) {
+      setSyncQueue([]);
+      return;
+    }
+    let disposed = false;
+    let outbox: ReturnType<typeof createSyncOutbox>;
+    try {
+      outbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo abrir la cola offline.');
+      return;
+    }
+    const worker = createSyncOutboxWorker({
+      outbox,
+      tournamentId: data.remoteId,
+      workerId: makeId('sync-worker'),
+      dispatch: async (operation) => {
+        if (operation.operation !== 'publish-round' || operation.entityType !== 'round') {
+          return { status: 'pause', error: { code: 'UNSUPPORTED_OPERATION', message: 'Esta operación necesita un adaptador de sincronización específico; se conserva en cola.' } };
+        }
+        try {
+          await apiPublishTabulationRound(session.token, {
+            protocolVersion: 1, operationId: operation.operationId, tournamentId: operation.tournamentId,
+            entityType: 'round', entityId: operation.entityId, operation: 'publish-round',
+            baseRevision: operation.baseRevision, payload: operation.payload as Record<string, unknown>, payloadHash: operation.payloadHash,
+          });
+          return { status: 'acknowledged' };
+        } catch (error) {
+          const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+          const message = error instanceof Error ? error.message : 'No se ha podido confirmar la sincronización.';
+          if (code === 'UNAUTHORIZED') {
+            localStorage.removeItem(SESSION_KEY);
+            setSession(null);
+            setServerError('La sesión ha caducado. Inicia sesión para reanudar la sincronización.');
+            return { status: 'pause', error: { code, message }, retryAfterMs: 60_000 };
+          }
+          if (['REVISION_CONFLICT', 'TOURNAMENT_MISMATCH', 'IDEMPOTENCY_MISMATCH'].includes(code)) return { status: 'conflict', error: { code, message } };
+          if (['INVALID_PAYLOAD', 'INVALID_RELATION', 'OPERATION_NOT_ALLOWED', 'FORMAT_NOT_CONFIGURED'].includes(code)) return { status: 'failed', error: { code, message } };
+          const retryAfterMs = error && typeof error === 'object' && 'retryAfterMs' in error ? Number((error as { retryAfterMs?: unknown }).retryAfterMs) || 0 : 0;
+          return { status: 'retry', error: { code: code || 'NETWORK_ERROR', message }, retryAfterMs };
+        }
+      },
+      onQueueChange: (operations) => { if (!disposed) setSyncQueue(operations); },
+      onAcknowledged: (operation) => {
+        if (disposed) return;
+        setTabulationNotice('La operación ' + operation.operationId + ' se ha confirmado en el servidor. La cola se ha actualizado.');
+        void reloadAdmin();
+      },
+      onError: (error) => { if (!disposed) setServerError(error instanceof Error ? error.message : 'Error en el worker de sincronización.'); },
+    });
+    worker.start();
+    return () => { disposed = true; worker.stop(); };
+  }, [roomId, session?.token, data.remoteId, reloadAdmin]);
   useEffect(() => {
     if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
   }, [data.rounds, selectedRound]);
@@ -1355,49 +1412,11 @@ export default function App() {
         baseRevision: outbox.basePanelRevision ?? data.revision,
         payload: outbox,
       })).operation;
-      const workerId = makeId('publish-worker');
-      const claimed = await syncOutbox.claimNext(data.remoteId, workerId);
-      if (!claimed) throw new Error('La operación no está disponible para envío. Comprueba el estado de la cola e inténtalo de nuevo.');
-      if (claimed.operationId !== queued.operationId) {
-        await syncOutbox.retry(claimed.operationId, workerId, {
-          code: 'WAITING_FOR_PREVIOUS_OPERATION',
-          message: 'Se mantiene el orden de la cola; una operación anterior debe resolverse antes de publicar esta ronda.',
-        });
-        throw new Error('Hay una operación anterior pendiente de sincronización. Se ha respetado el orden de la cola y esta ronda no se ha enviado.');
+      if (queued.status === 'sending') {
+        throw new Error('Esta publicación ya está siendo procesada en otra pestaña. Espera a que termine antes de volver a intentarlo.');
       }
-      try {
-        const published = await apiPublishTabulationRound(session.token, {
-          protocolVersion: 1,
-          operationId: claimed.operationId,
-          tournamentId: claimed.tournamentId,
-          entityType: 'round',
-          entityId: claimed.entityId,
-          operation: 'publish-round',
-          baseRevision: claimed.baseRevision,
-          payload: claimed.payload as Record<string, unknown>,
-          payloadHash: claimed.payloadHash,
-        });
-        const acknowledged = await syncOutbox.acknowledge(claimed.operationId, workerId);
-        await reloadAdmin();
-        setTabulationNotice(
-          'Ronda «' + published.roundName + '» publicada en el gestor con ' + published.assignmentIds.length
-          + ' asignaciones. Revisión del torneo: ' + published.revision + '.'
-          + (acknowledged ? '' : ' El servidor confirmó el commit, pero el ACK local está pendiente de recuperación automática; no vuelvas a crear la operación.'),
-        );
-      } catch (error) {
-        const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
-        const message = error instanceof Error ? error.message : 'No se ha podido confirmar la publicación.';
-        if (['REVISION_CONFLICT', 'TOURNAMENT_MISMATCH', 'IDEMPOTENCY_MISMATCH'].includes(code)) {
-          await syncOutbox.markConflict(claimed.operationId, workerId, { code: code || 'CONFLICT', message });
-        } else if (['INVALID_PAYLOAD', 'INVALID_RELATION', 'OPERATION_NOT_ALLOWED', 'FORMAT_NOT_CONFIGURED'].includes(code)) {
-          await syncOutbox.markFailed(claimed.operationId, workerId, { code, message });
-        } else {
-          // A timeout or 5xx may happen after COMMIT. Keep the same operationId
-          // pending so the server can return the committed idempotent response.
-          await syncOutbox.retry(claimed.operationId, workerId, { code: code || 'NETWORK_ERROR', message });
-        }
-        throw error;
-      }
+      window.dispatchEvent(new Event(SYNC_OUTBOX_UPDATED_EVENT));
+      setTabulationNotice('La propuesta «' + outbox.roundName + '» se ha guardado en la cola duradera. El gestor la publicará automáticamente cuando el servidor esté disponible; puedes seguir trabajando sin esperar al envío.');
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se ha podido publicar la ronda.');
     } finally {
@@ -1471,7 +1490,7 @@ export default function App() {
         saving={savingScores}
       />}
 
-      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button className="button primary" onClick={() => void publishFromTabulation()} disabled={!apiConfigured || !session || !data.remoteId || hasUnsavedChanges || saving || publishingTabulationRound} title="Revisa y publica la propuesta como una nueva ronda oficial"><ClipboardList size={15} />{publishingTabulationRound ? 'Publicando…' : 'Publicar nueva ronda'}</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
+      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button className="button primary" onClick={() => void publishFromTabulation()} disabled={!apiConfigured || !session || !data.remoteId || hasUnsavedChanges || saving || publishingTabulationRound} title="Revisa y publica la propuesta como una nueva ronda oficial"><ClipboardList size={15} />{publishingTabulationRound ? 'Publicando…' : 'Publicar nueva ronda'}</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div>{syncQueue.length > 0 && <div className="muted" role="status" aria-live="polite">Cola de sincronización: {syncQueue.filter((item) => item.status === 'pending').length} pendiente(s), {syncQueue.filter((item) => item.status === 'sending').length} en curso, {syncQueue.filter((item) => item.status === 'conflict').length} conflicto(s), {syncQueue.filter((item) => item.status === 'failed').length} error(es). {syncQueue.find((item) => item.status === 'conflict' || item.status === 'failed')?.lastError?.message ?? ''}</div>}<div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
         const expanded = expandedRoomIds.includes(room.id);
         return <section className={'panel room-editor room-card' + (expanded ? ' expanded' : '')} key={room.id}>
           <div className="room-card-header">
