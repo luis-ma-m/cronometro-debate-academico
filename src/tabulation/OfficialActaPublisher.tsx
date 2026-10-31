@@ -67,6 +67,8 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
   const [preview, setPreview] = useState<PreviewTabulationActaResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingSave, setPendingSave] = useState<PendingSave | null>(() => readPendingSave(assignmentId));
+  const pendingSaveRef = useRef(pendingSave);
+  pendingSaveRef.current = pendingSave;
   const [lastSaved, setLastSaved] = useState<SaveTabulationActaResponse | null>(null);
   const automaticAttemptRef = useRef('');
   const context = useMemo(() => outcomeContext(tournament), [tournament]);
@@ -111,7 +113,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
     tournament.settings.ballotMode, round.id, round.kind, debate.id, debate.teamIds, result]);
 
   useEffect(() => {
-    if (!canPublish || !token || !source || pendingSave || lastSaved || outcome.status !== 'complete') return;
+    if (!canPublish || !token || !source || pendingSaveRef.current?.input.assignmentId === assignmentId || readPendingSave(assignmentId) || lastSaved || outcome.status !== 'complete') return;
     const attemptKey = assignmentId + ':' + JSON.stringify(source);
     let disposed = false;
 
@@ -206,7 +208,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
       disposed = true;
       window.removeEventListener('online', onOnline);
     };
-  }, [assignmentId, canPublish, debate.id, lastSaved, notify, outcome.status, pendingSave, round.managerRoundId, round.name, source, store, token, tournament.panelLink?.remoteId]);
+  }, [assignmentId, canPublish, debate.id, lastSaved, notify, outcome.status, round.managerRoundId, round.name, source, store, token, tournament.panelLink?.remoteId]);
 
   const compare = async () => {
     if (!token || !assignmentId || !source || !canPublish) return;
