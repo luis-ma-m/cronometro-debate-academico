@@ -389,6 +389,7 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
     if (judgeIds.some((id) => !id)) issues.push(venueName + ': algún juez no tiene correspondencia con el gestor.');
     if (panel.chairId && !chairId) issues.push(venueName + ': la presidencia no tiene correspondencia con el gestor.');
     debates.push({
+      tabulationDebateId: debate.id,
       physicalRoomId: physicalRoomId ?? debate.venueId,
       venueName,
       teamFavorId: teamFavorId ?? favor,
