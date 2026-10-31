@@ -123,6 +123,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           setSyncStatus('No se puede reconstruir la base de comparación. Vuelve a vincular el torneo mediante revisión manual.');
           return;
         }
+        if (base.tournamentId !== tournament.panelLink.remoteId) {
+          setSyncStatus('La base de sincronización pertenece a otra identidad remota. Se ha bloqueado la reconciliación.');
+          return;
+        }
         const remoteRevisionAdvanced = (remote.revision ?? 0) > (base.revision ?? 0);
         const existingPending = readPendingPanelReconciliation(window.localStorage, tournament.id);
         if (existingPending) {
