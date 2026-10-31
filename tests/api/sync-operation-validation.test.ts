@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assertSyncOperationAuthorized, SyncAuthorizationError } from "./sync-operation-policy.js";
+import { assertSyncOperationAuthorized, SyncAuthorizationError } from "../../server/sync-operation-policy.js";
 import {
   canonicalSyncPayload,
   createSyncPayloadHash,
   validateSyncOperationEnvelope,
-} from "./sync-operation-validation.js";
+} from "../../server/sync-operation-validation.js";
 
 const validEnvelope = (overrides: Record<string, unknown> = {}) => {
   const payload = { assignments: [{ teamIds: ["team-a", "team-b"] }] };

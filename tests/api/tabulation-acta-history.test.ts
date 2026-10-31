@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "./core.js";
-import { readTabulationActaHistory, readTabulationActaVersion, type ActaHistoryQueryable } from "./tabulation-acta-history.js";
+import { ApiError } from "../../server/core.js";
+import { readTabulationActaHistory, readTabulationActaVersion, type ActaHistoryQueryable } from "../../server/tabulation-acta-history.js";
 
 const tournamentId = "123e4567-e89b-42d3-a456-426614174000";
 

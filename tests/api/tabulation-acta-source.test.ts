@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { presetSettings } from "../src/tabulation/presets.js";
-import { makeTournament, debate, result, ballots } from "../src/tabulation/test-fixtures.js";
-import { validateTabulationActaSource } from "./tabulation-acta-source.js";
-import type { TabulationActaDomainContext } from "./tabulation-acta-domain.js";
+import { presetSettings } from "../../src/tabulation/presets.js";
+import { makeTournament, debate, result, ballots } from "../../src/tabulation/test-fixtures.js";
+import { validateTabulationActaSource } from "../../server/tabulation-acta-source.js";
+import type { TabulationActaDomainContext } from "../../server/tabulation-acta-domain.js";
 
 function fixture(kind: "qualifying" | "elimination" = "qualifying") {
   const tournament = makeTournament("ledu-groups", ["a", "b"], ["j1", "j2", "j3"], 1);

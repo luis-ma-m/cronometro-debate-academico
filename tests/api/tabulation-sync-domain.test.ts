@@ -4,7 +4,7 @@ import {
   validatePublishedRoundPayload,
   type PublishedRoundDomainContext,
   type PublishedRoundPayload,
-} from "./tabulation-sync-domain.js";
+} from "../../server/tabulation-sync-domain.js";
 
 const context: PublishedRoundDomainContext = {
   canonicalTournamentId: "00000000-0000-4000-8000-000000000001",

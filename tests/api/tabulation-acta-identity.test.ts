@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalizeTabulationActa } from "./tabulation-acta-identity.js";
+import { canonicalizeTabulationActa } from "../../server/tabulation-acta-identity.js";
 
 const idMap = {
   teams: { localA: "remoteA", localB: "remoteB" },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateTabulationEliminationOutcome } from "./tabulation-elimination.js";
+import { validateTabulationEliminationOutcome } from "../../server/tabulation-elimination.js";
 
 describe("validateTabulationEliminationOutcome", () => {
   it("accepts a winner, loser and one advancing team", () => {

@@ -1,13 +1,13 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
-import { checkDatabase, databaseConfigured, getPool } from "./db.js";
-import { readTabulationActaHistory, readTabulationActaVersion } from "./tabulation-acta-history.js";
-import { previewTabulationActa, saveTabulationActa } from "./tabulation-acta-write.js";
-import { publishTabulationRound as publishTabulationRoundOperation } from "./tabulation-round-publish.js";
+import { checkDatabase, databaseConfigured, getPool } from "../server/db.js";
+import { readTabulationActaHistory, readTabulationActaVersion } from "../server/tabulation-acta-history.js";
+import { previewTabulationActa, saveTabulationActa } from "../server/tabulation-acta-write.js";
+import { publishTabulationRound as publishTabulationRoundOperation } from "../server/tabulation-round-publish.js";
 import { presetSettings } from "../src/tabulation/presets.js";
-import { validateTabulationSettings as validateTabulationSettingsPayload, TabulationSettingsValidationError } from "./tabulation-settings-validation.js";
+import { validateTabulationSettings as validateTabulationSettingsPayload, TabulationSettingsValidationError } from "../server/tabulation-settings-validation.js";
 import { TAB_SCHEMA_VERSION, type TabSettings } from "../src/tabulation/types.js";
-import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
+import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "../server/postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
 import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
@@ -30,7 +30,7 @@ import {
   validateTournamentInput,
   type SheetName,
   type SheetRow,
-} from "./core.js";
+} from "../server/core.js";
 
 type RequestLike = {
   method?: string;

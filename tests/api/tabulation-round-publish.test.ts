@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createSyncPayloadHash } from "./sync-operation-validation.js";
-import { publishTabulationRound } from "./tabulation-round-publish.js";
+import { createSyncPayloadHash } from "../../server/sync-operation-validation.js";
+import { publishTabulationRound } from "../../server/tabulation-round-publish.js";
 
 const tournamentId = "00000000-0000-4000-8000-000000000001";
 const baseUpdatedAt = 1_800_000_000_000;

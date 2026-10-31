@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { presetSettings } from "../src/tabulation/presets.js";
-import { ballots, result } from "../src/tabulation/test-fixtures.js";
-import { previewTabulationActa, saveTabulationActa } from "./tabulation-acta-write.js";
+import { presetSettings } from "../../src/tabulation/presets.js";
+import { ballots, result } from "../../src/tabulation/test-fixtures.js";
+import { previewTabulationActa, saveTabulationActa } from "../../server/tabulation-acta-write.js";
 
 const ids = {
   tournament: "00000000-0000-4000-8000-000000000001",

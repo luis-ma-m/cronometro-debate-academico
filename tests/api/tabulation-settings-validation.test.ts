@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { presetSettings } from "../src/tabulation/presets.js";
-import { TabulationSettingsValidationError, validateTabulationSettings } from "./tabulation-settings-validation.js";
+import { presetSettings } from "../../src/tabulation/presets.js";
+import { TabulationSettingsValidationError, validateTabulationSettings } from "../../server/tabulation-settings-validation.js";
 
 function validSettings() {
   return presetSettings("ledu-groups");
