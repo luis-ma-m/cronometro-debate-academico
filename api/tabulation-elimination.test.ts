@@ -24,7 +24,7 @@ describe("validateTabulationEliminationOutcome", () => {
     [{ winnerTeamId: "team-a", loserTeamId: "team-b", advancingTeamIds: ["team-a", "outsider"] }, "lista única"],
     [{ winnerTeamId: "team-a", loserTeamId: "team-b" }, "lista única"],
     [{ winnerTeamId: "team-a", loserTeamId: "team-b", advancingTeamIds: ["team-a"], ignored: true }, "ganador"],
-  ])("rejects an invalid bracket result", (value) => {
+  ])("rejects an invalid bracket result", (value, _expectedMessage) => {
     expect(() => validateTabulationEliminationOutcome(value, ["team-a", "team-b"])).toThrow();
   });
 
