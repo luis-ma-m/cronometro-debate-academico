@@ -14,6 +14,8 @@ export function isActaLinkSnapshot(value: unknown): value is ActaLink {
     || typeof link.desk !== 'string'
     || !round || typeof round !== 'object' || Array.isArray(round)
     || !Number.isSafeInteger((round as Record<string, unknown>).number)
+    || ((round as Record<string, unknown>).number as number) < 1
+    || ((round as Record<string, unknown>).number as number) > 10000
     || typeof (round as Record<string, unknown>).name !== 'string'
     || typeof (round as Record<string, unknown>).elimination !== 'boolean'
     || !Array.isArray(link.teams) || link.teams.length !== 2
