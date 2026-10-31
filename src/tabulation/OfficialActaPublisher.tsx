@@ -393,7 +393,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
               <button type="button" className="button secondary" onClick={() => void compare()} disabled={busy || Boolean(pendingSave && queueStatus !== 'conflict' && queueStatus !== 'failed')}>
                 <RefreshCw size={15} /> {busy && !pendingSave ? 'Comparando…' : pendingSave && (queueStatus === 'conflict' || queueStatus === 'failed') ? 'Revisar conflicto' : 'Comparar con el acta oficial'}
               </button>
-              {pendingSave && <><span className="muted">Publicación pendiente: ' + (queueStatus === 'conflict' ? 'conflicto que requiere revisión' : queueStatus === 'failed' ? 'error que requiere corrección' : 'operación persistida en IndexedDB; se reintentará al recuperar conexión') + '</span>
+              {pendingSave && <><span className="muted">{'Publicación pendiente: ' + (queueStatus === 'conflict' ? 'conflicto que requiere revisión' : queueStatus === 'failed' ? 'error que requiere corrección' : 'operación persistida en IndexedDB; se reintentará al recuperar conexión')}</span>
                 <button type="button" className="button primary" onClick={() => void retryPending()} disabled={busy}>{queueStatus === 'conflict' || queueStatus === 'failed' ? 'Revisar y resolver' : 'Reanudar sincronización'}</button></>}
             </div>
             {preview && <div className="notice tab-info-notice" role="status">
