@@ -116,7 +116,7 @@ Completar en cada ejecución:
 
 ## Nuevos controles de identidad/contexto F3-F4
 
-- [ ] Aplicar y verificar migraciones 0014, 0015 y 0016 únicamente en entorno Preview.
+- [ ] Aplicar y verificar migraciones 0014, 0015, 0016 y 0017 únicamente en entorno Preview.
 - [ ] Publicar una ronda y comprobar que cada tabulationDebateId devuelve el assignmentId correcto.
 - [ ] Reintentar la misma publicación y verificar que la respuesta idempotente conserva exactamente el mismo mapping.
 - [ ] Confirmar rollback completo si falla la escritura de una relación de identidad o de metadatos.
