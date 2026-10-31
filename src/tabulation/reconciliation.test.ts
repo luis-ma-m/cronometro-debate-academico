@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { comparePanelRevisions } from './reconciliation';
+import { buildLocalPanelBase, comparePanelRevisions } from './reconciliation';
 import { createTabTournament } from './presets';
 import type { PanelHandoff } from './panelBridge';
 import type { TabTournament } from './types';
@@ -21,6 +21,14 @@ function linkedTournament(): TabTournament {
 }
 
 describe('three-way panel reconciliation', () => {
+  it('reconstructs a stable remote baseline for a linked tournament created before F3', () => {
+    const local = linkedTournament();
+    const snapshot = buildLocalPanelBase(local);
+    expect(snapshot).toMatchObject({ tournamentId: 'remote-1', revision: 4, teams: [{ id: 'team-1', name: 'Equipo A' }] });
+    const result = comparePanelRevisions(local, snapshot!, base);
+    expect(result.changes[0].change).toBe('unchanged');
+  });
+
   it('classifies a remote-only entity edit as independently applicable', () => {
     const remote = { ...base, revision: 5, updatedAt: 200,
       teams: [{ ...base.teams[0], name: 'Equipo A renombrado' }] };
