@@ -96,7 +96,12 @@ export function comparePanelRevisions(
   base: PanelHandoff,
   remote: PanelHandoff,
 ): ReconciliationResult {
-  const idMap = tournament.panelLink?.idMap ?? { teams: {}, speakers: {}, judges: {}, venues: {} };
+  const idMap = tournament.panelLink?.idMap ?? {
+    teams: Object.fromEntries(tournament.teams.map((item) => [item.id, item.id])),
+    speakers: Object.fromEntries(tournament.speakers.map((item) => [item.id, item.id])),
+    judges: Object.fromEntries(tournament.judges.map((item) => [item.id, item.id])),
+    venues: Object.fromEntries(tournament.venues.map((item) => [item.id, item.id])),
+  };
   const changes: ReconciliationChange[] = [];
   const definitions: Array<{
     kind: PanelEntityKind;
@@ -120,7 +125,7 @@ export function comparePanelRevisions(
 
     for (const [remoteId, remoteRow] of remoteRows) {
       const baseRow = baseRows.get(remoteId) ?? null;
-      const localId = reverseMap.get(remoteId) ?? (localRows.has(remoteId) ? remoteId : null);
+      const localId = reverseMap.get(remoteId) ?? null;
       const localRow = localId ? localRows.get(localId) ?? null : null;
       const baseValue = baseRow as Record<string, unknown> | null;
       const localValue = localRow as Record<string, unknown> | null;
