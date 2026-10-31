@@ -568,7 +568,13 @@ export function readPanelPublishAcknowledgements(storage: SimpleStorage): PanelP
       && typeof (item as PanelPublishAcknowledgement).tabulationRoundId === 'string'
       && typeof (item as PanelPublishAcknowledgement).managerRoundId === 'string'
       && Number.isSafeInteger((item as PanelPublishAcknowledgement).revision)
-      && Array.isArray((item as PanelPublishAcknowledgement).debateAssignments)));
+      && Array.isArray((item as PanelPublishAcknowledgement).debateAssignments)
+      && (item as PanelPublishAcknowledgement).revision >= 1
+      && (item as PanelPublishAcknowledgement).debateAssignments.every((mapping) => Boolean(mapping
+        && typeof mapping.tabulationDebateId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(mapping.tabulationDebateId)
+        && typeof mapping.assignmentId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(mapping.assignmentId)))
+      && new Set((item as PanelPublishAcknowledgement).debateAssignments.map((mapping) => mapping.tabulationDebateId)).size
+        === (item as PanelPublishAcknowledgement).debateAssignments.length));
   } catch { return []; }
 }
 export function appendPanelPublishAcknowledgement(storage: SimpleStorage, acknowledgement: PanelPublishAcknowledgement): void {
