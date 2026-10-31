@@ -120,8 +120,15 @@ export async function publishTabulationRound(rawOperation: unknown) {
     );
     await client.query(
       `INSERT INTO tabulation_round_metadata (tournament_id, manager_round_id, side_mode, team_metadata, updated_by)
-       VALUES ($1, $2, $3, $4::jsonb, 'admin')`,
-      [canonicalTournamentId, operation.entityId, validated.sideMode, JSON.stringify(validated.teamMetadata)],
+       VALUES ($1, $2, $3, $4::jsonb, $5)`,
+      [canonicalTournamentId, operation.entityId, validated.sideMode, JSON.stringify(validated.teamMetadata), "tabulation:" + operation.operationId],
+    );
+    await client.query(
+      "INSERT INTO audit_events(event_key, event_type, round_id, details) VALUES ($1, $2, $3, $4::jsonb)",
+      ["tabulation-metadata:" + operation.operationId, "tabulation_round_metadata_published", operation.entityId,
+        JSON.stringify({ operationId: operation.operationId, tabTournamentId: validated.tabTournamentId,
+          tabulationRoundId: validated.tabulationRoundId, sideMode: validated.sideMode,
+          teamMetadata: validated.teamMetadata })],
     );
 
     const assignmentIds: string[] = [];
