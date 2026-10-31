@@ -12,6 +12,8 @@ export interface PendingSyncOperation {
   lastError?: SyncOperationError; workerId?: string; leaseUntil?: number; nextAttemptAt?: number;
 }
 export interface EnqueueSyncOperation {
+  /** Caller-supplied id for operations already persisted by a domain workflow. */
+  operationId?: string;
   tournamentId: string; entityType: string; entityId: string;
   operation: SyncOperationKind; baseRevision: number; payload: unknown;
 }
@@ -131,8 +133,10 @@ export function createSyncOutbox(
     async enqueue(input) {
       if (!input.tournamentId.trim() || !input.entityType.trim() || !input.entityId.trim()) throw new Error('La operación necesita torneo y entidad identificables.');
       if (!Number.isSafeInteger(input.baseRevision) || input.baseRevision < 0) throw new Error('La revisión base de la operación no es válida.');
+      const operationId = input.operationId ?? createOperationId();
+      if (!/^[a-zA-Z0-9_-]{8,128}$/.test(operationId)) throw new Error('El identificador de operación no es válido.');
       const operation: PendingSyncOperation = {
-        ...input, operationId: createOperationId(), payloadHash: await hashSyncPayload(input.payload),
+        ...input, operationId, payloadHash: await hashSyncPayload(input.payload),
         status: 'pending', attempts: 0, createdAt: now(),
       };
       const existing = await repository.insert(operation);
