@@ -233,6 +233,7 @@ export interface PublishedTabulationRound {
   assignmentIds: string[];
   debateAssignments: Array<{ tabulationDebateId: string; assignmentId: string }>;
   revision: number;
+  updatedAt: number;
   operationId: string;
 }
 export const publishTabulationRound = (token: string, operation: TabulationRoundPublishOperation) =>
