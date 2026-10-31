@@ -73,15 +73,16 @@ export function canonicalizeTabulationActa(
     throw new ApiError("INVALID_ACTA_SOURCE", "La propuesta de acta no contiene alineación, papeletas y sanciones válidas.");
   }
 
-  result.lineup = mapTeamRecord(result.lineup, idMap.teams, targets.teamIds, "equipos de la alineación");
-  for (const [teamId, lineup] of Object.entries(result.lineup)) {
+  const mappedLineup = mapTeamRecord(result.lineup, idMap.teams, targets.teamIds, "equipos de la alineación");
+  for (const [teamId, lineup] of Object.entries(mappedLineup)) {
     if (!isRecord(lineup)) throw new ApiError("INVALID_ACTA_SOURCE", "La alineación de un equipo no es válida.");
     const mapped: Record<string, unknown> = {};
     for (const [role, speakerId] of Object.entries(lineup)) {
       mapped[role] = mappedId(speakerId, idMap.speakers, targets.speakerIds, "oradores");
     }
-    result.lineup[teamId] = mapped;
+    mappedLineup[teamId] = mapped;
   }
+  result.lineup = mappedLineup;
 
   result.penalties = mapTeamRecord(result.penalties, idMap.teams, targets.teamIds, "equipos sancionados");
   const ballots = result.ballots as unknown[];
