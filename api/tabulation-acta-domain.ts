@@ -10,7 +10,7 @@ export interface TabulationActaDomainContext {
 }
 export interface ValidatedTabulationActa {
   tournamentId: string; basePanelRevision: number; basePanelUpdatedAt: number;
-  roundId: string; debateId: string; result: TabDebateResult;
+  roundId: string; debateId: string; result: TabDebateResult; winnerTeamId: string | null;
 }
 export class TabulationActaValidationError extends Error {
   readonly issues: string[];
@@ -171,5 +171,5 @@ export function validateTabulationActaResult(value: unknown, context: Tabulation
     throw new TabulationActaValidationError(details.length ? details : ["El acta todavía no contiene un resultado completo."]);
   }
   return { tournamentId: value.tournamentId as string, basePanelRevision: value.basePanelRevision as number,
-    basePanelUpdatedAt: value.basePanelUpdatedAt as number, roundId: value.roundId as string, debateId: value.debateId as string, result };
+    basePanelUpdatedAt: value.basePanelUpdatedAt as number, roundId: value.roundId as string, debateId: value.debateId as string, result, winnerTeamId: outcome.winnerTeamId };
 }
