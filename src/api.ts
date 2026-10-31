@@ -7,7 +7,7 @@ const API_URL = EXPLICIT_API_URL || (import.meta.env.PROD ? '/api' : '');
 export const apiConfigured = API_URL.length > 0;
 
 export class ApiError extends Error {
-  constructor(message: string, public code = 'API_ERROR', public retryAfterMs = 0) {
+  constructor(message: string, public code = 'API_ERROR', public retryAfterMs = 0, public status = 0) {
     super(message);
     this.name = 'ApiError';
   }
@@ -47,12 +47,14 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
         'La función de Vercel ha fallado internamente (HTTP ' + response.status + '). Revisa Vercel → Logs → Runtime Logs. No se ha podido confirmar la operación.' + reference,
         'VERCEL_RUNTIME_ERROR',
         retryAfterMs,
+        response.status,
       );
     }
     throw new ApiError(
       detail.error?.message ?? ('El backend respondió HTTP ' + response.status),
       detail.error?.code ?? 'HTTP_ERROR',
       retryAfterMs,
+      response.status,
     );
   }
   let result: { ok: boolean; data?: T; error?: { message?: string; code?: string } };

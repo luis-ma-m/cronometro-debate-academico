@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../api', () => ({
   ApiError: class ApiError extends Error {
-    constructor(message: string, public code = 'API_ERROR', public retryAfterMs = 0) { super(message); }
+    constructor(message: string, public code = 'API_ERROR', public retryAfterMs = 0, public status = 0) { super(message); }
   },
   previewTabulationActa: mocks.preview,
   saveTabulationActa: mocks.save,
