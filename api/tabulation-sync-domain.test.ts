@@ -33,6 +33,8 @@ const context: PublishedRoundDomainContext = {
 const validPayload = (): PublishedRoundPayload => ({
   format: "ledu-tabulacion-outbox",
   version: 1,
+  tabTournamentId: "tab-tournament-1",
+  tabulationRoundId: "tab-round-local-1",
   createdAt: 1_800_000_000_100,
   tournamentId: context.canonicalTournamentId,
   basePanelRevision: context.currentRevision,
