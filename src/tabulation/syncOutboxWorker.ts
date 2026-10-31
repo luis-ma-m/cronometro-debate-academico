@@ -2,7 +2,7 @@ import type { PendingSyncOperation, SyncOperationError, SyncOutbox } from './syn
 import { SYNC_OUTBOX_UPDATED_EVENT } from './syncOutbox';
 
 export type SyncDispatchResult =
-  | { status: 'acknowledged' }
+  | { status: 'acknowledged'; response?: unknown }
   | { status: 'conflict' | 'failed' | 'retry' | 'pause'; error: SyncOperationError; retryAfterMs?: number };
 
 export interface SyncOutboxWorkerOptions {
@@ -11,7 +11,7 @@ export interface SyncOutboxWorkerOptions {
   workerId: string;
   dispatch: (operation: PendingSyncOperation) => Promise<SyncDispatchResult>;
   onQueueChange?: (operations: PendingSyncOperation[]) => void;
-  onAcknowledged?: (operation: PendingSyncOperation) => void;
+  onAcknowledged?: (operation: PendingSyncOperation, response?: unknown) => void;
   onError?: (error: unknown) => void;
   now?: () => number;
   pollIntervalMs?: number;
@@ -73,7 +73,7 @@ export function createSyncOutboxWorker(options: SyncOutboxWorkerOptions) {
 
           if (result.status === 'acknowledged') {
             const acknowledged = await options.outbox.acknowledge(operation.operationId, options.workerId);
-            if (acknowledged) options.onAcknowledged?.(operation);
+            if (acknowledged) options.onAcknowledged?.(operation, result.response);
             else options.onError?.(new Error('El servidor confirmó la operación, pero el lease local ya no pertenece a este worker.'));
           } else if (result.status === 'conflict') {
             await options.outbox.markConflict(operation.operationId, options.workerId, result.error);
