@@ -406,6 +406,12 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   const provisional = debates.filter((debate) => debate.sidesProvisional).length;
   if (provisional) warnings.push(provisional + ' debate(s) sin postura sorteada: se enviarán con una postura provisional que podrás intercambiar en el panel.');
   if (debates.some((debate) => !debate.judgeIds.length)) warnings.push('Hay debates sin jueces.');
+  const teamMetadata = tournament.teams.filter((team) => team.active).map((team) => {
+    const teamId = remoteId('teams', team.id);
+    if (!teamId) issues.push('El equipo «' + team.name + '» no tiene correspondencia con el gestor; no se pueden sincronizar sus metadatos de resultado.');
+    return { teamId: teamId ?? team.id, swing: team.swing, breakEligible: team.breakEligible,
+      ...(typeof team.fallenFromRound === 'number' ? { fallenFromRound: team.fallenFromRound } : {}) };
+  });
   if (issues.length) return { outbox: null, issues: [...new Set(issues)], warnings };
   return {
     outbox: {
@@ -421,12 +427,7 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       roundNumber: round.number,
       roundKind: round.kind,
       sideMode: round.sideMode,
-      teamMetadata: tournament.teams.filter((team) => team.active).map((team) => {
-        const teamId = remoteId('teams', team.id);
-        if (!teamId) issues.push('El equipo «' + team.name + '» no tiene correspondencia con el gestor; no se pueden sincronizar sus metadatos de resultado.');
-        return { teamId: teamId ?? team.id, swing: team.swing, breakEligible: team.breakEligible,
-          ...(typeof team.fallenFromRound === 'number' ? { fallenFromRound: team.fallenFromRound } : {}) };
-      }),
+      teamMetadata,
       debates,
     },
     issues,
