@@ -115,6 +115,22 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     expect(mocks.query).toHaveBeenCalledWith("COMMIT");
   });
 
+  it("rejects a stale manager revision instead of rebasing the acta preview silently", async () => {
+    const baseImplementation = mocks.query.getMockImplementation();
+    mocks.query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      const response = await baseImplementation!(sql, params);
+      if (String(sql).startsWith("SELECT b.tournament_id")) {
+        return { ...response, rows: response.rows.map((row: Record<string, unknown>) => ({
+          ...row, revision: 4, updated_at_ms: baseUpdatedAt + 1000,
+        })) };
+      }
+      return response;
+    });
+    await expect(previewTabulationActa({ assignmentId: ids.assignment, source: input().source }))
+      .rejects.toMatchObject({ code: "ACTA_REVISION_CONFLICT", status: 409 });
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("INSERT INTO"))).toBe(false);
+  });
+
   it("validates using persisted rules, team metadata, assignment judges and reviewed identity mapping", async () => {
     const response = await saveTabulationActa(input());
     expect(response).toMatchObject({
