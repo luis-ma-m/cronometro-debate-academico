@@ -110,7 +110,11 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       const timeout = window.setTimeout(() => controller.abort(), 10000);
       try {
         const remoteTournament = await getTournament(token, controller.signal);
-        if (disposed || remoteTournament.remoteId !== tournament.panelLink.remoteId) return;
+        if (disposed) return;
+        if (remoteTournament.remoteId !== tournament.panelLink.remoteId) {
+          setSyncStatus('La identidad remota del Gestor ha cambiado. Se ha bloqueado la sincronización para evitar mezclar torneos. Revisa el vínculo manualmente.');
+          return;
+        }
         const remote = buildPanelHandoff(remoteTournament);
         const storedBase = readPanelSyncBase(window.localStorage, tournament.id);
         const isLegacyBaseline = !storedBase;
