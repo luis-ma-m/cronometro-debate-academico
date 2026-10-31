@@ -108,7 +108,8 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
     setLastSaved(null);
     try {
       const next = await previewTabulationActa(token, assignmentId, source);
-      if (next.assignmentId !== assignmentId || next.tournamentId !== tournament.panelLink?.remoteId) {
+      if (next.assignmentId !== assignmentId || next.tournamentId !== tournament.panelLink?.remoteId
+        || next.roundId !== round.managerRoundId || next.debateId !== debate.id) {
         throw new Error('La comparación devuelta no corresponde a esta asignación y torneo.');
       }
       setPreview(next);
