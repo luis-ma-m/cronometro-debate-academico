@@ -121,8 +121,22 @@ export function canonicalizeTabulationActa(
     result.joint = joint;
   }
 
+  let eliminationResult = value.eliminationResult;
+  if (eliminationResult !== undefined && eliminationResult !== null) {
+    if (!isRecord(eliminationResult) || !Array.isArray(eliminationResult.advancingTeamIds)) {
+      throw new ApiError("INVALID_ACTA_SOURCE", "El resultado explícito de eliminatoria no es válido.");
+    }
+    eliminationResult = {
+      winnerTeamId: mappedId(eliminationResult.winnerTeamId, idMap.teams, targets.teamIds, "ganador de eliminatoria"),
+      loserTeamId: mappedId(eliminationResult.loserTeamId, idMap.teams, targets.teamIds, "perdedor de eliminatoria"),
+      advancingTeamIds: eliminationResult.advancingTeamIds.map((teamId) =>
+        mappedId(teamId, idMap.teams, targets.teamIds, "equipos que avanzan en eliminatoria")),
+    };
+  }
+
   const acta = {
     ...value,
+    ...(eliminationResult === undefined ? {} : { eliminationResult }),
     tournamentId: targets.tournamentId,
     roundId: targets.roundId,
     debateId: targets.debateId,
