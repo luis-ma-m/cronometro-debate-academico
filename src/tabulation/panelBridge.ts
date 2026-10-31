@@ -104,6 +104,7 @@ export function validatePanelEntityIdMap(tournament: TabTournament, handoff: Pan
 }
 
 export interface PanelOutboxDebate {
+  tabulationDebateId: string;
   physicalRoomId: string;
   venueName: string;
   teamFavorId: string;
