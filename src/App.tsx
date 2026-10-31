@@ -1506,12 +1506,13 @@ export default function App() {
         const expanded = expandedRoomIds.includes(room.id);
         return <section className={'panel room-editor room-card' + (expanded ? ' expanded' : '')} key={room.id}>
           <div className="room-card-header">
-            <button type="button" className="room-card-toggle" aria-expanded={expanded} aria-controls={'room-config-' + room.id} onClick={() => setExpandedRoomIds((current) => expanded ? current.filter((id) => id !== room.id) : [...current, room.id])}>
+            <button type="button" className="room-card-toggle" aria-expanded={expanded} aria-controls={'room-config-' + room.id} onClick={() => { const opening = !expanded; setExpandedRoomIds((current) => opening ? [...current, room.id] : current.filter((id) => id !== room.id)); if (opening && !actaHistories[room.id] && !actaHistoryLoading[room.id]) void loadActaHistory(room); }}>
               <span className="room-card-name">{room.name}</span>
               <span className="room-card-toggle-hint">{expanded ? 'Ocultar configuración' : 'Ver configuración'}</span>
               <ChevronRight size={16} className="room-card-chevron" />
             </button>
             <div className="room-open-actions">
+              {actaHistories[room.id] && <span className="muted room-acta-history-indicator" title={actaHistories[room.id].totalVersions + " versiones oficiales"}>{actaHistories[room.id].rewriteCount > 0 ? "Acta reescrita " + actaHistories[room.id].rewriteCount + (actaHistories[room.id].rewriteCount === 1 ? " vez" : " veces") : "Acta oficial sin reescrituras"}</span>}
               <button type="button" className="icon-button" title="Abrir cronómetro" aria-label={'Abrir cronómetro de ' + room.name} onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button>
               <button type="button" className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button>
               <button type="button" className="icon-button danger-action" title="Eliminar sala" aria-label={'Eliminar sala ' + room.name} onClick={() => removeRoom(room)}><Trash2 size={15} /></button>
