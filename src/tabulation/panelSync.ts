@@ -10,7 +10,7 @@ function validSnapshot(value: unknown): value is PanelHandoff {
     && typeof snapshot.tournamentId === 'string' && typeof snapshot.tournamentName === 'string'
     && Array.isArray(snapshot.teams) && Array.isArray(snapshot.speakers)
     && Array.isArray(snapshot.judges) && Array.isArray(snapshot.venues)
-    && typeof snapshot.revision === 'number' && typeof snapshot.updatedAt === 'number';
+    && Number.isSafeInteger(snapshot.revision) && Number.isFinite(snapshot.updatedAt);
 }
 
 export interface PendingPanelReconciliation {
@@ -26,8 +26,17 @@ export function readPanelSyncBase(storage: Pick<Storage, 'getItem'>, tournamentI
   } catch { return null; }
 }
 
-export function writePanelSyncBase(storage: Pick<Storage, 'setItem'>, tournamentId: string, snapshot: PanelHandoff): void {
-  storage.setItem(PANEL_SYNC_BASE_PREFIX + tournamentId, JSON.stringify(snapshot));
+export function writePanelSyncBase(storage: Pick<Storage, 'setItem' | 'removeItem'>, tournamentId: string, snapshot: PanelHandoff): boolean {
+  const key = PANEL_SYNC_BASE_PREFIX + tournamentId;
+  try {
+    storage.setItem(key, JSON.stringify(snapshot));
+    return true;
+  } catch {
+    // The baseline is reconstructible from the flushed local tournament and its
+    // remote cursor. Remove a stale baseline rather than comparing against it.
+    try { storage.removeItem(key); } catch { /* Storage may be fully unavailable. */ }
+    return false;
+  }
 }
 
 export function readPendingPanelReconciliation(storage: Pick<Storage, 'getItem'>, tournamentId: string): PendingPanelReconciliation | null {
