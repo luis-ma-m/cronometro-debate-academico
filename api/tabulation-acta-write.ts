@@ -89,11 +89,18 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
   };
 
   const [teamsResult, judgesResult, speakersResult, settingsResult] = await Promise.all([
-    db.query(`SELECT t.id, t.name, t.active, COALESCE(i.name, '') AS institution, t.incompatible_judge_ids
-             FROM teams t LEFT JOIN institutions i ON i.id = t.institution_id`),
-    db.query(`SELECT j.id, j.name, j.active, COALESCE(i.name, '') AS institution, j.incompatible_judge_ids
+    db.query(`SELECT t.id, t.name, t.active, COALESCE(i.name, '') AS institution,
+                    COALESCE(array_agg(tji.judge_id) FILTER (WHERE tji.judge_id IS NOT NULL), ARRAY[]::text[]) AS incompatible_judge_ids
+             FROM teams t LEFT JOIN institutions i ON i.id = t.institution_id
+             LEFT JOIN team_judge_incompatibilities tji ON tji.team_id = t.id
+             GROUP BY t.id, i.name`),
+    db.query(`SELECT j.id, j.name, j.active, COALESCE(i.name, '') AS institution,
+                    COALESCE(array_agg(ji.incompatible_judge_id) FILTER (WHERE ji.incompatible_judge_id IS NOT NULL), ARRAY[]::text[]) AS incompatible_judge_ids
              FROM judges j LEFT JOIN institutions i ON i.id = j.institution_id
-             JOIN assignment_judges aj ON aj.judge_id = j.id WHERE aj.assignment_id = $1`, [assignmentId]),
+             JOIN assignment_judges aj ON aj.judge_id = j.id
+             LEFT JOIN judge_incompatibilities ji ON ji.judge_id = j.id
+             WHERE aj.assignment_id = $1
+             GROUP BY j.id, i.name`, [assignmentId]),
     db.query(`SELECT s.id, s.team_id, s.name FROM speakers s WHERE s.team_id = ANY($1::text[])`, [[teamFavorId, teamContraId]]),
     db.query("SELECT schema_version, revision, settings FROM tabulation_settings WHERE id = 1 FOR SHARE"),
   ]);
