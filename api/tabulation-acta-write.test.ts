@@ -109,6 +109,8 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     const insert = mocks.query.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO tabulation_acta_sources"));
     expect(insert).toBeTruthy();
     expect(String(insert?.[0])).toContain("supersedes_source_id");
+    expect(String(insert?.[0])).toContain("elimination_result");
+    expect((insert?.[1] as unknown[])[8]).toBeNull();
     const teamContextQuery = mocks.query.mock.calls.find(([sql]) => String(sql).startsWith("SELECT t.id, t.name"));
     const judgeContextQuery = mocks.query.mock.calls.find(([sql]) => String(sql).startsWith("SELECT j.id, j.name"));
     expect(String(teamContextQuery?.[0])).toContain("team_judge_incompatibilities");
