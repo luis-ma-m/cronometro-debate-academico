@@ -112,3 +112,15 @@ Completar en cada ejecución:
 - No se ha validado el flujo real multi-dispositivo contra Neon Preview ni la migración IndexedDB v1 → v2 en navegador.
 - No se han ejecutado migraciones ni escrituras en Neon Production.
 - Este checklist no declara F3 ni F4 terminadas: registra evidencia pendiente para el cierre.
+
+
+## Nuevos controles de identidad/contexto F3-F4
+
+- [ ] Aplicar y verificar migraciones 0014 y 0015 únicamente en entorno Preview.
+- [ ] Publicar una ronda y comprobar que cada tabulationDebateId devuelve el assignmentId correcto.
+- [ ] Reintentar la misma publicación y verificar que la respuesta idempotente conserva exactamente el mismo mapping.
+- [ ] Confirmar rollback completo si falla la escritura de una relación de identidad o de metadatos.
+- [ ] Verificar que la instantánea incluye todos los equipos activos, sin duplicados ni referencias ajenas.
+- [ ] Cambiar swing, breakEligible, fallenFromRound o sideMode y comprobar que el contexto persistido es el que utiliza el cálculo server-side del acta.
+- [ ] Conectar la respuesta del servidor al modelo local y al outbox durable; probar pérdida de respuesta y recuperación por operationId.
+- [ ] No permitir publicar/sustituir actas hasta que el contexto server-side se recupere desde estas tablas.
