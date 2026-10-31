@@ -1326,6 +1326,27 @@ function errorPayload(error: unknown): { ok: false; error: { code: string; messa
   return { ok: false, error: { code: "INTERNAL_ERROR", message: "Se ha producido un error inesperado. No se ha podido confirmar la operación." } };
 }
 
+function pr79PreviewNeonConnection(req: RequestLike): string {
+  const expected = process.env.PR79_NEON_TEST_TOKEN ?? '';
+  const provided = headerValue(req, 'x-pr79-neon-token');
+  const sameLength = Boolean(expected && provided && Buffer.byteLength(expected) === Buffer.byteLength(provided));
+  const authorized = sameLength && timingSafeEqual(Buffer.from(expected), Buffer.from(provided ?? ''));
+  if (!authorized || process.env.VERCEL_ENV !== 'preview'
+    || process.env.VERCEL_GIT_COMMIT_REF !== 'feat/tabulation-manager-sync') {
+    throw new ApiError('NOT_FOUND', 'Recurso no encontrado.', 404);
+  }
+  const connectionString = process.env.NEON_DATABASE_URL?.trim();
+  if (!connectionString) throw new ApiError('NOT_CONFIGURED', 'La conexión Neon de Preview no está configurada.', 503);
+  let url: URL;
+  try { url = new URL(connectionString); } catch {
+    throw new ApiError('DATABASE_CONFIGURATION_INVALID', 'La conexión Neon de Preview no es válida.', 503);
+  }
+  if (!url.hostname.endsWith('.neon.tech') || !['postgres:', 'postgresql:'].includes(url.protocol)) {
+    throw new ApiError('DATABASE_SCOPE_INVALID', 'La conexión no pertenece a Neon Preview.', 503);
+  }
+  return connectionString;
+}
+
 export default async function handler(req: RequestLike, res: ResponseLike): Promise<void> {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store, max-age=0");
@@ -1340,6 +1361,11 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
     if (req.method === "GET") {
       const action = Array.isArray(req.query?.action) ? req.query?.action[0] : req.query?.action;
       if (action === "resolveActaShortLink") { const result = await resolveActaShortLink(req); res.status(200).json({ ok: true, data: result }); return; }
+      if (action === "pr79NeonConnection") {
+        const connectionString = pr79PreviewNeonConnection(req);
+        res.status(200).json({ ok: true, data: { connectionString } });
+        return;
+      }
       if (action !== "health") throw new ApiError("METHOD_NOT_ALLOWED", "Usa POST para operar con la API.", 405);
       const result = await health();
       res.status(200).json({ ok: true, data: result });
