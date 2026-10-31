@@ -720,3 +720,18 @@ Se añade `api/tabulation-round-publish.ts` y la acción privada `publishTabulat
 - El gestor incorpora la acción explícita **Publicar nueva ronda**. Antes de enviar, comprueba identidad, revisión, secuencia de ronda y relaciones, y presenta un resumen para confirmación. La propuesta se conserva en IndexedDB; el cliente reclama una operación de la cola en orden, envía el sobre firmado por hash y solo elimina la operación tras recibir el ACK del servidor. Los errores de revisión quedan como conflicto; los errores de dominio quedan fallidos; los errores de red/5xx conservan el mismo operationId para reintento idempotente.
 
 **Límite de esta entrega:** el envío se activa desde la acción explícita del gestor; todavía no existe un worker de sincronización automática en segundo plano al recuperar conectividad ni un panel general de estado/gestión de la cola. No se han ejecutado migraciones ni escrituras en Neon.
+
+## Incremento F3: worker automático y recuperación de la outbox
+
+Se añade un worker de sincronización para las operaciones que ya tienen un flujo de publicación explícita implementado.
+
+- La publicación de una ronda se persiste primero en IndexedDB, únicamente después de la confirmación explícita del gestor. El envío HTTP queda desacoplado del botón y lo realiza el worker.
+- El worker se activa al iniciar la sesión del gestor, al recuperar conectividad, al volver el foco/visibilidad y al recibir una notificación local de nueva operación. También realiza un sondeo de respaldo cada 30 segundos.
+- El claim atómico de IndexedDB y los leases de 60 segundos impiden que dos pestañas de la misma instalación procesen simultáneamente la misma operación. La cola conserva orden FIFO por torneo y un conflicto/error bloqueante detiene las operaciones dependientes posteriores.
+- Los fallos de red/5xx y los timeouts conservan operationId, hash, payload y revisión base. Los reintentos usan backoff exponencial con jitter, límite de cinco minutos y respetan Retry-After hasta 24 horas.
+- La base IndexedDB avanza a versión 2 sin eliminar operaciones existentes. Se añade nextAttemptAt; las operaciones sending con lease vencido vuelven a pending con espera de recuperación.
+- Los ACK locales solo se eliminan tras recibir la respuesta confirmada del endpoint transaccional. Los 409/errores de identidad quedan como conflicto; los errores semánticos quedan como fallo que requiere intervención.
+- La UI de rondas muestra el número de operaciones pendientes, en curso, en conflicto y fallidas. Una sesión caducada pausa el worker y solicita volver a iniciar sesión.
+- Las operaciones cuyo adaptador aún no existe permanecen en cola y se pausan; no se envían a endpoints genéricos ni se marcan falsamente como sincronizadas.
+
+**Alcance todavía no cerrado de F3:** el worker actual despacha únicamente publish-round, que es la única operación push con endpoint transaccional implementado en esta fase. El pull incremental/reconciliación por remoteRevision con diff persistente de entidades compartidas y resolución interactiva de conflictos entre cambios locales y remotos sigue pendiente. La lectura periódica actual del gestor no equivale a ese protocolo. Por ello F3 no debe marcarse como completa ni la PR pasar a ready hasta implementar y probar ese pull, además de una prueba real multi-dispositivo/reload con IndexedDB y backend de pruebas.
