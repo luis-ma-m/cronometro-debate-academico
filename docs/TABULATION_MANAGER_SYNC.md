@@ -735,3 +735,31 @@ Se añade un worker de sincronización para las operaciones que ya tienen un flu
 - Las operaciones cuyo adaptador aún no existe permanecen en cola y se pausan; no se envían a endpoints genéricos ni se marcan falsamente como sincronizadas.
 
 **Alcance todavía no cerrado de F3:** el worker actual despacha únicamente publish-round, que es la única operación push con endpoint transaccional implementado en esta fase. El pull incremental/reconciliación por remoteRevision con diff persistente de entidades compartidas y resolución interactiva de conflictos entre cambios locales y remotos sigue pendiente. La lectura periódica actual del gestor no equivale a ese protocolo. Por ello F3 no debe marcarse como completa ni la PR pasar a ready hasta implementar y probar ese pull, además de una prueba real multi-dispositivo/reload con IndexedDB y backend de pruebas.
+
+
+---
+
+## 16. Estado de implementación de F3 y definición ejecutable de F4
+
+### F3 — Reconciliación y offline
+
+El worker de outbox implementa push automático de `publish-round`, leases, reintentos con backoff y recuperación de operaciones pendientes. Esto no cierra F3.
+
+Se ha añadido `src/tabulation/reconciliation.ts` como primer bloque de dominio para comparar tres versiones: último snapshot remoto confirmado, estado local y snapshot remoto nuevo. Clasifica cambios independientes, conflictos simultáneos, altas remotas y cambios que requieren revisión histórica. Su contrato está cubierto por `src/tabulation/reconciliation.test.ts`.
+
+**Limitación actual:** este comparador todavía no está conectado al ciclo de vida de Tabulación. No existe aún una base snapshot remota persistida por torneo, un pull autenticado periódico/por foco ni una interfaz que permita aceptar/rechazar cada cambio y resolver conflictos conservando ambas versiones. Tampoco hay prueba multi-dispositivo contra Neon. Por tanto, F3 permanece abierta y no debe marcarse como completada.
+
+Orden restante de F3:
+1. Persistir el último snapshot remoto confirmado junto al vínculo, con revisión y hash.
+2. Implementar pull autenticado incremental usando la sesión del operador; nunca usar un handoff de localStorage como sustituto del transporte entre dispositivos.
+3. Comparar base/local/remoto mediante el módulo de reconciliación.
+4. Aplicar automáticamente solo cambios compatibles y no históricos; exigir revisión para cambios históricos y decisión para conflictos.
+5. Guardar las dos propuestas y la decisión del operador en el log local; actualizar la base solo después de aplicar/aceptar la revisión remota.
+6. Reanudar push únicamente cuando dependencias y revisión base estén confirmadas.
+7. Probar dos dispositivos, recarga, cierre/reapertura, timeout ambiguo, migración IndexedDB 1→2 y recuperación real con Neon Preview.
+
+### F4 — Actas oficiales
+
+El diseño ejecutable de F4 está desarrollado en [`docs/TABULATION_MANAGER_F4_ACTAS_IMPLEMENTATION.md`](./TABULATION_MANAGER_F4_ACTAS_IMPLEMENTATION.md). Establece almacenamiento fuente inmutable y contratos distintos para papeletas por juez, acta conjunta y eliminatorias; define primer guardado, diff/confirmación de sustitución, idempotencia, concurrencia, auditoría, contador y pruebas.
+
+F4 depende de F3: no habilitar escrituras oficiales de actas hasta disponer de revisión remota fiable y resolución de conflictos. El documento de decisiones funcionales sigue siendo vinculante en caso de discrepancia.
