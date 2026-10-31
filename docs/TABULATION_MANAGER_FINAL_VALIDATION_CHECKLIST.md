@@ -136,3 +136,35 @@ Completar en cada ejecución:
 - [ ] Probar en Neon Preview rollback, concurrencia, contador de reescrituras y pérdida de respuesta con recuperación por operationId.
 
 - [ ] Verificar que el torneo, ronda y debate locales del acta coinciden con la identidad persistida para el assignmentId.
+
+## Actualización de implementación — iteración 2026-10-31
+
+HEAD revisado: `cb5448b4e94fe2405da53133f7c36105b23d5ded`.
+
+### Estado de los cinco puntos solicitados
+
+1. **Persistencia de reglas — implementada en código.** El editor vive en Gestor → Configuración, usa las acciones versionadas de lectura/guardado y la migración de reglas. La validación de persistencia contra PostgreSQL/Neon real sigue pendiente; no se considera verificada por el build ni por los tests de validación.
+
+2. **Clasificación en Gestor → Torneo — integrada.** Cuando existe una Tabulación local vinculada al mismo `remoteId`, el gestor lee esa copia por identidad canónica y utiliza `buildTeamStandings`, `buildGroupStandings` y `buildSpeakerStandings`. Conserva los cinco primeros y «Ver más», desempates, grupos, métrica de oradores y ocultación de la clasificación a ciegas hasta completar la fase. Se refresca al recibir cambios de almacenamiento entre pestañas. Si no existe una copia local vinculada, se mantiene el ranking de scorecards del Gestor como fallback. **Límite explícito:** esta proyección depende de que la copia local de Tabulación esté disponible en ese mismo navegador; no es todavía una proyección remota compartida entre dispositivos.
+
+3. **Conversión de actas — implementada en código; validación real pendiente.** El flujo conserva fuentes `judges`, `joint` y `elimination`, hace preview no mutante, valida contexto autoritativo y guarda versiones con revisión optimista, idempotencia, auditoría e historial. La prueba contra PostgreSQL/Neon real de migraciones, concurrencia, rollback, timeout tras commit y los tres modos sigue pendiente.
+
+4. **Reconciliación de entidades — implementada en código.** Tabulación consulta el Gestor autenticado, compara revisiones con base de tres vías, aplica automáticamente cambios compatibles y conserva para revisión los conflictos o cambios que afectan al histórico. La resolución explícita crea copia previa y solo avanza la base después de guardar localmente. La validación multi-dispositivo real sigue pendiente.
+
+5. **Cola offline y conflictos — implementada parcialmente por tipo de operación.** IndexedDB conserva las publicaciones de rondas, leases, recuperación de operaciones interrumpidas y estados de conflicto/error; las actas oficiales mantienen una operación local persistida con el mismo `operationId` para recuperar timeouts y reconexiones. El worker no confirma tipos sin adaptador y los deja pausados; actualmente el flujo de outbox conectado es la publicación de rondas, no un dispatcher genérico para cualquier tipo futuro. La validación real de reconexión multi-dispositivo sigue pendiente.
+
+### Evidencia de esta iteración
+
+- GitHub Actions run [41240608593](https://github.com/luis-ma-m/cronometro-debate-academico/actions/runs/41240608593): `verify` y `e2e` completados con `success`. `verify` incluye cobertura, `typecheck:api` y build; E2E ejecuta Playwright.
+- Vercel Preview del HEAD: [deployment](https://vercel.com/luismarmai-5333/cronometro-debate-academico/3J6RvXbSBhCpRvwVEMPaHnyTRxCH) — `READY`, commit `cb5448b`.
+- El primer deployment de esta iteración falló por una variable TypeScript sin uso en el nuevo componente; se corrigió antes del deployment `READY`.
+- Consumo de deployments de esta iteración: **2 de 4**.
+- No se han aplicado migraciones ni ejecutado escrituras de integración en Neon Production. La validación de base de datos queda bloqueada hasta disponer de una conexión Preview aislada y verificable; un build Preview correcto no demuestra persistencia transaccional.
+
+### Bloqueos que impiden cerrar la PR
+
+- Aplicar y verificar migraciones 0010–0020 en una base Neon Preview aislada.
+- Ejecutar pruebas reales de reglas, actas (los tres modos), idempotencia, concurrencia, rollback y recuperación tras timeout.
+- Probar vínculo, reconciliación, publicación y recuperación offline con dos dispositivos/perfiles de navegador.
+- Decidir si la clasificación de Torneo debe ser visible también en dispositivos que no tengan la copia local de Tabulación; para ello hace falta una proyección remota calculada desde datos fuente persistidos, no guardar un ranking derivado como nueva fuente de verdad.
+- Mantener PR #79 en Draft hasta completar las pruebas anteriores.
