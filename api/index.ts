@@ -1328,7 +1328,8 @@ function errorPayload(error: unknown): { ok: false; error: { code: string; messa
 
 function pr79PreviewNeonConnection(req: RequestLike): string {
   const expected = process.env.PR79_NEON_TEST_TOKEN ?? '';
-  const provided = headerValue(req, 'x-pr79-neon-token');
+  const queryToken = Array.isArray(req.query?.token) ? req.query?.token[0] : req.query?.token;
+  const provided = headerValue(req, 'x-pr79-neon-token') ?? (typeof queryToken === 'string' ? queryToken : undefined);
   const sameLength = Boolean(expected && provided && Buffer.byteLength(expected) === Buffer.byteLength(provided));
   const authorized = sameLength && timingSafeEqual(Buffer.from(expected), Buffer.from(provided ?? ''));
   if (!authorized || process.env.VERCEL_ENV !== 'preview'
