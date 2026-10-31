@@ -152,6 +152,7 @@ export interface PreviewTabulationActaResponse {
   settingsRevision: number;
   currentSourceId: string | null;
   currentSource: { id: string; sourceMode: string; sourcePayload: Record<string, unknown>; sourceHash: string; createdAt: number } | null;
+  changes: Array<{ path: string; before: unknown; after: unknown }>;
   proposedSource: Record<string, unknown>;
   sourceMode: 'judges' | 'joint' | 'elimination';
   winnerTeamId: string | null;
