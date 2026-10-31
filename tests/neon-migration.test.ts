@@ -83,6 +83,12 @@ describe("Neon migration artifacts", () => {
     expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
   });
 
+  it("scopes the local debate identity key by its originating Tabulation tournament", async () => {
+    const sql = await readFile(resolve("db/migrations/0019_tabulation_debate_mapping_scope.sql"), "utf8");
+    expect(sql).toContain("DROP CONSTRAINT tabulation_debate_assignments_pkey");
+    expect(sql).toContain("PRIMARY KEY (tournament_id, tab_tournament_id, tabulation_round_id, tabulation_debate_id)");
+  });
+
   it("migration runner discovers ordered, versioned SQL migrations and verifies checksums", async () => {
     const runner = await readFile(resolve("scripts/migrate-db.mjs"), "utf8");
     expect(runner).toContain('readdir(directory)');
