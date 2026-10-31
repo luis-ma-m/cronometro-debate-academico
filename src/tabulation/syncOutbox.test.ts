@@ -20,7 +20,7 @@ class MemoryOutboxRepository implements SyncOutboxRepository {
   }
   async claimNext(tournamentId: string, workerId: string, now: number, leaseMs: number) {
     const oldest = (await this.list(tournamentId))[0];
-    if (!oldest || oldest.status !== 'pending') return null;
+    if (!oldest || oldest.status !== 'pending' || (oldest.nextAttemptAt ?? 0) > now) return null;
     const claimed: PendingSyncOperation = {
       ...oldest, status: 'sending', attempts: oldest.attempts + 1,
       workerId, lastAttemptAt: now, leaseUntil: now + leaseMs,
@@ -28,10 +28,10 @@ class MemoryOutboxRepository implements SyncOutboxRepository {
     this.rows.set(claimed.operationId, claimed);
     return structuredClone(claimed);
   }
-  async transition(id: string, workerId: string, status: 'pending' | 'conflict' | 'failed', error?: { code: string; message: string }) {
+  async transition(id: string, workerId: string, status: 'pending' | 'conflict' | 'failed', error?: { code: string; message: string }, nextAttemptAt?: number) {
     const row = this.rows.get(id);
     if (!row || row.status !== 'sending' || row.workerId !== workerId) return false;
-    this.rows.set(id, { ...row, status, lastError: error, workerId: undefined, leaseUntil: undefined });
+    this.rows.set(id, { ...row, status, lastError: error, workerId: undefined, leaseUntil: undefined, nextAttemptAt: status === 'pending' ? nextAttemptAt : undefined });
     return true;
   }
   async acknowledge(id: string, workerId: string) {
@@ -44,7 +44,7 @@ class MemoryOutboxRepository implements SyncOutboxRepository {
     let recovered = 0;
     for (const [id, row] of this.rows) {
       if (row.status === 'sending' && (row.leaseUntil ?? 0) <= now) {
-        this.rows.set(id, { ...row, status: 'pending', workerId: undefined, leaseUntil: undefined });
+        this.rows.set(id, { ...row, status: 'pending', workerId: undefined, leaseUntil: undefined, nextAttemptAt: now + 2_000 });
         recovered++;
       }
     }
@@ -95,13 +95,16 @@ describe('durable sync outbox contract', () => {
 
   it('retries with the same operation id and deletes only after confirmed acknowledgement', async () => {
     const repository = new MemoryOutboxRepository();
-    const outbox = createSyncOutbox(repository, { now: () => 300, createOperationId: () => 'stable-op' });
+    let now = 300;
+    const outbox = createSyncOutbox(repository, { now: () => now, random: () => 0.5, createOperationId: () => 'stable-op' });
     const { operation } = await outbox.enqueue({ tournamentId: 't1', entityType: 'settings', entityId: 'settings', operation: 'settings', baseRevision: 2, payload: { rules: 1 } });
     const claimed = await outbox.claimNext('t1', 'worker');
     expect(claimed?.operationId).toBe(operation.operationId);
     expect(await outbox.retry(operation.operationId, 'wrong-worker')).toBe(false);
     expect(await outbox.retry(operation.operationId, 'worker', { code: 'NETWORK', message: 'Timeout ambiguo.' })).toBe(true);
-    expect((await outbox.list('t1'))[0]).toMatchObject({ operationId: 'stable-op', status: 'pending', attempts: 1 });
+    expect((await outbox.list('t1'))[0]).toMatchObject({ operationId: 'stable-op', status: 'pending', attempts: 1, nextAttemptAt: 2_300 });
+    expect(await outbox.claimNext('t1', 'worker')).toBeNull();
+    now = 2_300;
     expect((await outbox.claimNext('t1', 'worker'))?.operationId).toBe('stable-op');
     expect(await outbox.acknowledge('stable-op', 'worker')).toBe(true);
     expect(await outbox.list('t1')).toEqual([]);
@@ -116,7 +119,7 @@ describe('durable sync outbox contract', () => {
     expect(await outbox.recoverExpiredLeases()).toBe(0);
     now = 1100;
     expect(await outbox.recoverExpiredLeases()).toBe(1);
-    expect((await outbox.list('t1'))[0].status).toBe('pending');
+    expect((await outbox.list('t1'))[0]).toMatchObject({ status: 'pending', nextAttemptAt: 3_100 });
   });
 
   it('rejects invalid revisions and unserializable or oversized payloads', async () => {
