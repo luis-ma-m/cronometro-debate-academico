@@ -388,6 +388,7 @@ describe('Tabulation publication acknowledgements', () => {
       tabulationRoundId: 'tab-round-1',
       managerRoundId: 'manager-round-1',
       revision: 8,
+      updatedAt: now + 1,
       debateAssignments: [{ tabulationDebateId: 'tab-debate-1', assignmentId: '00000000-0000-4000-8000-000000000001' }],
     };
     appendPanelPublishAcknowledgement(storage, acknowledgement);
