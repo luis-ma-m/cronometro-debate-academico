@@ -163,6 +163,7 @@ export interface PublishedTabulationRound {
   roundName: string;
   roundKind: 'qualifying' | 'elimination';
   assignmentIds: string[];
+  debateAssignments: Array<{ tabulationDebateId: string; assignmentId: string }>;
   revision: number;
   operationId: string;
 }
