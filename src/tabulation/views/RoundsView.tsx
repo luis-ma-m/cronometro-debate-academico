@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { Check, ClipboardList, Copy, Dices, Download, FileText, Gavel, MessageCircle, MonitorPlay, MoreHorizontal, Projector, RotateCcw, Search, Send, Shuffle, Sparkles, Star, Trash2, Trophy, Undo2, X } from 'lucide-react';
 import { allocateJudgesForRound, judgesConflict, teamConflicts, type RoundProblem } from '../adjudication';
 import { computeBreak, tournamentChampion } from '../bracket';
@@ -12,6 +12,7 @@ import type { LogInput } from '../log';
 import { drawSides, fallenTeamIds } from '../pairing';
 import { buildOutbox, writeOutbox } from '../panelBridge';
 import { hashSeed, randomSeed } from '../random';
+import { cyrb53 } from '../hash';
 import { roundIsComplete, type DebateOutcome } from '../results';
 import { roundPdf } from '../roundPdf';
 import { buildRoundZip } from '../roundZip';
@@ -19,6 +20,7 @@ import { simulateRoundResults } from '../sample';
 import { eliminationRounds, qualifyingRounds, type TabDebate, type TabJudge, type TabRound, type TabRoundDraft, type TabTournament } from '../types';
 import { copyText, downloadBytes, Empty, IssueList, lookups, Notice, STATUS_LABELS, type ViewProps } from '../ui';
 import { actaLinkMessage, buildActaLink, whatsAppNumber, whatsAppUrl } from '../whatsapp';
+import { createActaShortLink, listActaShortLinks, revokeActaShortLinks, updateActaShortLinkExpiry, type ActaShortLink } from '../../api';
 
 const DRAFT_TAB = '__borrador__';
 type Look = ReturnType<typeof lookups>;
@@ -37,7 +39,7 @@ function seedFrom(text: string): number {
   return /^\d{1,9}$/.test(trimmed) ? Number(trimmed) : hashSeed(trimmed);
 }
 
-export function RoundsView({ tournament, outcomes, update, notify, store, projection, onProject, onNavigate }: ViewProps & {
+export function RoundsView({ tournament, outcomes, update, notify, store, projection, onProject, onNavigate, managerSessionToken }: ViewProps & {
   projection: boolean;
   onProject: () => void;
   onNavigate: (view: string) => void;
@@ -348,7 +350,7 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
             }}
             onZip={() => exportZip(round.id, false)} onPdf={() => exportPdf(round)} onScreen={() => setScreenId(round.id)} onAudit={() => audit(round)}
             onReopen={() => reopen(round)} onRemove={() => removeRound(round)} onSend={() => sendToPanel(round)} onOpenBallots={() => onNavigate('actas')}
-            whatsapp={tournament.settings.ballotMode === 'joint' ? <WhatsAppLinks tournament={tournament} round={round} notify={notify} onSent={(message) => store.log({ type: 'acta.link', message })} /> : null}
+            whatsapp={tournament.settings.ballotMode === 'joint' ? <WhatsAppLinks tournament={tournament} round={round} notify={notify} managerSessionToken={managerSessionToken} onSent={(message) => store.log({ type: 'acta.link', message })} /> : null}
             onSimulate={tournament.sample ? () => {
               const result = simulateRoundResults(tournament, round.id);
               update(() => result.tournament, { type: 'acta.save', message: 'Resultados simulados de ' + round.name + ' (torneo de ejemplo).' });
@@ -584,11 +586,20 @@ function DebateTable({ tournament, round, problems, look, outcomes, onEdit }: {
   </div>;
 }
 
-/** Links for the chairs: each one opens the acta of its debate on the phone, to be sent back by WhatsApp. */
-function WhatsAppLinks({ tournament, round, notify, onSent }: { tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void }) {
+/** Short links are the online default; the compact A2 snapshot is the offline fallback. */
+function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken }: {
+  tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void; managerSessionToken?: string;
+}) {
   const baseUrl = (tournament.whatsapp?.baseUrl.trim() || window.location.origin).replace(/\/+$/, '');
   const unreachable = /^https?:\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[)/.test(baseUrl);
   const desk = whatsAppNumber(tournament.whatsapp?.deskPhone ?? '');
+  const [expiryDays, setExpiryDays] = useState(30);
+  const [links, setLinks] = useState<ActaShortLink[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [expiryDrafts, setExpiryDrafts] = useState<Record<string, number>>({});
+  const [busy, setBusy] = useState(false);
+  const [fallbackKeys, setFallbackKeys] = useState<Record<string, string>>({});
+  const [refreshError, setRefreshError] = useState('');
   const rows = useMemo(() => {
     const fallen = fallenTeamIds(tournament.teams, round.number);
     const judges = new Map(tournament.judges.map((judge) => [judge.id, judge]));
@@ -596,31 +607,151 @@ function WhatsAppLinks({ tournament, round, notify, onSent }: { tournament: TabT
       const { url, link } = buildActaLink(tournament, round, debate, baseUrl);
       const phone = whatsAppNumber(judges.get(debate.chairId)?.phone ?? '');
       const label = (link.venue || 'Debate') + ' (' + link.teams.map((team) => team.name).join(' – ') + ')';
-      return { debate, url, link, phone, label, href: whatsAppUrl(phone, actaLinkMessage(link, url)) };
+      return { debate, fallbackUrl: url, link, phone, label };
     });
   }, [tournament, round, baseUrl]);
-  const groupMessage = 'Actas de ' + round.name + ' · ' + tournament.name + '. Cada juez principal abre el enlace de su sala, rellena el acta y la envía por WhatsApp a la mesa:\n\n'
-    + rows.map((row) => row.label + (row.link.jury[0] ? ' · ' + row.link.jury[0] : '') + '\n' + row.url).join('\n\n');
+  const refreshLinks = async () => {
+    if (!managerSessionToken) return;
+    try { setLinks(await listActaShortLinks(managerSessionToken, tournament.id)); setRefreshError(''); }
+    catch (error) { setRefreshError(errorText(error)); }
+  };
+  useEffect(() => { void refreshLinks(); }, [managerSessionToken, tournament.id]);
+  const getUrl = async (row: typeof rows[number]): Promise<{ url: string; online: boolean }> => {
+    if (!managerSessionToken || unreachable) return { url: row.fallbackUrl, online: false };
+    const snapshotKey = cyrb53(JSON.stringify(row.link));
+    const keyName = 'acta-short-link-idem:' + tournament.id + ':' + row.debate.id + ':' + snapshotKey;
+    const getKey = () => {
+      let key = fallbackKeys[keyName] ?? '';
+      try { key = window.localStorage.getItem(keyName) ?? key; } catch { /* storage may be disabled */ }
+      if (!key) key = 'acta_' + snapshotKey + '_' + row.link.debate;
+      try { window.localStorage.setItem(keyName, key); } catch { /* deterministic key still makes retries idempotent */ }
+      return key;
+    };
+    try {
+      let result = await createActaShortLink(managerSessionToken, tournament.id, row.debate.id, row.link, expiryDays, getKey());
+      if (result.revokedAt || (result.expiresAt !== null && result.expiresAt <= Date.now())) {
+        const rotated = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'retry_' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+        setFallbackKeys((current) => ({ ...current, [keyName]: rotated }));
+        try { window.localStorage.setItem(keyName, rotated); } catch { /* in-memory key remains stable for this tab */ }
+        result = await createActaShortLink(managerSessionToken, tournament.id, row.debate.id, row.link, expiryDays, rotated);
+      }
+      setLinks((current) => [result, ...current.filter((item) => item.id !== result.id)]);
+      return { url: baseUrl + '/acta#S8-' + result.id, online: true };
+    } catch (error) {
+      notify('No se pudo crear el enlace corto (' + errorText(error) + '). Se utilizará A2 autocontenido, que no necesita backend para abrirse.', 'warning');
+      return { url: row.fallbackUrl, online: false };
+    }
+  };
+  const openWhatsApp = async (row: typeof rows[number]) => {
+    const popup = window.open('about:blank', '_blank');
+    const target = await getUrl(row);
+    const message = actaLinkMessage(row.link, target.url);
+    const href = whatsAppUrl(row.phone, message);
+    if (popup) popup.location.href = href;
+    else { notify('El navegador ha bloqueado WhatsApp. Se ha copiado el mensaje si el portapapeles está disponible.', 'warning'); await copyText(message); }
+    onSent(round.name + ' · enlace ' + (target.online ? 'corto' : 'A2 offline') + ' del acta de ' + row.label + ' preparado para WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.');
+    if (target.online) void refreshLinks();
+  };
+  const openActa = async (row: typeof rows[number]) => {
+    const popup = window.open('about:blank', '_blank');
+    const target = await getUrl(row);
+    if (popup) popup.location.href = target.url;
+    else window.location.href = target.url;
+    if (target.online) void refreshLinks();
+  };
+  const copyGroup = async () => {
+    setBusy(true);
+    try {
+      const generated = await Promise.all(rows.map(async (row) => {
+        const target = await getUrl(row);
+        return row.label + (row.link.jury[0] ? ' · ' + row.link.jury[0] : '') + '\n' + target.url;
+      }));
+      const message = 'Actas de ' + round.name + ' · ' + tournament.name + '. Cada juez principal abre el enlace de su sala, rellena el acta y la envía por WhatsApp a la mesa:\n\n' + generated.join('\n\n');
+      const copied = await copyText(message);
+      notify(copied ? 'Enlaces copiados: enlaces cortos cuando el backend responde y A2 solo como contingencia.' : 'No se han podido copiar los enlaces.', copied ? 'success' : 'error');
+      if (managerSessionToken) void refreshLinks();
+    } finally { setBusy(false); }
+  };
+  const revoke = async (ids: string[], all = false) => {
+    const affectedCount = all ? revocableLinks.length : ids.length;
+    if (!managerSessionToken || !window.confirm(all
+      ? '¿Revocar todos los enlaces de este torneo? Se revocarán ' + affectedCount + ' enlaces. Las actas fuente no se eliminarán.'
+      : '¿Revocar ' + affectedCount + ' enlace(s)? Las actas fuente no se eliminarán.')) return;
+    setBusy(true);
+    try {
+      const result = await revokeActaShortLinks(managerSessionToken, tournament.id, ids, all, 'Revocado desde la gestión de enlaces de WhatsApp');
+      const affected = links.filter((item) => result.ids.includes(item.id));
+      for (const item of affected) {
+        const row = rows.find((candidate) => candidate.debate.id === item.debateId);
+        if (row) {
+          const keyName = 'acta-short-link-idem:' + tournament.id + ':' + row.debate.id + ':' + cyrb53(JSON.stringify(row.link));
+          const rotated = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'retry_' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+          setFallbackKeys((current) => ({ ...current, [keyName]: rotated }));
+          try { window.localStorage.setItem(keyName, rotated); } catch { /* in-memory key remains stable for this tab */ }
+        }
+      }
+      setSelectedIds([]);
+      notify('Se han revocado ' + result.revoked + ' enlace(s). Los enlaces ya enviados dejarán de resolverse.', 'success');
+      await refreshLinks();
+    } catch (error) { notify('No se pudieron revocar los enlaces: ' + errorText(error), 'error'); }
+    finally { setBusy(false); }
+  };
+  const updateExpiry = async (item: ActaShortLink) => {
+    if (!managerSessionToken) return;
+    setBusy(true);
+    try {
+      await updateActaShortLinkExpiry(managerSessionToken, tournament.id, item.id, expiryDrafts[item.id] ?? 30);
+      notify('Caducidad actualizada para ' + item.id + '.', 'success');
+      await refreshLinks();
+    } catch (error) { notify('No se pudo actualizar la caducidad: ' + errorText(error), 'error'); }
+    finally { setBusy(false); }
+  };
+  const revocableLinks = links.filter((item) => !item.revokedAt);
   return <details className="tab-whatsapp tab-no-project">
-    <summary><MessageCircle size={16} /> Actas por WhatsApp</summary>
-    {unreachable && <Notice kind="warning">Los móviles no pueden abrir {baseUrl}: usa la tabulación publicada o escribe la dirección pública en Reglas → «Actas por WhatsApp».</Notice>}
-    <p className="muted">Envía a cada juez principal el enlace de su sala. Rellenará el acta en el móvil y la mandará por WhatsApp {desk ? 'al +' + desk : 'al chat que elija (escribe el móvil de la mesa en Reglas)'}; después pega los mensajes en Actas → «Actas recibidas por WhatsApp».</p>
+    <summary><MessageCircle size={16} /> Actas por WhatsApp · enlaces cortos de 8 caracteres</summary>
+    {unreachable && <Notice kind="warning">Los móviles no pueden abrir {baseUrl}: configura una dirección pública.</Notice>}
+    <p className="muted">Con backend y sesión activa se crea un enlace corto de ocho caracteres que guarda el snapshot completo en Neon. Si no hay conexión, se genera el formato A2 autocontenido. Los enlaces cortos necesitan backend para resolverse; A2 puede abrirse sin conexión.</p>
+    <label className="tab-field"><span>Caducidad de los nuevos enlaces</span><select value={expiryDays} onChange={(event) => setExpiryDays(Number(event.target.value))}><option value={1}>1 día</option><option value={7}>7 días</option><option value={30}>30 días</option><option value={90}>90 días</option><option value={365}>365 días</option></select></label>
+    {!managerSessionToken && <Notice kind="info">Inicia sesión en el panel de organización para crear y administrar enlaces cortos. Mientras tanto se utilizará A2 offline.</Notice>}
+    {refreshError && <Notice kind="warning">No se ha podido cargar el inventario de enlaces: {refreshError}</Notice>}
     <div className="tournament-table-wrap"><table>
       <thead><tr><th>Sala</th><th>Debate</th><th>Juez principal</th><th>Enlace</th></tr></thead>
       <tbody>{rows.map((row) => <tr key={row.debate.id}>
-        <td>{row.link.venue || '—'}</td>
-        <td>{row.link.teams[0].name} – {row.link.teams[1].name}</td>
+        <td>{row.link.venue || '—'}</td><td>{row.link.teams[0].name} – {row.link.teams[1].name}</td>
         <td>{row.link.jury[0] ?? 'sin juez'}<small className="tab-cell-sub">{row.phone ? '+' + row.phone : 'sin móvil: WhatsApp pedirá el chat'}</small></td>
         <td className="tab-whatsapp-actions">
-          <a className="button secondary" href={row.href} target="_blank" rel="noreferrer" aria-label={'Enviar el enlace de ' + row.label}
-            onClick={() => onSent(round.name + ' · enlace del acta de ' + row.label + ' enviado por WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.')}><Send size={14} /> Enviar enlace</a>
-          <a className="text-button" href={row.url} target="_blank" rel="noreferrer" aria-label={'Abrir el acta de ' + row.label}>Abrir el acta</a>
+          <button type="button" className="button secondary" disabled={busy} onClick={() => void openWhatsApp(row)}><Send size={14} /> Enviar enlace</button>
+          <button type="button" className="text-button" disabled={busy} onClick={() => void openActa(row)}>Abrir el acta</button>
         </td>
       </tr>)}</tbody>
     </table></div>
-    <button type="button" className="button ghost" onClick={() => void copyText(groupMessage).then((copied) => notify(copied ? 'Enlaces copiados: pégalos en el grupo de WhatsApp de los jueces.' : 'No se han podido copiar: usa «Enviar enlace» en cada sala.', copied ? 'success' : 'error'))}>
-      <Copy size={16} /> Copiar todos los enlaces para el grupo de jueces
-    </button>
+    <button type="button" className="button ghost" disabled={busy} onClick={() => void copyGroup()}><Copy size={16} /> Copiar todos los enlaces para el grupo de jueces</button>
+    {managerSessionToken && <section className="tab-panel" aria-label="Gestión de enlaces cortos">
+      <h4>Enlaces cortos de este torneo ({links.length})</h4>
+      <p className="muted">La revocación impide nuevas consultas del enlace, pero no elimina las actas ni los mensajes ya recibidos.</p>
+      <div className="tab-actions">
+        <button type="button" className="button secondary" disabled={busy || !selectedIds.length} onClick={() => void revoke(selectedIds)}>Revocar seleccionados ({selectedIds.length})</button>
+        <button type="button" className="button ghost danger-action" disabled={busy || !revocableLinks.length} onClick={() => void revoke([], true)}>Revocar todos los enlaces no revocados</button>
+      </div>
+      {links.length === 0 ? <p className="muted">Todavía no se han creado enlaces cortos.</p> : <ul className="tab-list">
+        {links.map((item) => {
+          const expired = item.expiresAt !== null && item.expiresAt <= Date.now();
+          const revoked = Boolean(item.revokedAt);
+          return <li key={item.id}>
+            <label><input type="checkbox" checked={selectedIds.includes(item.id)} disabled={revoked} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /> <code>{item.id}</code> · {item.debateId}</label>
+            <small>{revoked ? 'Revocado' : expired ? 'Caducado' : 'Activo'} · caduca {item.expiresAt ? new Date(item.expiresAt).toLocaleString('es-ES') : 'nunca'}</small>
+            {item.events?.length ? <details><summary>Historial ({item.events.length})</summary><ul>{item.events.map((event, index) => <li key={index}>{event.eventType === 'created' ? 'Creado' : event.eventType === 'expiry_updated' ? 'Caducidad modificada' : 'Revocado'} · {new Date(event.occurredAt).toLocaleString('es-ES')} · {event.actor}{typeof event.details?.reason === 'string' ? ' · ' + event.details.reason : ''}</li>)}</ul></details> : null}
+            {!revoked && <div className="tab-actions">
+              <select aria-label={'Nueva caducidad para ' + item.id} value={expiryDrafts[item.id] ?? ''} onChange={(event) => setExpiryDrafts((current) => ({ ...current, [item.id]: Number(event.target.value) }))}>
+                <option value="" disabled>Selecciona caducidad</option><option value={1}>1 día</option><option value={7}>7 días</option><option value={30}>30 días</option><option value={90}>90 días</option><option value={365}>365 días</option>
+              </select>
+              <button type="button" className="text-button" disabled={busy || expiryDrafts[item.id] === undefined} onClick={() => void updateExpiry(item)}>Actualizar caducidad</button>
+              <button type="button" className="text-button danger-action" disabled={busy} onClick={() => void revoke([item.id])}>Revocar</button>
+            </div>}
+          </li>;
+        })}
+      </ul>}
+    </section>}
   </details>;
 }
 

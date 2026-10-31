@@ -355,6 +355,10 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "getTournament":
       await requireSession(payload.token);
       return tournamentFromData(await loadSheetData());
+    case "createActaShortLink": await requireSession(payload.token); return createActaShortLink(payload);
+    case "listActaShortLinks": await requireSession(payload.token); return listActaShortLinks(payload);
+    case "updateActaShortLinkExpiry": await requireSession(payload.token); return updateActaShortLinkExpiry(payload);
+    case "revokeActaShortLinks": await requireSession(payload.token); return revokeActaShortLinks(payload);
     case "getTabulationSettings":
       await requireSession(payload.token);
       return getTabulationSettings();
@@ -1257,6 +1261,47 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
 }
 
 
+
+type ShortLinkRow = { id:string; tournament_id:string; debate_id:string; snapshot:unknown; snapshot_sha256:string; expires_at:Date|string|null; revoked_at:Date|string|null; created_at:Date|string };
+function canonicalShortLinkJson(value:unknown):string {
+  if(Array.isArray(value)) return "["+value.map(canonicalShortLinkJson).join(",")+"]";
+  if(value && typeof value==="object"){const r=value as Record<string,unknown>;return "{"+Object.keys(r).sort().map(k=>JSON.stringify(k)+":"+canonicalShortLinkJson(r[k])).join(",")+"}";}
+  return JSON.stringify(value) ?? "null";
+}
+function validActaSnapshot(value:unknown):value is Record<string,unknown>{
+  if(!value||typeof value!=="object"||Array.isArray(value))return false;
+  const v=value as Record<string,unknown>, round=v.round as Record<string,unknown>|undefined, rules=v.rules as Record<string,unknown>|undefined;
+  return (v.version===1||v.version===2)&&typeof v.debate==="string"&&v.debate.length>0&&v.debate.length<=200
+    &&typeof v.key==="string"&&v.key.length>0&&v.key.length<=100&&!!round&&Number.isInteger(round.number)
+    &&typeof round.name==="string"&&typeof round.elimination==="boolean"&&Array.isArray(v.teams)&&v.teams.length===2
+    &&v.teams.every(t=>!!t&&typeof t==="object"&&typeof (t as Record<string,unknown>).id==="string"&&typeof (t as Record<string,unknown>).name==="string"&&Array.isArray((t as Record<string,unknown>).members))
+    &&Array.isArray(v.jury)&&v.jury.length<=20&&v.jury.every(n=>typeof n==="string")&&!!rules&&Array.isArray(rules.rubric)&&rules.rubric.length<=100
+    &&typeof v.venue==="string"&&typeof v.desk==="string";
+}
+function shortLinkId():string{const a="0123456789ABCDEFGHJKMNPQRSTVWXYZ";let n=0n;for(const b of randomBytes(5))n=(n<<8n)|BigInt(b);let s="";for(let i=0;i<8;i++){s=a[Number(n&31n)]+s;n>>=5n;}return s;}
+function expiryDate(value:unknown):Date{const d=Number(value);if(![1,7,30,90,365].includes(d))throw new ApiError("INVALID_EXPIRY","Elige una caducidad de 1, 7, 30, 90 o 365 días.");return new Date(Date.now()+d*86400000);}
+function shortLinkPublic(r:ShortLinkRow){return{id:r.id,tournamentId:r.tournament_id,debateId:r.debate_id,createdAt:new Date(r.created_at).getTime(),expiresAt:r.expires_at?new Date(r.expires_at).getTime():null,revokedAt:r.revoked_at?new Date(r.revoked_at).getTime():null};}
+async function createActaShortLink(p:Record<string,unknown>):Promise<unknown>{
+ const tournamentId=str(p.tournamentId).trim(),debateId=str(p.debateId).trim(),snapshot=p.snapshot;
+ if(!/^[a-zA-Z0-9_-]{1,128}$/.test(tournamentId)||!/^[a-zA-Z0-9_-]{1,200}$/.test(debateId)||!validActaSnapshot(snapshot))throw new ApiError("INVALID_SHORT_LINK","El snapshot del acta no es válido.");
+ const json=canonicalShortLinkJson(snapshot);if(new TextEncoder().encode(json).byteLength>32768)throw new ApiError("SHORT_LINK_TOO_LARGE","El acta supera el tamaño máximo permitido.");
+ const rawIdem=str(p.idempotencyKey).trim();if(!/^[a-zA-Z0-9_-]{8,128}$/.test(rawIdem))throw new ApiError("INVALID_IDEMPOTENCY_KEY","Clave de idempotencia no válida.");const hash=sha256(json),idem=sha256("acta-short-link:v1|"+tournamentId+"|"+debateId+"|"+rawIdem),expires=expiryDate(p.expiryDays??30),client=await getPool().connect();
+ try{
+  await client.query("BEGIN");
+  const prior=await client.query("SELECT * FROM acta_short_links WHERE tournament_id=$1 AND idempotency_key=$2 FOR UPDATE",[tournamentId,idem]);
+  if(prior.rows[0]){const row=prior.rows[0] as ShortLinkRow;if(row.snapshot_sha256!==hash)throw new ApiError("IDEMPOTENCY_CONFLICT","La clave de idempotencia tiene otro contenido.",409);await client.query("COMMIT");return shortLinkPublic(row);}
+  let created:ShortLinkRow|undefined;
+  for(let i=0;i<8&&!created;i++){const r=await client.query("INSERT INTO acta_short_links(id,tournament_id,debate_id,snapshot,snapshot_sha256,idempotency_key,created_by,expires_at) VALUES($1,$2,$3,$4::jsonb,$5,$6,'manager',$7) ON CONFLICT DO NOTHING RETURNING *",[shortLinkId(),tournamentId,debateId,json,hash,idem,expires]);if(r.rows[0])created=r.rows[0] as ShortLinkRow;else{const raced=await client.query("SELECT * FROM acta_short_links WHERE tournament_id=$1 AND idempotency_key=$2 FOR UPDATE",[tournamentId,idem]);if(raced.rows[0]){const prior=raced.rows[0] as ShortLinkRow;if(prior.snapshot_sha256!==hash)throw new ApiError("IDEMPOTENCY_CONFLICT","La clave de idempotencia tiene otro contenido.",409);await client.query("COMMIT");return shortLinkPublic(prior);}}}
+  if(!created)throw new ApiError("SHORT_LINK_COLLISION","No se ha podido reservar un identificador único.",503);
+  await client.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'created','manager',$2::jsonb)",[created.id,JSON.stringify({expiresAt:expires.toISOString(),snapshotHash:hash})]);
+  await client.query("COMMIT");return shortLinkPublic(created);
+ }catch(e){await client.query("ROLLBACK").catch(()=>undefined);throw e;}finally{client.release();}
+}
+async function listActaShortLinks(p:Record<string,unknown>):Promise<unknown>{const id=str(p.tournamentId).trim();if(!/^[a-zA-Z0-9_-]{1,128}$/.test(id))throw new ApiError("INVALID_TOURNAMENT","Torneo no válido.");const r=await getPool().query("SELECT l.id,l.tournament_id,l.debate_id,l.created_at,l.expires_at,l.revoked_at,COALESCE((SELECT json_agg(json_build_object('eventType',e.event_type,'actor',e.actor,'occurredAt',e.occurred_at,'details',e.details) ORDER BY e.occurred_at) FROM acta_short_link_events e WHERE e.link_id=l.id),'[]'::json) AS events FROM acta_short_links l WHERE l.tournament_id=$1 ORDER BY l.created_at DESC LIMIT 1000",[id]);return r.rows.map((x)=>({...shortLinkPublic(x as ShortLinkRow),events:Array.isArray(x.events)?x.events:[]}));}
+async function updateActaShortLinkExpiry(p:Record<string,unknown>):Promise<unknown>{const tournamentId=str(p.tournamentId),id=str(p.id).toUpperCase(),expires=expiryDate(p.expiryDays);if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("INVALID_SHORT_LINK","Identificador no válido.");const c=await getPool().connect();try{await c.query("BEGIN");const r=await c.query("UPDATE acta_short_links SET expires_at=$3,updated_at=now() WHERE id=$1 AND tournament_id=$2 AND revoked_at IS NULL RETURNING *",[id,tournamentId,expires]);if(!r.rows[0])throw new ApiError("SHORT_LINK_NOT_FOUND","No existe un enlace activo.",404);await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'expiry_updated','manager',$2::jsonb)",[id,JSON.stringify({expiresAt:expires.toISOString()})]);await c.query("COMMIT");return shortLinkPublic(r.rows[0] as ShortLinkRow);}catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}}
+async function revokeActaShortLinks(p:Record<string,unknown>):Promise<unknown>{const tid=str(p.tournamentId),all=p.all===true,ids=Array.isArray(p.ids)?Array.from(new Set(p.ids.filter(x=>typeof x==="string").map(x=>(x as string).toUpperCase()))):[];if(!all&&(!ids.length||ids.length>200||ids.some(x=>!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(x))))throw new ApiError("INVALID_SHORT_LINKS","Selecciona entre 1 y 200 enlaces válidos.");const reason=str(p.reason).trim().slice(0,300),c=await getPool().connect();try{await c.query("BEGIN");const r=await c.query(all?"SELECT id FROM acta_short_links WHERE tournament_id=$1 AND revoked_at IS NULL":"SELECT id FROM acta_short_links WHERE tournament_id=$1 AND revoked_at IS NULL AND id=ANY($2::text[])",all?[tid]:[tid,ids]);const affected=r.rows.map(x=>String(x.id));if(affected.length){await c.query("UPDATE acta_short_links SET revoked_at=now(),updated_at=now() WHERE tournament_id=$1 AND id=ANY($2::text[]) AND revoked_at IS NULL",[tid,affected]);for(const id of affected)await c.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'revoked','manager',$2::jsonb)",[id,JSON.stringify({reason,bulk:all})]);}await c.query("COMMIT");return{revoked:affected.length,ids:affected};}catch(e){await c.query("ROLLBACK").catch(()=>undefined);throw e;}finally{c.release();}}
+async function resolveActaShortLink(req:RequestLike):Promise<unknown>{ensureConfigured();const key="ledu:acta-short-link:resolve:"+sha256(requestIp(req)),count=num(await redisCommand(["INCR",key]));if(count===1)await redisCommand(["EXPIRE",key,60]);if(count>60)throw new ApiError("RATE_LIMITED","Demasiadas consultas de enlaces. Espera un minuto.",429);const raw=Array.isArray(req.query?.id)?req.query?.id[0]:req.query?.id,id=str(raw).toUpperCase();if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);const r=await getPool().query("SELECT * FROM acta_short_links WHERE id=$1",[id]),row=r.rows[0] as ShortLinkRow|undefined;if(!row)throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);if(row.revoked_at)throw new ApiError("SHORT_LINK_REVOKED","Este enlace ha sido revocado por la mesa.",410);if(row.expires_at&&new Date(row.expires_at).getTime()<=Date.now())throw new ApiError("SHORT_LINK_EXPIRED","Este enlace ha caducado. Pide a la mesa que genere uno nuevo.",410);if(!validActaSnapshot(row.snapshot)||sha256(canonicalShortLinkJson(row.snapshot))!==row.snapshot_sha256)throw new ApiError("SHORT_LINK_CORRUPT","El contenido del enlace no supera la comprobación de integridad.",500);return{snapshot:row.snapshot,expiresAt:row.expires_at?new Date(row.expires_at).getTime():null};}
+
 async function health(): Promise<unknown> {
   ensureConfigured();
   const database = await checkDatabase();
@@ -1294,6 +1339,7 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
   try {
     if (req.method === "GET") {
       const action = Array.isArray(req.query?.action) ? req.query?.action[0] : req.query?.action;
+      if (action === "resolveActaShortLink") { const result = await resolveActaShortLink(req); res.status(200).json({ ok: true, data: result }); return; }
       if (action !== "health") throw new ApiError("METHOD_NOT_ALLOWED", "Usa POST para operar con la API.", 405);
       const result = await health();
       res.status(200).json({ ok: true, data: result });

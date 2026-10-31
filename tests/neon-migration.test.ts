@@ -223,4 +223,36 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("favor_count <> 1 OR contra_count <> 1");
   });
 
+
+  it("creates append-only acta short-link storage with expiry, revocation and audit events", async () => {
+    const sql = await readFile(resolve("db/migrations/0020_acta_short_links.sql"), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS acta_short_links");
+    expect(sql).toContain("varchar(8) PRIMARY KEY");
+    expect(sql).toContain("snapshot_sha256 char(64)");
+    expect(sql).toContain("UNIQUE (tournament_id, idempotency_key)");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS acta_short_link_events");
+    expect(sql).toContain("CHECK (event_type IN ('created','expiry_updated','revoked'))");
+    expect(sql).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(sql).not.toMatch(/\bTRUNCATE\b/i);
+    expect(sql).not.toMatch(/\bDELETE\s+FROM\b/i);
+  });
+
+  it("exposes authenticated short-link management and a public integrity-checked resolver", async () => {
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    const client = await readFile(resolve("src/api.ts"), "utf8");
+    const view = await readFile(resolve("src/tabulation/views/RoundsView.tsx"), "utf8");
+    expect(api).toContain('case "createActaShortLink"');
+    expect(api).toContain('case "listActaShortLinks"');
+    expect(api).toContain('case "updateActaShortLinkExpiry"');
+    expect(api).toContain('case "revokeActaShortLinks"');
+    expect(api).toContain('action === "resolveActaShortLink"');
+    expect(api).toContain("randomBytes(5)");
+    expect(api).toContain("snapshot_sha256");
+    expect(api).toContain('["INCR",key]');
+    expect(api).toContain("SHORT_LINK_REVOKED");
+    expect(api).toContain("SHORT_LINK_EXPIRED");
+    expect(view).toContain("#S8-");
+    expect(client).toContain("resolveActaShortLink");
+  });
+
 });

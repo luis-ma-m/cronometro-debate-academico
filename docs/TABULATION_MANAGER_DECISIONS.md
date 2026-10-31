@@ -84,6 +84,16 @@
 - Mantener el historial de creación, cambio de caducidad y revocación con actor/fecha/motivo cuando exista.
 - La reutilización del mismo enlace para una misma convocatoria/contexto debe abrir el mismo snapshot y contexto original; no debe reconstruirse silenciosamente con reglas o participantes actuales. Si se necesita un snapshot nuevo, se crea un nuevo enlace.
 
+### Implementación incorporada en PR79 (HEAD posterior a 5afe192)
+
+- `0020_acta_short_links.sql` crea almacenamiento append-only de snapshots y eventos de gestión.
+- Los IDs se generan con 5 bytes criptográficos codificados en Crockford Base32: exactamente 8 caracteres, sin caracteres ambiguos.
+- La API crea snapshots inmutables con SHA-256, idempotencia por solicitud, resolución pública limitada por IP y rechazo de tokens inválidos, caducados o revocados.
+- La UI de Actas por WhatsApp usa enlaces S8 cuando hay sesión/backend; si falla la creación, genera A2 autocontenido. No concatena ambos formatos.
+- La gestión permite configurar 1/7/30/90/365 días al crear, modificar caducidad, revocar individualmente, seleccionar varios o revocar todos los del torneo. Cada acción queda en `acta_short_link_events`.
+- La reutilización de una solicitud conserva el mismo snapshot; un nuevo snapshot usa una nueva clave de idempotencia. Tras revocar/caducar, el cliente rota la clave al regenerar.
+- A1/A2 y ACTA1/ACTA2 se conservan para compatibilidad histórica.
+
 ## 6. Sincronización y conflictos multi-dispositivo
 
 - El comportamiento de reconexión es automático con progreso visible.

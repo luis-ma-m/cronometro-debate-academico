@@ -801,3 +801,14 @@ La migración 0017 añade la integridad referencial de la presidencia persistida
 La migración 0018 conserva también el ID local del torneo de Tabulación. Tanto el preview como el guardado rechazan si el torneo, ronda o debate de la fuente local no coinciden con el mapping persistido para esa asignación.
 
 La migración 0019 amplía la clave natural del mapping para incluir el torneo local de Tabulación; así se evita que dos torneos locales distintos colisionen al reutilizar IDs de ronda/debate.
+
+
+## 6. Enlaces cortos de actas (S8)
+
+- El identificador público tiene exactamente ocho caracteres Crockford Base32 (40 bits) y no contiene caracteres ambiguos.
+- El cliente crea el enlace mediante una acción autenticada. La API valida el snapshot, calcula SHA-256 y persiste el JSON completo, caducidad, clave idempotente y auditoría en Neon.
+- La URL es `/acta#S8-XXXXXXXX`; la página del juez resuelve el token mediante `GET /api?action=resolveActaShortLink&id=XXXXXXXX` y valida integridad antes de mostrar el acta.
+- La resolución es pública, no cacheable y limitada a 60 consultas por IP/minuto. Los tokens inválidos devuelven 404; expirados/revocados, 410.
+- La caducidad se configura a 1, 7, 30, 90 o 365 días y puede actualizarse desde la gestión de enlaces. Se permiten revocaciones individual, múltiple y global por torneo.
+- Si la creación no está disponible, el cliente usa A2 autocontenido; no adjunta A2 automáticamente cuando S8 se crea correctamente. La resolución S8 requiere servidor.
+- Migración append-only: `db/migrations/0020_acta_short_links.sql`.

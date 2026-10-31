@@ -75,12 +75,12 @@
 
 ## 5. Short links y compatibilidad WhatsApp
 
-- [ ] Con backend disponible, crear y resolver enlaces cortos de exactamente 8 caracteres.
-- [ ] Verificar aleatoriedad criptográfica, colisiones, unicidad, rate limit, expiración y revocación.
-- [ ] Confirmar revocación individual, múltiple y global con confirmación y auditoría.
-- [ ] Con backend caído, generar y abrir A2 local sin petición obligatoria al servidor.
-- [ ] Confirmar compatibilidad A1/A2 históricos y que WhatsApp no añade A2 automáticamente cuando el short link se genera correctamente.
-- [ ] Confirmar que short links no se presentan como resolubles offline y que los fallos se comunican de forma controlada.
+- [x] Implementado: con backend disponible se crean y resuelven enlaces cortos de exactamente 8 caracteres; pendiente prueba real en Neon Preview.
+- [x] Implementados ID aleatorio Crockford Base32 de 40 bits, retry de colisión, unicidad, idempotencia, rate limit, caducidad y revocación; pendiente estrés/integración en Neon Preview.
+- [x] UI/API de revocación individual, múltiple y de todos los enlaces del torneo con confirmación y eventos de auditoría; pendiente E2E/Neon.
+- [x] A2 autocontenido se genera localmente y se abre sin petición al servidor.
+- [x] Codec A1/A2 y ACTA1/ACTA2 histórico preservado; WhatsApp usa solo el short link si se crea correctamente.
+- [x] La resolución S8 depende del backend; los errores de creación online activan A2 como fallback y la UI distingue ambos formatos.
 
 ## 6. Revisión final antes de considerar la PR casi lista
 
