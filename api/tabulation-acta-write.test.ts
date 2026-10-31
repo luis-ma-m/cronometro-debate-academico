@@ -140,6 +140,12 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT b.tournament_id"))).toBe(false);
   });
 
+  it("rejects a save if Tabulation rules changed after the preview", async () => {
+    await expect(saveTabulationActa(input({ expectedSettingsRevision: 3 })))
+      .rejects.toMatchObject({ code: "ACTA_RULES_REVISION_CONFLICT", status: 409 });
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO tabulation_acta_sources"))).toBe(false);
+  });
+
   it("refuses to overwrite an official source without explicit compare-and-confirm", async () => {
     mocks.query.mockImplementation(async (sql: string) => {
       const statement = String(sql).replace(/\\s+/g, " ").trim();
