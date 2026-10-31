@@ -14,7 +14,7 @@ import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundSco
 import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 import { SearchableEntityPicker } from './components/SearchableEntityPicker';
-import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
+import { appendPanelPublishAcknowledgement, applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox, hashSyncPayload, SYNC_OUTBOX_UPDATED_EVENT } from './tabulation/syncOutbox';
 import type { PendingSyncOperation } from './tabulation/syncOutbox';
 import { createSyncOutboxWorker } from './tabulation/syncOutboxWorker';
@@ -372,10 +372,21 @@ export default function App() {
           return { status: 'pause', error: { code: 'UNSUPPORTED_OPERATION', message: 'Esta operación necesita un adaptador de sincronización específico; se conserva en cola.' } };
         }
         try {
-          await apiPublishTabulationRound(session.token, {
+          const payload = operation.payload as Record<string, unknown>;
+          const published = await apiPublishTabulationRound(session.token, {
             protocolVersion: 1, operationId: operation.operationId, tournamentId: operation.tournamentId,
             entityType: 'round', entityId: operation.entityId, operation: 'publish-round',
-            baseRevision: operation.baseRevision, payload: operation.payload as Record<string, unknown>, payloadHash: operation.payloadHash,
+            baseRevision: operation.baseRevision, payload, payloadHash: operation.payloadHash,
+          });
+          if (!Array.isArray(published.debateAssignments)
+            || typeof payload.tabTournamentId !== 'string' || typeof payload.tabulationRoundId !== 'string') {
+            throw new Error('El servidor confirmó la ronda, pero no devolvió el mapping de debates esperado. Se requiere reconciliación por operationId.');
+          }
+          appendPanelPublishAcknowledgement(window.localStorage, {
+            version: 1, operationId: operation.operationId,
+            tabTournamentId: payload.tabTournamentId, tabulationRoundId: payload.tabulationRoundId,
+            managerRoundId: published.roundId, revision: published.revision,
+            debateAssignments: published.debateAssignments,
           });
           return { status: 'acknowledged' };
         } catch (error) {
