@@ -128,6 +128,30 @@ describe("transactional Tabulation round publication", () => {
     expect(query.mock.calls.some(([sql]) => String(sql) === "ROLLBACK")).toBe(true);
   });
 
+  it("refuses to publish when the manager has no valid timer format", async () => {
+    query.mockImplementation(async (sql: string, params: unknown[] = []) => {
+      const statement = String(sql).replace(/\\s+/g, " ").trim();
+      if (statement.startsWith("SELECT ti.tournament_id")) return { rows: [{
+        tournament_id: tournamentId, revision: 7, updated_at_ms: baseUpdatedAt, minimum_judges_per_room: 1,
+      }] };
+      if (statement.startsWith("SELECT id FROM format_presets")) return { rows: [] };
+      if (statement.startsWith("SELECT scope, response FROM idempotency_keys")) return { rows: [] };
+      if (statement.startsWith("SELECT id, active FROM physical_rooms")) return { rows: [{ id: "room-a", active: true }] };
+      if (statement.startsWith("SELECT t.id, t.name")) return { rows: [
+        { id: "team-a", name: "Equipo A", active: true, institution: "Universidad A", incompatible_judge_ids: [] },
+        { id: "team-b", name: "Equipo B", active: true, institution: "Universidad B", incompatible_judge_ids: [] },
+      ] };
+      if (statement.startsWith("SELECT j.id, j.name")) return { rows: [
+        { id: "judge-a", name: "Juez A", active: true, institution: "Universidad J", incompatible_judge_ids: [] },
+      ] };
+      if (statement.startsWith("SELECT COALESCE(MAX(number)")) return { rows: [{ next_number: 1 }] };
+      if (statement.startsWith("SELECT id FROM rounds")) return { rows: [] };
+      return { rows: [], rowCount: 1 };
+    });
+    await expect(publishTabulationRound(await operation())).rejects.toMatchObject({ code: "FORMAT_NOT_CONFIGURED", status: 503 });
+    expect(query.mock.calls.some(([sql]) => String(sql).includes("INSERT INTO rounds"))).toBe(false);
+  });
+
   it("preserves authorization errors instead of misreporting them as database outages", async () => {
     const op = await operation({ tournamentId: "00000000-0000-4000-8000-000000000002" });
     await expect(publishTabulationRound(op)).rejects.toMatchObject({ code: "TOURNAMENT_MISMATCH", status: 409 });
