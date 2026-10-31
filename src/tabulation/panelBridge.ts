@@ -71,7 +71,7 @@ export function suggestPanelEntityMatches(tournament: TabTournament, handoff: Pa
 }
 
 /** Rejects stale, cross-type and many-to-one mappings before any local data can be changed. */
-export function validatePanelEntityIdMap(tournament: TabTournament, handoff: PanelHandoff, idMap: PanelEntityIdMap): string[] {
+export function validatePanelEntityIdMap(tournament: TabTournament, handoff: PanelHandoff, idMap: PanelEntityIdMap, allowLinkedSpeakerMoves = false): string[] {
   const errors: string[] = [];
   const definitions: Array<{ kind: PanelEntityKind; localIds: Set<string>; remoteIds: Set<string> }> = [
     { kind: 'teams', localIds: new Set(tournament.teams.map((item) => item.id)), remoteIds: new Set(handoff.teams.map((item) => item.id)) },
@@ -96,7 +96,7 @@ export function validatePanelEntityIdMap(tournament: TabTournament, handoff: Pan
     const remoteSpeaker = remoteSpeakers.get(remoteSpeakerId);
     if (!localSpeaker || !remoteSpeaker) continue;
     const mappedTeamId = remoteTeamToLocal.get(remoteSpeaker.teamId);
-    if (!mappedTeamId || mappedTeamId !== localSpeaker.teamId) {
+    if (!allowLinkedSpeakerMoves && (!mappedTeamId || mappedTeamId !== localSpeaker.teamId)) {
       errors.push('El orador «' + localSpeaker.name + '» no pertenece al equipo local correspondiente al equipo remoto de «' + remoteSpeaker.name + '». No se puede vincular sin revisar primero el equipo.');
     }
   }
@@ -225,7 +225,7 @@ export function mergeHandoff(
   }
 
   if (handoff.tournamentId) {
-    const mapIssues = validatePanelEntityIdMap(tournament, handoff, idMap);
+    const mapIssues = validatePanelEntityIdMap(tournament, handoff, idMap, Boolean(tournament.panelLink?.remoteId));
     if (mapIssues.length) return { tournament, added, updated, warnings, issues: mapIssues };
   }
 
