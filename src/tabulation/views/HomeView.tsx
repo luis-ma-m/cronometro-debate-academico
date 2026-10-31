@@ -186,7 +186,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
         panelLink: current.panelLink ? {
           ...current.panelLink,
           remoteRevision: Math.max(current.panelLink.remoteRevision ?? 0, ...updates.map((ack) => ack.revision)),
-          remoteUpdatedAt: Math.max(current.panelLink.remoteUpdatedAt ?? 0, ...updates.map((ack) => ack.updatedAt)),
+          remoteUpdatedAt: Math.max(current.panelLink.remoteUpdatedAt ?? 0, ...updates.flatMap((ack) => typeof ack.updatedAt === 'number' ? [ack.updatedAt] : [])),
         } : current.panelLink,
       }), { type: 'panel.round.ack', message: 'Correspondencias de debates confirmadas por el Gestor y guardadas en Tabulación.' });
       if (changed && store.flush()) {
