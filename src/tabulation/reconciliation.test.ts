@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLocalPanelBase, comparePanelRevisions } from './reconciliation';
+import { buildLocalPanelBase, comparePanelRevisions, hasRemoteCursorAdvanced } from './reconciliation';
 import { createTabTournament } from './presets';
 import type { PanelHandoff } from './panelBridge';
 import type { TabTournament } from './types';
@@ -19,6 +19,14 @@ function linkedTournament(): TabTournament {
     remoteUpdatedAt: 100, idMap: { teams: { 'local-team-1': 'team-1' }, speakers: {}, judges: {}, venues: {} } };
   return tournament;
 }
+
+describe('remote revision cursor', () => {
+  it('detects timestamp-only advancement when the revision number is unchanged', () => {
+    expect(hasRemoteCursorAdvanced({ revision: 8, updatedAt: 100 }, { revision: 8, updatedAt: 101 })).toBe(true);
+    expect(hasRemoteCursorAdvanced({ revision: 8, updatedAt: 101 }, { revision: 8, updatedAt: 100 })).toBe(false);
+    expect(hasRemoteCursorAdvanced({ revision: 8, updatedAt: 100 }, { revision: 9, updatedAt: 100 })).toBe(true);
+  });
+});
 
 describe('three-way panel reconciliation', () => {
   it('reconstructs a stable remote baseline for a linked tournament created before F3', () => {
