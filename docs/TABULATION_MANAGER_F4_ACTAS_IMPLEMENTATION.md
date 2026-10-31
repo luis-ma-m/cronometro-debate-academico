@@ -14,7 +14,7 @@ F4 dispone ya de una implementación funcional en código para el flujo de previ
 - Guardado inicial y sustitución transaccionales con bloqueo de asignación, compare-and-swap sobre versión actual y revisión de reglas, fuente inmutable, head actualizado mediante trigger, evento de auditoría y respuesta idempotente por `operationId`.
 - Persistencia de resultado de eliminatoria separada de la scorecard clasificatoria. `sourceMode: elimination` representa el tipo de resultado/progresión; la estructura de papeletas sigue respetando `settings.ballotMode` (incluido el modo conjunto ADUMA).
 - Historial y detalle de versiones; el contador de reescrituras se calcula en servidor a partir de versiones que sustituyen una fuente anterior.
-- UI `OfficialActaPublisher` de comparación, primer guardado/sustitución explícitos y reintento del mismo `operationId` después de error ambiguo.
+- UI `OfficialActaPublisher`: el primer guardado se intenta sincronizar automáticamente cuando no existe versión oficial; la operación exacta se persiste antes de la escritura y se recupera con el mismo `operationId` tras timeout, recarga o reconexión. Si ya existe versión oficial, solo presenta el diff y exige confirmación explícita para sustituir.
 - En el Gestor, el historial de cada sala permite consultar las versiones oficiales y el contador de reescrituras. Se añade inspección bajo demanda y de solo lectura del payload fuente íntegro y del snapshot de reglas de cada versión; no se reconstruye ni se sobrescribe el acta vigente al consultar.
 - Migraciones append-only 0010–0019 definidas en el repositorio. No se han aplicado a Neon Production.
 
@@ -37,6 +37,7 @@ F4 dispone ya de una implementación funcional en código para el flujo de previ
 ## Continuación de implementación — UI de sala y rollback (2026-10-30)
 
 - Al expandir una sala del Gestor, se consulta automáticamente su historial oficial si todavía no está cargado. El contador de reescrituras queda visible también en la cabecera de la tarjeta de sala una vez recuperado el historial; la consulta sigue siendo de solo lectura y no se ejecuta mientras existan cambios locales sin guardar.
+- El flujo de Tabulación ahora intenta el primer guardado oficial en cuanto hay un acta completa y una asignación vinculada. Si la comparación descubre una versión oficial existente, no escribe ni sustituye: presenta el diff y requiere confirmación. Los reintentos de una operación inicial pendiente reutilizan el mismo `operationId` y payload, también al recuperar conectividad.
 - Se añade una prueba de regresión de F4 que fuerza un fallo al insertar el evento de auditoría después de insertar la fuente inmutable. La prueba exige `ROLLBACK`, prohíbe `COMMIT` y comprueba que no se registra la clave de idempotencia incompleta. Es una prueba de contrato con cliente PostgreSQL simulado; no sustituye la prueba de rollback en Neon Preview.
 - Se añade también una prueba de sustitución confirmada: verifica que se crea una nueva versión inmutable enlazada a la anterior, que el contador de reescrituras procede del servidor y que la transacción confirma correctamente.
 
