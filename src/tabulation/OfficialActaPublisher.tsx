@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, CloudUpload, RefreshCw } from 'lucide-react';
 import { apiConfigured, previewTabulationActa, saveTabulationActa, type PreviewTabulationActaResponse, type SaveTabulationActaResponse } from '../api';
 import { computeDebateOutcome, outcomeContext } from './results';
@@ -29,6 +29,22 @@ interface PendingSave {
   };
 }
 
+function pendingStorageKey(assignmentId: string): string { return 'ledu-tabulation-acta-pending-v1:' + assignmentId; }
+function readPendingSave(assignmentId: string): PendingSave | null {
+  if (!assignmentId) return null;
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(pendingStorageKey(assignmentId)) ?? 'null') as unknown;
+    const value = raw as PendingSave | null;
+    if (!value || typeof value !== 'object' || !value.input || value.input.assignmentId !== assignmentId
+      || typeof value.input.operationId !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(value.input.operationId)
+      || !value.input.source || typeof value.input.source !== 'object'
+      || (value.input.expectedCurrentSourceId !== null && typeof value.input.expectedCurrentSourceId !== 'string')
+      || typeof value.input.confirmReplace !== 'boolean'
+      || !Number.isSafeInteger(value.input.expectedSettingsRevision)) return null;
+    return value;
+  } catch { return null; }
+}
+
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
@@ -41,14 +57,26 @@ function ballotCount(source: Record<string, unknown> | null): number {
 
 /** Explicit server comparison and publication; local actas remain usable offline and are never auto-pushed. */
 export function OfficialActaPublisher({ tournament, round, debate, result, token, store, notify }: Props) {
+  const assignmentId = debate.managerAssignmentId ?? '';
   const [preview, setPreview] = useState<PreviewTabulationActaResponse | null>(null);
   const [busy, setBusy] = useState(false);
-  const [pendingSave, setPendingSave] = useState<PendingSave | null>(null);
+  const [pendingSave, setPendingSave] = useState<PendingSave | null>(() => readPendingSave(assignmentId));
   const [lastSaved, setLastSaved] = useState<SaveTabulationActaResponse | null>(null);
   const context = useMemo(() => outcomeContext(tournament), [tournament]);
   const look = useMemo(() => lookups(tournament), [tournament]);
   const outcome = useMemo(() => computeDebateOutcome(round, { ...debate, result }, context), [round, debate, result, context]);
-  const assignmentId = debate.managerAssignmentId;
+  useEffect(() => {
+    setPendingSave(readPendingSave(assignmentId));
+    setPreview(null);
+  }, [assignmentId]);
+  useEffect(() => {
+    if (!assignmentId) return;
+    if (pendingSave?.input.assignmentId === assignmentId) {
+      try { window.localStorage.setItem(pendingStorageKey(assignmentId), JSON.stringify(pendingSave)); } catch { /* Server idempotency remains available for this mounted session. */ }
+    } else if (!pendingSave) {
+      try { window.localStorage.removeItem(pendingStorageKey(assignmentId)); } catch { /* Storage may be disabled. */ }
+    }
+  }, [assignmentId, pendingSave]);
   const canPublish = Boolean(apiConfigured && token && tournament.panelLink?.remoteId && round.managerRoundId && assignmentId);
   const source = useMemo<Record<string, unknown> | null>(() => {
     if (outcome.status !== 'complete' || !outcome.winnerTeamId) return null;
@@ -138,6 +166,26 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
     } finally { setBusy(false); }
   };
 
+  const retryPending = async () => {
+    if (!token || !pendingSave) return;
+    setBusy(true);
+    try {
+      const saved = await saveTabulationActa(token, pendingSave.input);
+      setLastSaved(saved);
+      setPendingSave(null);
+      setPreview(null);
+      store.log({
+        type: saved.replacedSourceId ? 'acta.official.replace' : 'acta.official.save',
+        message: round.name + ' · confirmación oficial recuperada. Versión ' + saved.sourceId + '.',
+        details: { assignmentId, sourceId: saved.sourceId, operationId: saved.operationId, winnerTeamId: saved.winnerTeamId },
+      });
+      notify('Confirmación recuperada: el Gestor conserva la versión oficial ' + saved.sourceId + '.', 'success');
+    } catch (error) {
+      notify((error instanceof Error ? error.message : 'No se ha podido recuperar la confirmación.')
+        + ' Se conservará la misma operación para volver a intentarlo.', 'error');
+    } finally { setBusy(false); }
+  };
+
   if (!apiConfigured || !tournament.panelLink?.remoteId) return null;
   return <section className="panel tab-official-acta-publisher">
     <div className="panel-title">
@@ -152,7 +200,8 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
               <button type="button" className="button secondary" onClick={() => void compare()} disabled={busy || Boolean(pendingSave)}>
                 <RefreshCw size={15} /> {busy && !pendingSave ? 'Comparando…' : 'Comparar con el acta oficial'}
               </button>
-              {pendingSave && <span className="muted">Publicación pendiente de confirmar: reintenta para recuperar el ACK.</span>}
+              {pendingSave && <><span className="muted">Publicación pendiente: la operación está guardada para reintentar incluso después de recargar.</span>
+                <button type="button" className="button primary" onClick={() => void retryPending()} disabled={busy}>Reintentar y recuperar confirmación</button></>}
             </div>
             {preview && <div className="notice tab-info-notice" role="status">
               <b>{preview.currentSourceId ? 'Comparación de sustitución' : 'Primera publicación'}</b>
@@ -174,7 +223,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
                 <button type="button" className="button primary" onClick={() => void publish()} disabled={busy}>
                   <CheckCircle2 size={15} /> {busy && pendingSave ? 'Publicando…' : preview.currentSourceId ? 'Confirmar sustitución oficial' : 'Confirmar primera publicación'}
                 </button>
-                <button type="button" className="text-button" onClick={() => { setPreview(null); setPendingSave(null); }}>Cancelar comparación</button>
+                <button type="button" className="text-button" disabled={Boolean(pendingSave)} onClick={() => setPreview(null)}>Cancelar comparación</button>
               </div>
             </div>}
             {lastSaved && <Notice kind="success">Versión oficial {lastSaved.sourceId} guardada. Total de versiones: {lastSaved.totalVersions}; reescrituras: {lastSaved.rewriteCount}.</Notice>}
