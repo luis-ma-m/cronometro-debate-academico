@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, CloudUpload, RefreshCw } from 'lucide-react';
 import { ApiError, apiConfigured, previewTabulationActa, saveTabulationActa, type PreviewTabulationActaResponse, type SaveTabulationActaResponse } from '../api';
 import { computeDebateOutcome, outcomeContext } from './results';
@@ -61,19 +61,21 @@ function ballotCount(source: Record<string, unknown> | null): number {
   return Array.isArray(result?.ballots) ? result.ballots.length : 0;
 }
 
-/** Explicit server comparison and publication; local actas remain usable offline and are never auto-pushed. */
+/** First official save is attempted automatically; every replacement still requires an explicit diff and confirmation. */
 export function OfficialActaPublisher({ tournament, round, debate, result, token, store, notify }: Props) {
   const assignmentId = debate.managerAssignmentId ?? '';
   const [preview, setPreview] = useState<PreviewTabulationActaResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [pendingSave, setPendingSave] = useState<PendingSave | null>(() => readPendingSave(assignmentId));
   const [lastSaved, setLastSaved] = useState<SaveTabulationActaResponse | null>(null);
+  const automaticAttemptRef = useRef('');
   const context = useMemo(() => outcomeContext(tournament), [tournament]);
   const look = useMemo(() => lookups(tournament), [tournament]);
   const outcome = useMemo(() => computeDebateOutcome(round, { ...debate, result }, context), [round, debate, result, context]);
   useEffect(() => {
     setPendingSave(readPendingSave(assignmentId));
     setPreview(null);
+    setLastSaved(null);
   }, [assignmentId]);
   useEffect(() => {
     if (!assignmentId) return;
@@ -107,6 +109,104 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
     };
   }, [outcome, tournament.id, tournament.panelLink?.remoteRevision, tournament.panelLink?.remoteUpdatedAt,
     tournament.settings.ballotMode, round.id, round.kind, debate.id, debate.teamIds, result]);
+
+  useEffect(() => {
+    if (!canPublish || !token || !source || pendingSave || lastSaved || outcome.status !== 'complete') return;
+    const attemptKey = assignmentId + ':' + JSON.stringify(source);
+    let disposed = false;
+
+    const attempt = async () => {
+      if (disposed || !navigator.onLine || automaticAttemptRef.current === attemptKey) return;
+      automaticAttemptRef.current = attemptKey;
+      setBusy(true);
+      try {
+        const comparison = await previewTabulationActa(token, assignmentId, source);
+        if (disposed) return;
+        if (comparison.assignmentId !== assignmentId || comparison.tournamentId !== tournament.panelLink?.remoteId
+          || comparison.roundId !== round.managerRoundId || comparison.debateId !== debate.id) {
+          throw new Error('La comparación automática no corresponde a esta asignación y torneo.');
+        }
+
+        if (comparison.currentSourceId) {
+          if (comparison.changes.length === 0) {
+            setPreview(null);
+            notify('El acta ya coincide con la versión oficial del Gestor. No se ha creado una reescritura.', 'success');
+          } else {
+            setPreview(comparison);
+            notify('Ya existe un acta oficial. Revisa las diferencias y confirma expresamente si quieres sustituirla.', 'warning');
+          }
+          return;
+        }
+
+        const acta = asRecord(source.acta);
+        if (!acta) throw new Error('La fuente del acta no contiene un acta válida.');
+        const confirmedSource = {
+          ...source,
+          acta: {
+            ...acta,
+            basePanelRevision: comparison.basePanelRevision,
+            basePanelUpdatedAt: comparison.basePanelUpdatedAt,
+          },
+        };
+        const operationId = makeTabId('acta-op');
+        const stablePending: PendingSave = {
+          operationId,
+          input: {
+            operationId,
+            assignmentId,
+            source: confirmedSource,
+            expectedCurrentSourceId: null,
+            confirmReplace: false,
+            expectedSettingsRevision: comparison.settingsRevision,
+          },
+        };
+        // Persist the exact operation before the network write so a reload can recover it idempotently.
+        try {
+          window.localStorage.setItem(pendingStorageKey(assignmentId), JSON.stringify(stablePending));
+        } catch {
+          setPendingSave(stablePending);
+          notify('El primer acta se ha conservado localmente, pero no se puede persistir la operación de sincronización en este navegador. Libera espacio y reintenta.', 'error');
+          return;
+        }
+        setPendingSave(stablePending);
+        const saved = await saveTabulationActa(token, stablePending.input);
+        if (disposed) return;
+        setLastSaved(saved);
+        setPendingSave(null);
+        setPreview(null);
+        store.log({
+          type: 'acta.official.save',
+          message: round.name + ' · primera acta sincronizada automáticamente con el Gestor. Versión ' + saved.sourceId + '.',
+          details: { assignmentId, sourceId: saved.sourceId, operationId: saved.operationId, winnerTeamId: saved.winnerTeamId },
+        });
+        notify('Primera versión del acta sincronizada automáticamente con el Gestor.', 'success');
+      } catch (error) {
+        if (!disposed) {
+          if (error instanceof ApiError && nonRetryableActaCodes.has(error.code)) {
+            setPendingSave(null);
+            setPreview(null);
+            notify(error.message + ' El acta local se conserva; vuelve a comparar antes de publicar.', 'error');
+          } else {
+            notify((error instanceof Error ? error.message : 'No se ha podido sincronizar el primer acta.')
+              + ' El acta local se conserva. Se reintentará al recuperar conexión o puedes recuperar la misma operación.', 'warning');
+          }
+        }
+      } finally {
+        if (!disposed) setBusy(false);
+      }
+    };
+
+    void attempt();
+    const onOnline = () => {
+      automaticAttemptRef.current = '';
+      void attempt();
+    };
+    window.addEventListener('online', onOnline);
+    return () => {
+      disposed = true;
+      window.removeEventListener('online', onOnline);
+    };
+  }, [assignmentId, canPublish, debate.id, lastSaved, notify, outcome.status, pendingSave, round.managerRoundId, round.name, source, store, token, tournament.panelLink?.remoteId]);
 
   const compare = async () => {
     if (!token || !assignmentId || !source || !canPublish) return;
@@ -208,7 +308,7 @@ export function OfficialActaPublisher({ tournament, round, debate, result, token
   if (!apiConfigured || !tournament.panelLink?.remoteId) return null;
   return <section className="panel tab-official-acta-publisher">
     <div className="panel-title">
-      <div><h3>Acta oficial del Gestor</h3><p>La copia local no se publica automáticamente. Compara y confirma la versión oficial por separado.</p></div>
+      <div><h3>Acta oficial del Gestor</h3><p>El primer guardado se sincroniza automáticamente cuando no existe versión oficial. Toda sustitución requiere comparar y confirmar.</p></div>
       <CloudUpload size={18} />
     </div>
     {!token ? <Notice kind="warning">Inicia sesión en el Panel de organización en esta misma sesión del navegador para publicar actas.</Notice>
