@@ -234,3 +234,6 @@ También se incorpora una instantánea de metadatos propios de Tabulación en la
 - Se añade una barrera de revisión separada para `tabulation_settings.revision`; un cambio de reglas entre comparación y confirmación obliga a volver a comparar.
 
 **Pendiente de validación externa:** aplicar 0014–0016 únicamente en Neon Preview, verificar transacciones/rollback y concurrencia real en PostgreSQL, ejecutar E2E de publicación y sustitución en navegador, probar la pérdida real de respuesta y confirmar que el historial refleja el contador exacto. Las migraciones no se han aplicado a Neon Production.
+
+
+La migración 0017 añade una FK para garantizar que la presidencia persistida del debate siga apuntando a un juez existente del Gestor. Migraciones acumuladas de esta ampliación: 0014–0017 (además de 0010–0013 para settings e historial).
