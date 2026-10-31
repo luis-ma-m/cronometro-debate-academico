@@ -59,6 +59,11 @@ const validPayload = (): PublishedRoundPayload => ({
   ],
   debates: [{
     tabulationDebateId: "tab-debate-1",
+    tabulationVenueId: "local-room",
+    tabulationTeamFavorId: "local-a",
+    tabulationTeamContraId: "local-b",
+    tabulationJudgeIds: ["local-judge"],
+    tabulationChairId: "local-judge",
     physicalRoomId: "room-a",
     venueName: "Sala A",
     teamFavorId: "team-a",
