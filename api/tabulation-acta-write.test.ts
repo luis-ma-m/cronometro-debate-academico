@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { presetSettings } from "../src/tabulation/presets.js";
 import { ballots, result } from "../src/tabulation/test-fixtures.js";
@@ -111,6 +112,27 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     const stored = JSON.parse(String((insert?.[1] as unknown[])[6])) as Record<string, unknown>;
     expect(stored).toMatchObject({ sourceMode: "judges", acta: { tournamentId: ids.tournament, roundId: "manager-round", debateId: "local-debate" } });
     expect(mocks.query).toHaveBeenCalledWith("COMMIT");
+  });
+
+  it("recovers a committed operation before requiring the assignment context again", async () => {
+    const request = input();
+    const scopePayload = {
+      source: request.source,
+      expectedCurrentSourceId: null,
+      confirmReplace: false,
+      expectedSettingsRevision: 4,
+    };
+    const scope = "tabulation-save-acta:" + ids.assignment + ":"
+      + createHash("sha256").update(JSON.stringify(scopePayload)).digest("hex");
+    const response = { sourceId: ids.source, assignmentId: ids.assignment, operationId: "acta-operation-0001" };
+    mocks.query.mockImplementation(async (sql: string) => {
+      const statement = String(sql).replace(/\\s+/g, " ").trim();
+      if (statement === "BEGIN" || statement === "COMMIT") return { rows: [] };
+      if (statement.startsWith("SELECT scope, response FROM idempotency_keys")) return { rows: [{ scope, response }] };
+      throw new Error("An idempotent retry must not need the assignment context: " + statement);
+    });
+    await expect(saveTabulationActa(request)).resolves.toEqual(response);
+    expect(mocks.query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT b.tournament_id"))).toBe(false);
   });
 
   it("refuses to overwrite an official source without explicit compare-and-confirm", async () => {
