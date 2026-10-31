@@ -213,7 +213,7 @@ describe('tabulation → panel', () => {
   it('accepts a manager-owned speaker team reassignment after the tournament is linked', () => {
     const source = panel();
     const tab = tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1);
-    source.speakers[0].teamId = 't2';
+    source.speakers = (source.speakers ?? []).map((speaker) => speaker.id === 's1' ? { ...speaker, teamId: 't2' } : speaker);
     const merged = mergeHandoff(tab, buildPanelHandoff(source, now + 1), now + 1);
     expect(merged.issues).toEqual([]);
     expect(merged.tournament.speakers.find((speaker) => speaker.id === 's1')?.teamId).toBe('t2');
