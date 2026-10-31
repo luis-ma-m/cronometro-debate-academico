@@ -772,3 +772,9 @@ Se ha conectado el pull remoto autenticado al ciclo de vida de Tabulación. El g
 El diseño ejecutable de F4 está desarrollado en [`docs/TABULATION_MANAGER_F4_ACTAS_IMPLEMENTATION.md`](./TABULATION_MANAGER_F4_ACTAS_IMPLEMENTATION.md). Establece almacenamiento fuente inmutable y contratos distintos para papeletas por juez, acta conjunta y eliminatorias; define primer guardado, diff/confirmación de sustitución, idempotencia, concurrencia, auditoría, contador y pruebas.
 
 F4 depende de F3: no habilitar escrituras oficiales de actas hasta disponer de revisión remota fiable y resolución de conflictos. El documento de decisiones funcionales sigue siendo vinculante en caso de discrepancia.
+
+
+## Checklist de validación externa y cierre
+
+El registro operativo de pruebas que requieren Vercel Preview, Neon real, navegadores y revisión final está en [TABULATION_MANAGER_FINAL_VALIDATION_CHECKLIST.md](./TABULATION_MANAGER_FINAL_VALIDATION_CHECKLIST.md). Debe completarse con el commit SHA, entorno y evidencia de cada ejecución; no sustituye los criterios funcionales de este documento.
+
