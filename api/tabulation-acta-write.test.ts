@@ -109,6 +109,11 @@ describe("authoritative transactional Tabulation acta persistence", () => {
     const insert = mocks.query.mock.calls.find(([sql]) => String(sql).includes("INSERT INTO tabulation_acta_sources"));
     expect(insert).toBeTruthy();
     expect(String(insert?.[0])).toContain("supersedes_source_id");
+    const teamContextQuery = mocks.query.mock.calls.find(([sql]) => String(sql).startsWith("SELECT t.id, t.name"));
+    const judgeContextQuery = mocks.query.mock.calls.find(([sql]) => String(sql).startsWith("SELECT j.id, j.name"));
+    expect(String(teamContextQuery?.[0])).toContain("team_judge_incompatibilities");
+    expect(String(judgeContextQuery?.[0])).toContain("judge_incompatibilities");
+    expect(String(teamContextQuery?.[0])).not.toContain("t.incompatible_judge_ids");
     const stored = JSON.parse(String((insert?.[1] as unknown[])[6])) as Record<string, unknown>;
     expect(stored).toMatchObject({ sourceMode: "judges", acta: { tournamentId: ids.tournament, roundId: "manager-round", debateId: "local-debate" } });
     expect(mocks.query).toHaveBeenCalledWith("COMMIT");
