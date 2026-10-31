@@ -5,7 +5,7 @@ import { validateTabulationSettings as validateSettings, TabulationSettingsValid
 import { canonicalizeTabulationActa, type TabulationActaIdMap } from "./tabulation-acta-identity.js";
 import { validateTabulationActaSource } from "./tabulation-acta-source.js";
 import { TabulationActaValidationError, type TabulationActaDomainContext } from "./tabulation-acta-domain.js";
-import type { TabJudge, TabSettings, TabSpeaker, TabTeam } from "../src/tabulation/types.js";
+import { TAB_SCHEMA_VERSION, type TabJudge, type TabSettings, type TabSpeaker, type TabTeam } from "../src/tabulation/types.js";
 import { presetSettings } from "../src/tabulation/presets.js";
 
 type Db = { query(sql: string, values?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }> };
@@ -108,6 +108,7 @@ async function loadActaContext(db: Db, assignmentId: string): Promise<LoadedActa
   ]);
   const settingsRow = settingsResult.rows[0];
   if (!settingsRow) throw new ApiError("MIGRATION_REQUIRED", "Falta la configuración persistida de Tabulación. No se puede validar un acta sin sus reglas.", 503);
+  if (num(settingsRow.schema_version) > TAB_SCHEMA_VERSION) throw new ApiError("SCHEMA_TOO_NEW", "Las reglas de Tabulación se guardaron con una versión más reciente. Actualiza la aplicación antes de publicar actas.", 409);
   let settings: TabSettings;
   try { settings = !settingsRow.settings || (isRecord(settingsRow.settings) && Object.keys(settingsRow.settings).length === 0)
     ? presetSettings("ledu-groups") : validateSettings(settingsRow.settings); }
