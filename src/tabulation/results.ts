@@ -267,8 +267,8 @@ export function computeDebateOutcome(round: RoundInfo, debate: TabDebate, contex
   if (!a || !b || a === b) return { ...base, status: 'invalid', issues: ['El debate necesita dos equipos distintos.'] };
   const elimination = round.kind === 'elimination';
   const result = debate.result;
-  // Knockout rounds always use individual judge votes, even when qualifying rounds use a joint acta.
-  const joint = settings.ballotMode === 'joint' && !elimination;
+  // El acta de eliminatoria conserva el modo oficial del torneo: judges o joint.
+  const joint = settings.ballotMode === 'joint';
   const penalties = { [a]: effectivePenalties(result?.penalties[a], settings), [b]: effectivePenalties(result?.penalties[b], settings) };
   const side = (teamId: string) => (debate.favorTeamId ? (debate.favorTeamId === teamId ? 'favor' : 'contra') : null);
   const line = (teamId: string, patch: Partial<TeamLine>): TeamLine => ({
