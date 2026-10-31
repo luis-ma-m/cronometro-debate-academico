@@ -56,6 +56,20 @@ describe('three-way panel reconciliation', () => {
     expect(result.changes[0].change).toBe('conflict');
   });
 
+  it('detects concurrent edits made on two independent device copies', () => {
+    const deviceA = linkedTournament();
+    const deviceB = linkedTournament();
+    const sharedBase = buildLocalPanelBase(deviceA)!;
+    deviceA.teams[0].name = 'Nombre cambiado en dispositivo A';
+    deviceB.teams[0].institution = 'Institución cambiada en dispositivo B';
+    const remote = buildLocalPanelBase(deviceB)!;
+    remote.revision = 5;
+    remote.updatedAt = 200;
+    const result = comparePanelRevisions(deviceA, sharedBase, remote);
+    expect(result.hasConflicts).toBe(true);
+    expect(result.changes[0].change).toBe('conflict');
+  });
+
   it('requires explicit review when a remote edit touches an entity in a historical debate', () => {
     const local = linkedTournament();
     local.rounds = [{
