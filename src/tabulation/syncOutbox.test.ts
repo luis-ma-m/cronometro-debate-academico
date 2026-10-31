@@ -71,6 +71,26 @@ describe('durable sync outbox contract', () => {
     expect(await outbox.list('tournament-uuid')).toHaveLength(1);
   });
 
+  it('accepts a stable operation id supplied by the acta workflow and deduplicates exact retries', async () => {
+    const repository = new MemoryOutboxRepository();
+    const outbox = createSyncOutbox(repository, { now: () => 250, createOperationId: () => 'unused-generated-id' });
+    const input = {
+      operationId: 'acta-op-stable-01',
+      tournamentId: 't1',
+      entityType: 'acta',
+      entityId: 'assignment-1',
+      operation: 'replace-acta' as const,
+      baseRevision: 0,
+      payload: { mode: 'first-save', source: { winner: 'team-a' } },
+    };
+    const first = await outbox.enqueue(input);
+    const retry = await outbox.enqueue(input);
+    expect(first.operation.operationId).toBe('acta-op-stable-01');
+    expect(first.duplicate).toBe(false);
+    expect(retry.duplicate).toBe(true);
+    expect(retry.operation.payloadHash).toBe(first.operation.payloadHash);
+  });
+
   it('rejects reuse of an operation id with a different payload', async () => {
     const repository = new MemoryOutboxRepository();
     const outbox = createSyncOutbox(repository, { createOperationId: () => 'same-id' });
