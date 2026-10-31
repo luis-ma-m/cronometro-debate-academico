@@ -82,3 +82,13 @@ Ejecuta `npm test` únicamente con una base de test desechable y aislada. La sui
 ## Rollback
 
 No se importan ni modifican los datos de Google Sheets: permanecen separados y dejan de ser la fuente operativa de esta rama. Un rollback al código antiguo no recibiría las escrituras nuevas; debe planificarse explícitamente teniendo en cuenta que la base PostgreSQL será la fuente de verdad después del corte.
+
+
+## Migraciones de integración Tabulación ↔ Gestor
+
+- 0010_tabulation_settings.sql: reglas oficiales de Tabulación con revisión e historial.
+- 0012–0019: fuentes/versionado de actas, asignaciones de Tabulación, metadatos de ronda, identidad estable de entidades y alcance del mapping.
+- 0020_acta_short_links.sql: almacenamiento de snapshots S8, hash de integridad, caducidad, revocación e historial de eventos.
+- 0021_acta_short_link_rate_limits.sql: buckets de limitación por IP para la resolución pública S8 en PostgreSQL; permite resolver enlaces sin depender de Redis.
+
+Aplicar siempre todas las migraciones pendientes en orden mediante el runner versionado. La 0021 es necesaria para resolver S8; si falta, el endpoint devuelve 503 con MIGRATION_REQUIRED. La creación de enlaces requiere además API, Neon, Redis y sesión autenticada del Gestor. No aplicar en Production hasta completar la validación aislada de Preview.
