@@ -10,11 +10,12 @@ La rama ya contenía una primera base de F4: validación pura del resultado de T
 - Migración nueva 0013 que amplía el tipo de fuente para admitir elimination y persiste un resultado explícito separado (ganador, perdedor y equipos que avanzan), sin convertirlo en RoundScorecard.
 - Validador puro de resultado de eliminatoria con comprobación de que ganador/perdedor pertenecen a la asignación, son distintos, y los equipos que avanzan son únicos e incluyen al ganador.
 - Historial y tipos de API preparados para exponer sourceMode elimination y su resultado explícito.
+- Canonicalizador puro `api/tabulation-acta-identity.ts`: traduce equipos, jueces y oradores de la fuente local a IDs del Gestor usando exclusivamente el `idMap` revisado; reescribe también las claves de puntuaciones/sanciones/alineaciones, las papeletas, el acta conjunta y el resultado de eliminatoria. El ámbito torneo/ronda/asignación se toma de los objetivos resueltos por el Gestor, no de los IDs enviados por el cliente.
+- Tests de identidad: mapeo completo, IDs ausentes, destino fuera de la asignación, colisiones de mapeo, acta conjunta y progresión eliminatoria.
 
 **Todavía no implementado ni habilitado:**
 - Endpoint transaccional de guardado inicial/sustitución y recuperación idempotente.
-- Construcción de contexto remoto completo y validación server-side conectada al guardado.
-- Mapeo de IDs locales a IDs canónicos remotos para cada acta.
+- Construcción de contexto remoto completo y validación server-side conectada al guardado (el canonicalizador puro existe, pero todavía no está conectado a una consulta/operación autorizada del Gestor).
 - Proyección compatible a scorecard cuando corresponda.
 - UI de primer guardado, diff, confirmación, historial y contador conectados al endpoint.
 - E2E y pruebas reales contra Neon Preview.
