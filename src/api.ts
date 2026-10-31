@@ -7,7 +7,7 @@ const API_URL = EXPLICIT_API_URL || (import.meta.env.PROD ? '/api' : '');
 export const apiConfigured = API_URL.length > 0;
 
 export class ApiError extends Error {
-  constructor(message: string, public code = 'API_ERROR') {
+  constructor(message: string, public code = 'API_ERROR', public retryAfterMs = 0) {
     super(message);
     this.name = 'ApiError';
   }
@@ -43,9 +43,14 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
         'VERCEL_RUNTIME_ERROR',
       );
     }
+    const retryAfterHeader = response.headers.get('retry-after');
+    const retryAfterSeconds = retryAfterHeader && Number.isFinite(Number(retryAfterHeader)) ? Number(retryAfterHeader) : 0;
+    const retryAfterDate = retryAfterHeader && retryAfterSeconds === 0 ? Date.parse(retryAfterHeader) : Number.NaN;
+    const retryAfterMs = Math.max(0, retryAfterSeconds ? retryAfterSeconds * 1000 : Number.isFinite(retryAfterDate) ? retryAfterDate - Date.now() : 0);
     throw new ApiError(
       detail.error?.message ?? ('El backend respondió HTTP ' + response.status),
       detail.error?.code ?? 'HTTP_ERROR',
+      retryAfterMs,
     );
   }
   let result: { ok: boolean; data?: T; error?: { message?: string; code?: string } };
