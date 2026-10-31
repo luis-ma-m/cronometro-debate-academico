@@ -825,3 +825,13 @@ La migración 0019 amplía la clave natural del mapping para incluir el torneo l
 - La previsualización de un acta ya no rebasea silenciosamente una revisión obsoleta del Gestor: devuelve ACTA_REVISION_CONFLICT y exige reconciliar antes de publicar.
 
 **Validación pendiente:** ejecutar CI del HEAD actual, aplicar 0021 en Neon Preview y probar creación/resolución/expiración/revocación S8 con Redis apagado; después ejecutar pruebas de concurrencia y multi-dispositivo contra infraestructura aislada. No ejecutar migraciones ni escrituras en Production.
+
+
+### Hallazgos adicionales de auditoría
+
+- La revocación de enlaces usa UPDATE ... RETURNING como punto de serialización: dos operadores concurrentes no generan eventos duplicados para el mismo enlace.
+- Los borradores offline del juez se aíslan por versión/clave/contexto del acta. Los borradores antiguos se migran solo conservando campos compatibles con equipos, oradores e ítems actuales; los datos locales se normalizan antes de renderizar.
+- La publicación de una ronda devuelve también el updatedAt del Gestor. Tabulación persiste ambos cursores (revision y updatedAt); los ACK antiguos siguen siendo legibles y el pull detecta cambios de timestamp aunque la revisión no avance.
+- Si el almacenamiento local no permite guardar el nuevo snapshot base, se elimina el snapshot antiguo (reconstruible) para evitar comparar el torneo actualizado contra una base obsoleta.
+- El guardado del acta comprueba de nuevo revision y updatedAt del Gestor dentro de la transacción; una carrera entre preview y save se devuelve como conflicto recuperable.
+- La cola no hace busy polling cuando una operación está bloqueada por un conflicto previo. La sesión del Gestor se vuelve a leer periódicamente para reactivar el worker tras un login/refresh en la misma pestaña.
