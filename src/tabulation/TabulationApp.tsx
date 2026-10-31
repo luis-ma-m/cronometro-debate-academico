@@ -5,7 +5,12 @@ import { tournamentProgress } from './progress';
 import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
-import { isFallenAt } from './types';
+import { isFallenAt, makeTabId } from './types';
+import { apiConfigured } from '../api';
+import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
+import type { PendingSyncOperation } from './syncOutbox';
+import { createSyncOutboxWorker } from './syncOutboxWorker';
+import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from './syncDispatcher';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 
@@ -58,6 +63,7 @@ function TabulationShell() {
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [managerSessionToken, setManagerSessionToken] = useState(readManagerSessionToken);
+  const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   const [managerConnection, setManagerConnection] = useState<{ connected: boolean; checkedAt: number | null; lastSuccessAt: number | null }>({ connected: false, checkedAt: null, lastSuccessAt: null });
   const tournament = state.tournament;
 
@@ -68,6 +74,42 @@ function TabulationShell() {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
+  useEffect(() => {
+    if (!apiConfigured || !managerSessionToken || !tournament?.panelLink?.remoteId || state.readOnly) {
+      setSyncQueue([]);
+      return;
+    }
+    let disposed = false;
+    let outbox: ReturnType<typeof createSyncOutbox>;
+    try {
+      outbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
+    } catch (error) {
+      store.logError(error instanceof Error ? error.message : 'No se pudo abrir la cola offline.');
+      return;
+    }
+    const worker = createSyncOutboxWorker({
+      outbox,
+      tournamentId: tournament.panelLink.remoteId,
+      workerId: makeTabId('sync-worker'),
+      dispatch: createTabulationSyncDispatcher({ token: managerSessionToken }),
+      onQueueChange: (operations) => { if (!disposed) setSyncQueue(operations); },
+      onAcknowledged: (operation, response) => {
+        if (disposed) return;
+        notifyTabulationSyncAcknowledged(operation, response);
+        store.log({
+          type: 'sync.ack',
+          message: operation.operation === 'replace-acta'
+            ? 'Acta oficial confirmada por el Gestor · ' + operation.entityId
+            : 'Ronda confirmada por el Gestor · ' + operation.entityId,
+          details: { operationId: operation.operationId, entityType: operation.entityType, entityId: operation.entityId },
+        });
+      },
+      onError: (error) => { if (!disposed) store.logError(error instanceof Error ? error.message : 'Error en la cola offline.'); },
+    });
+    worker.start();
+    return () => { disposed = true; worker.stop(); };
+  }, [managerSessionToken, tournament?.panelLink?.remoteId, state.readOnly, store]);
+
   useEffect(() => {
     const onHashChange = () => setViewState(readHashView());
     window.addEventListener('hashchange', onHashChange);
@@ -227,6 +269,10 @@ function TabulationShell() {
         </button>;
       })}</nav>
       <div className="sidebar-bottom">
+        {syncQueue.length > 0 && <div className="muted tab-sync-queue" role="status" aria-live="polite">
+          Cola offline: {syncQueue.filter((item) => item.status === 'pending').length} pendiente(s), {syncQueue.filter((item) => item.status === 'sending').length} en curso, {syncQueue.filter((item) => item.status === 'conflict').length} conflicto(s), {syncQueue.filter((item) => item.status === 'failed').length} error(es).
+          {syncQueue.find((item) => item.status === 'conflict' || item.status === 'failed')?.lastError?.message ?? ''}
+        </div>}
         <div className={'tab-manager-connection ' + (managerConnection.connected ? 'is-connected' : 'is-disconnected')} role="status" aria-live="polite">
           <span><span className="tab-manager-connection-dot" />{managerConnection.connected ? 'API, Neon y Redis disponibles' : 'Sin conexión con el servidor'}</span>
           <small>{managerConnection.lastSuccessAt ? 'Último health correcto hace ' + Math.max(0, Math.floor((now - managerConnection.lastSuccessAt) / 1000)) + ' s' : managerConnection.checkedAt ? 'Sin conexión confirmada' : 'Comprobando disponibilidad…'}</small>
