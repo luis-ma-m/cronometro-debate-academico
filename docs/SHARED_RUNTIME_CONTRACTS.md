@@ -109,3 +109,18 @@ Tests: `src/contracts/applicationPersistence.test.ts` cubre revisiones, compare-
 6. Abordar la simplificación del índice multi-torneo local en una fase separada, después de exportación y recuperación verificables.
 
 No se deben borrar `HANDOFF_KEY`, `OUTBOX_KEY`, `PANEL_SYNC_BASE_PREFIX`, `PANEL_SYNC_PENDING_PREFIX`, ACKs, mappings ni operaciones IndexedDB durante los pasos anteriores.
+
+
+## Bandeja común de entregas entre módulos
+
+Implementación: `src/contracts/applicationDeliveryQueue.ts`; persistencia IndexedDB compartida: `src/contracts/applicationPersistence.ts`.
+
+- La base `ledu-application-runtime-v1` evoluciona de versión 1 a versión 2 mediante una actualización IndexedDB no destructiva. Se conserva el object store `records` y se añade `deliveries` con clave primaria `deliveryId` e índices por creación y destino/creación.
+- Cada entrega tiene ID estable, origen, destino, tipo, timestamp, payload JSON, estado (`pending`, `claimed`, `acked`) e intentos.
+- `enqueue` es idempotente: repetir el mismo ID y contenido devuelve la entrega existente; reutilizar el ID con contenido distinto se rechaza.
+- `claimNext` reclama atómicamente una entrega pendiente o con lease vencido. El lease identifica al consumidor y tiene duración limitada (máximo cinco minutos).
+- Solo el propietario del lease puede confirmar (`acknowledge`) o liberar (`release`) la entrega. Un consumidor distinto no puede confirmar ni liberar el trabajo ajeno.
+- Las entregas confirmadas se conservan; no hay purga automática ni borrado de históricos.
+- Hay implementación en memoria para tests y una implementación IndexedDB para el navegador.
+
+**Límites del incremento:** el contrato todavía no está conectado a `sendToTabulation`, `RoundsView`, `HomeView` ni a los ACKs actuales. No hay adaptadores específicos de `PanelHandoff`/`PanelOutbox`, ni lógica de presentación/revisión humana. Los tests actuales validan la máquina de estados en memoria; falta prueba real de IndexedDB con dos pestañas, recarga, bloqueo y recuperación. No se debe retirar ni dejar de escribir las claves heredadas por este cambio.
