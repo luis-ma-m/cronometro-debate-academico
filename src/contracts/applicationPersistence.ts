@@ -157,22 +157,27 @@ export function createIndexedDbApplicationRecordRepository(
         const request = store.get(recordId(namespace, key));
         request.onerror = () => reject(request.error ?? new ApplicationPersistenceError('No se pudo comprobar la revisión.'));
         request.onsuccess = () => {
-          const raw = request.result as { record?: unknown } | undefined;
-          const current = raw ? validateRecord<T>(raw.record, namespace, key) : null;
-          if (options.expectedRevision !== undefined
-            && (options.expectedRevision === null ? current !== null : current?.revision !== options.expectedRevision)) {
-            conflict = true;
-            return;
+          try {
+            const raw = request.result as { record?: unknown } | undefined;
+            const current = raw ? validateRecord<T>(raw.record, namespace, key) : null;
+            if (options.expectedRevision !== undefined
+              && (options.expectedRevision === null ? current !== null : current?.revision !== options.expectedRevision)) {
+              conflict = true;
+              return;
+            }
+            result = Object.freeze({
+              schemaVersion: 1,
+              namespace,
+              key,
+              revision: (current?.revision ?? 0) + 1,
+              updatedAt: now,
+              value: cloned,
+            });
+            store.put({ id: recordId(namespace, key), namespace, updatedAt: now, record: result });
+          } catch (error) {
+            try { tx.abort(); } catch { /* transaction already inactive */ }
+            reject(error);
           }
-          result = Object.freeze({
-            schemaVersion: 1,
-            namespace,
-            key,
-            revision: (current?.revision ?? 0) + 1,
-            updatedAt: now,
-            value: cloned,
-          });
-          store.put({ id: recordId(namespace, key), namespace, updatedAt: now, record: result });
         };
         tx.oncomplete = () => resolve(conflict ? null : result);
         transactionError(tx, reject);
@@ -190,13 +195,18 @@ export function createIndexedDbApplicationRecordRepository(
         const request = store.get(recordId(namespace, key));
         request.onerror = () => reject(request.error ?? new ApplicationPersistenceError('No se pudo comprobar el registro antes de borrarlo.'));
         request.onsuccess = () => {
-          const raw = request.result as { record?: unknown } | undefined;
-          const current = raw ? validateRecord(raw.record, namespace, key) : null;
-          if (expectedRevision !== undefined
-            && (expectedRevision === null ? current !== null : current?.revision !== expectedRevision)) return;
-          if (!current) return;
-          store.delete(recordId(namespace, key));
-          deleted = true;
+          try {
+            const raw = request.result as { record?: unknown } | undefined;
+            const current = raw ? validateRecord(raw.record, namespace, key) : null;
+            if (expectedRevision !== undefined
+              && (expectedRevision === null ? current !== null : current?.revision !== expectedRevision)) return;
+            if (!current) return;
+            store.delete(recordId(namespace, key));
+            deleted = true;
+          } catch (error) {
+            try { tx.abort(); } catch { /* transaction already inactive */ }
+            reject(error);
+          }
         };
         tx.oncomplete = () => resolve(deleted);
         transactionError(tx, reject);
