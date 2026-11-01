@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TabulationRulesPanel } from './components/TabulationRulesPanel';
 import { clearManagerSession, readManagerSession, writeManagerSession } from './contracts/managerSession';
 import { activeTournamentContext } from './contracts/activeTournamentContext';
+import { createApplicationBootstrap } from './contracts/applicationBootstrap';
+import { participantSnapshotFromManager } from './contracts/participantSnapshot';
 import { TabulationTournamentRanking } from './components/TabulationTournamentRanking';
 import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
@@ -139,6 +141,24 @@ export default function App() {
       return null;
     }
   }, [data.remoteId, data.revision, data.updatedAt]);
+  const managerParticipants = useMemo(() => {
+    if (!activeTournament) return null;
+    try {
+      return participantSnapshotFromManager(activeTournament, {
+        teams: data.teams,
+        speakers: data.speakers ?? [],
+        judges: data.judges,
+        physicalRooms: data.physicalRooms,
+      });
+    } catch {
+      return null;
+    }
+  }, [activeTournament, data.teams, data.speakers, data.judges, data.physicalRooms]);
+  const applicationBootstrap = useMemo(() => createApplicationBootstrap({
+    session,
+    activeTournament,
+    participants: managerParticipants,
+  }), [session, activeTournament, managerParticipants]);
 
   const reloadAdmin = useCallback(async () => {
     if (demoMode) return;
@@ -358,7 +378,7 @@ export default function App() {
   }, [roomId, session, reloadAdmin, reloadRoom]);
 
   useEffect(() => {
-    if (roomId || !apiConfigured || !session?.token || !activeTournament) {
+    if (roomId || !apiConfigured || !applicationBootstrap.session?.token || !applicationBootstrap.activeTournament) {
       setSyncQueue([]);
       return;
     }
@@ -372,10 +392,10 @@ export default function App() {
     }
     const worker = createSyncOutboxWorker({
       outbox,
-      tournamentId: activeTournament.tournamentId,
+      tournamentId: applicationBootstrap.activeTournament.tournamentId,
       workerId: makeId('sync-worker'),
       dispatch: createTabulationSyncDispatcher({
-        token: session.token,
+        token: applicationBootstrap.session.token,
         onUnauthorized: () => {
           clearManagerSession(localStorage);
           setSession(null);
@@ -393,7 +413,7 @@ export default function App() {
     });
     worker.start();
     return () => { disposed = true; worker.stop(); };
-  }, [roomId, session?.token, activeTournament?.tournamentId, reloadAdmin]);
+  }, [roomId, applicationBootstrap.session?.token, applicationBootstrap.activeTournament?.tournamentId, reloadAdmin]);
   useEffect(() => {
     if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
   }, [data.rounds, selectedRound]);
