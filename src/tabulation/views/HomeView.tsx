@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ArrowRight, Check, ClipboardList, Database, Download, Flag, Gavel, Plus, RotateCcw, ShieldCheck, Sparkles, Stethoscope, Trash2, Trophy, Upload, Users } from 'lucide-react';
+import { readManagerSession } from '../../contracts/managerSession';
 import { tournamentChampion } from '../bracket';
 import { PanelLinkReview } from '../PanelLinkReview';
 import { parseBackupFile } from '../emergency';
@@ -18,16 +19,6 @@ import { createSampleTournament } from '../sample';
 import { INDEX_KEY, MAX_BACKUPS, tournamentKey, type TabStore, type TabStoreState } from '../store';
 import { eliminationRounds, isFallenAt, qualifyingRounds, type PresetId, type TabTournament, type PanelEntityIdMap } from '../types';
 import { BUILD_INFO, exportTournamentCopy, Field, formatNumber, IssueList, Notice, type NoticeKind } from '../ui';
-
-const MANAGER_SESSION_KEY = 'ledu-admin-session';
-
-function readManagerToken(): string | null {
-  try {
-    const session = JSON.parse(window.localStorage.getItem(MANAGER_SESSION_KEY) ?? 'null') as { token?: unknown; expiresAt?: unknown } | null;
-    return typeof session?.token === 'string' && typeof session.expiresAt === 'number' && session.expiresAt > Date.now()
-      ? session.token : null;
-  } catch { return null; }
-}
 
 function findLinkedLocalTournamentId(remoteId: string): string | null {
   try {
@@ -97,7 +88,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const backups = useMemo(() => store.listBackups(), [store, tournament?.id, tournament?.revision, backupVersion]);
   useEffect(() => {
     if (state.readOnly) return;
-    const token = readManagerToken();
+    const token = readManagerSession(window.localStorage)?.token ?? null;
     if (!token) return;
     const attemptKey = token + ':' + handoffVersion;
     if (managerBootstrapAttempt.current === attemptKey) return;
@@ -214,17 +205,12 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     const pull = async () => {
       if (disposed || running || document.visibilityState === 'hidden' || !navigator.onLine) return;
       let token = '';
-      try {
-        const session = JSON.parse(window.localStorage.getItem('ledu-admin-session') ?? 'null') as { token?: string; expiresAt?: number } | null;
-        if (!session?.token || (session.expiresAt ?? 0) <= Date.now()) {
-          setSyncStatus('Inicia sesión en el Gestor para sincronizar este torneo.');
-          return;
-        }
-        token = session.token;
-      } catch {
+      const session = readManagerSession(window.localStorage);
+      if (!session) {
         setSyncStatus('Inicia sesión en el Gestor para sincronizar este torneo.');
         return;
       }
+      token = session.token;
       running = true;
       const controller = new AbortController();
       activeController = controller;
