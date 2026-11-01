@@ -218,3 +218,18 @@ Este incremento **no está conectado aún** a los hand-offs reales. El siguiente
 - [ ] Retirada de claves heredadas autorizada y completada.
 
 Este documento es inventario y diseño de transición, no certifica que la aplicación única esté terminada. La PR #84 continúa en Draft y apilada sobre PR #79.
+
+
+## 9. Segundo incremento: bandeja duradera de entregas
+
+Se añade `src/contracts/applicationDeliveryQueue.ts` y su suite `applicationDeliveryQueue.test.ts`.
+
+- La base compartida sube de versión 1 a 2 y añade el almacén `deliveries`; el almacén `records` existente permanece y no se elimina ni se transforma.
+- La bandeja admite entregas independientes, no un buzón global de una sola posición.
+- `deliveryId` es aportado por el productor y debe mantenerse estable en reintentos. La cola no inventa una identidad nueva al recuperar una entrega.
+- El claim usa transacción read-write, lease y contador de intentos. Un lease vencido puede ser reclamado por otro consumidor, conservando el mismo ID y payload.
+- ACK y release están condicionados al propietario actual del lease.
+- Los ACKs se conservan y no existe limpieza automática.
+- Tests cubren entregas concurrentes lógicas, idempotencia, colisión de ID/contenido, propietario del lease, recuperación, release y validación de payload.
+
+**No integrado todavía:** los escritores/lectores heredados continúan siendo la ruta funcional. Este incremento no autoriza a retirar `ledu-tabulacion-handoff-v1`, `ledu-tabulacion-outbox-v1` ni `ledu-tabulation-publish-acks-v1`. Antes de activar el flujo hacen falta adaptadores estrictos, una política de revisión/aprobación del operador y pruebas de IndexedDB entre pestañas y tras reinicio.
