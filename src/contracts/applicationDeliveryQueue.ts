@@ -125,8 +125,19 @@ function deliveryIdentity<T>(item: ApplicationDelivery<T>) {
   };
 }
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return '{' + Object.keys(record).sort().map(key => JSON.stringify(key) + ':' + stableJson(record[key])).join(',') + '}';
+  }
+  const serialized = JSON.stringify(value);
+  if (typeof serialized !== 'string') throw new ApplicationPersistenceError('El payload no tiene una representación JSON estable.');
+  return serialized;
+}
+
 function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return stableJson(left) === stableJson(right);
 }
 
 /** Deterministic queue used by unit tests and non-browser adapters. */
