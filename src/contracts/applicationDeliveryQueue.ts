@@ -34,6 +34,7 @@ export interface EnqueueApplicationDelivery<T = unknown> {
 
 export interface ClaimApplicationDeliveryOptions {
   consumer: string;
+  target: ApplicationDeliveryEndpoint;
   now: number;
   leaseMs: number;
 }
@@ -144,12 +145,13 @@ export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue
         .sort((a, b) => a.createdAt - b.createdAt || a.deliveryId.localeCompare(b.deliveryId))
         .map(item => validateStored<T>(item));
     },
-    async claimNext<T>({ consumer, now, leaseMs }) {
+    async claimNext<T>({ consumer, target, now, leaseMs }) {
       validText(consumer, 'El consumidor');
+      if (target !== 'manager' && target !== 'tabulation') throw new ApplicationPersistenceError('El destino de consumo no es válido.');
       validTime(now, 'La fecha actual');
       if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 300_000) throw new ApplicationPersistenceError('La duración del lease debe estar entre 1 y 300000 ms.');
-      const candidate = [...items.values()].filter(item => item.status === 'pending'
-        || (item.status === 'claimed' && (item.leaseUntil ?? 0) <= now))
+      const candidate = [...items.values()].filter(item => item.target === target && (item.status === 'pending'
+        || (item.status === 'claimed' && (item.leaseUntil ?? 0) <= now)))
         .sort((a, b) => a.createdAt - b.createdAt || a.deliveryId.localeCompare(b.deliveryId))[0];
       if (!candidate) return null;
       const claimed = validateStored<T>({
@@ -164,7 +166,7 @@ export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue
       validText(consumer, 'El consumidor');
       validTime(now, 'La fecha de ACK');
       const current = items.get(id);
-      if (!current || current.status !== 'claimed' || current.leaseOwner !== consumer) return false;
+      if (!current || current.status !== 'claimed' || current.leaseOwner !== consumer || (current.leaseUntil ?? 0) <= now) return false;
       items.set(id, validateStored({ ...current, status: 'acked', ackedAt: now, leaseOwner: undefined, leaseUntil: undefined }));
       return true;
     },
@@ -260,8 +262,9 @@ export function createIndexedDbApplicationDeliveryQueue(
         tx.onabort = () => reject(tx.error);
       });
     },
-    async claimNext<T>({ consumer, now, leaseMs }) {
+    async claimNext<T>({ consumer, target, now, leaseMs }) {
       validText(consumer, 'El consumidor');
+      if (target !== 'manager' && target !== 'tabulation') throw new ApplicationPersistenceError('El destino de consumo no es válido.');
       validTime(now, 'La fecha actual');
       if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 300_000) throw new ApplicationPersistenceError('La duración del lease debe estar entre 1 y 300000 ms.');
       const db = await database;
@@ -274,7 +277,7 @@ export function createIndexedDbApplicationDeliveryQueue(
         request.onsuccess = () => {
           try {
             const candidate = (request.result as unknown[]).map(item => validateStored<T>(item))
-              .filter(item => item.status === 'pending' || (item.status === 'claimed' && (item.leaseUntil ?? 0) <= now))
+              .filter(item => item.target === target && (item.status === 'pending' || (item.status === 'claimed' && (item.leaseUntil ?? 0) <= now)))
               .sort((a,b) => a.createdAt-b.createdAt || a.deliveryId.localeCompare(b.deliveryId))[0];
             if (!candidate) return;
             result = validateStored<T>({ ...candidate, status: 'claimed', attempts: candidate.attempts + 1, leaseOwner: consumer, leaseUntil: now + leaseMs });
@@ -298,7 +301,7 @@ export function createIndexedDbApplicationDeliveryQueue(
           try {
             if (!request.result) return;
             const current = validateStored(request.result);
-            if (current.status !== 'claimed' || current.leaseOwner !== consumer) return;
+            if (current.status !== 'claimed' || current.leaseOwner !== consumer || (current.leaseUntil ?? 0) <= now) return;
             store.put(validateStored({ ...current, status: 'acked', ackedAt: now, leaseOwner: undefined, leaseUntil: undefined }));
             accepted = true;
           } catch (error) { try { tx.abort(); } catch { /* noop */ } reject(error); }
