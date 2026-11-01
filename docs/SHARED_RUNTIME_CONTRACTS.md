@@ -28,6 +28,21 @@ Implementación: `src/contracts/activeTournamentContext.ts`.
 
 **Límite importante:** este incremento define y prueba el contrato, pero todavía no elige el torneo, no persiste el contexto, no lo inyecta en React ni elimina los índices multi-torneo existentes. Esas operaciones requieren inventario y migración compatible de los datos locales.
 
+## Snapshot común de participantes
+
+Implementación: `src/contracts/participantSnapshot.ts`.
+
+- DTO versionado `ParticipantSnapshot` con identidad del torneo, revisión y marca temporal.
+- Proyecta equipos, oradores, jueces y salas físicas con IDs canónicos y procedencia explícita.
+- El adaptador de Gestión usa los IDs de su modelo como IDs canónicos; el adaptador de Tabulación exige mappings explícitos para equipos, oradores, jueces y salas. No hay resolución por nombre.
+- Conserva en la proyección compartida los datos comunes necesarios para las relaciones: institución, estado activo, incompatibilidades y relación orador-equipo.
+- Valida unicidad de IDs canónicos y referencias entre oradores/equipos/jueces antes de producir el snapshot.
+- El parser vuelve a validar los DTOs en los límites entre módulos/persistencia y devuelve una proyección inmutable.
+- Los atributos exclusivos de cada módulo (por ejemplo, rating/capacidad de presidencia de jueces, equipos swing, rúbricas, asignaciones y estado del cronómetro) siguen en sus modelos especializados y no se sobrescriben con este DTO.
+- Tests: adaptadores de ambos modelos, mappings ausentes, duplicados, relaciones rotas, round-trip y mutaciones.
+
+**Límite:** el snapshot común ya está definido y probado como contrato/adaptador, pero todavía no sustituye el handoff de localStorage ni se inyecta como store/estado común en ambos shells. No se ha hecho migración destructiva ni se han borrado mappings.
+
 ## Alcance y límites
 
 El contrato de sesión elimina la duplicación del formato y de su clave entre los dos shells. El contrato de torneo fija la forma del contexto compartido. **Ninguno de los dos** unifica todavía la autenticación, el ciclo de vida de React, las rutas ni el estado de Gestión y Tabulación.
@@ -40,7 +55,7 @@ El contexto local tampoco debe confundirse con una revisión oficial confirmada.
 
 1. Inventariar los puntos de entrada que seleccionan/cargan el torneo en Gestión y Tabulación, y sus consumidores.
 2. Definir un bootstrap común que resuelva sesión y contexto activo una sola vez.
-3. Adaptar un flujo de lectura de snapshot de participantes con DTO versionado y validación runtime.
+3. Integrar el snapshot común de participantes en un bootstrap compartido, manteniendo los modelos especializados como propietarios de sus campos.
 4. Migrar rutas y shells a ese bootstrap sin cambiar todavía la propiedad de datos de cada módulo.
 5. Retirar accesos duplicados a almacenamiento y simplificar el índice local solo después de exportación/backup, migración y pruebas de recuperación.
 
