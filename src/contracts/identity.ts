@@ -51,7 +51,7 @@ export class IdentityContractError extends Error {
  * IDs and control characters are rejected, but legacy punctuation is allowed.
  */
 function validateOpaqueId(value: unknown, label: string): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > 200
+  if (typeof value !== 'string' || value.length === 0 || value.length > 200 || value.trim().length === 0
     || /[\u0000-\u001f\u007f]/.test(value)) {
     throw new IdentityContractError(label + ' debe ser una cadena no vacía de hasta 200 caracteres y sin caracteres de control.');
   }
@@ -93,8 +93,8 @@ export function resolveMappedIdentity<K extends EntityKind>(
   originalId: unknown,
 ): CanonicalId<K> | null {
   const source = sourceId(kind, originalId);
-  const mapped = mapping[source];
-  return mapped === undefined ? null : canonicalId(kind, mapped);
+  if (!Object.prototype.hasOwnProperty.call(mapping, source)) return null;
+  return canonicalId(kind, mapping[source]);
 }
 
 /** Runtime guard for untrusted identity DTOs received across a module/API boundary. */
