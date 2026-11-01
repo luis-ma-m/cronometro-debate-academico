@@ -43,6 +43,20 @@ Implementación: `src/contracts/participantSnapshot.ts`.
 
 **Límite:** el snapshot común ya está definido y probado como contrato/adaptador, pero todavía no sustituye el handoff de localStorage ni se inyecta como store/estado común en ambos shells. No se ha hecho migración destructiva ni se han borrado mappings.
 
+## Bootstrap común de aplicación
+
+Implementación: `src/contracts/applicationBootstrap.ts`.
+
+- Reúne sesión validada, contexto del torneo activo y snapshot común de participantes en una única proyección runtime versionada.
+- Revalida los tres contratos en el punto de composición.
+- Rechaza snapshots de participantes sin contexto activo o cuyo ID canónico de torneo no coincide.
+- Gestión construye el snapshot desde su modelo de torneo remoto; Tabulación lo construye desde su modelo local especializado solo cuando dispone del mapping explícito `panelLink.idMap`.
+- Ambos shells utilizan el bootstrap como fuente de sesión/contexto para habilitar sus workers de sincronización.
+- Una sesión caducada se representa como no disponible; el contexto local/remoto no concede autorización. Cada endpoint sigue verificando el token en servidor.
+- Si Tabulación carece de mappings explícitos o la proyección no valida, el bootstrap conserva sesión/contexto pero no publica un snapshot compartido. No se infieren correspondencias ni se muta el torneo local.
+
+**Límite:** el bootstrap se deriva en memoria en cada shell; todavía no existe un proveedor React único, un store común ni una única lectura persistida del torneo. La sesión y los modelos siguen siendo propiedad de cada módulo.
+
 ## Alcance y límites
 
 El contrato de sesión elimina la duplicación del formato y de su clave entre los dos shells. El contrato de torneo fija la forma del contexto compartido. **Ninguno de los dos** unifica todavía la autenticación, el ciclo de vida de React, las rutas ni el estado de Gestión y Tabulación.
