@@ -65,12 +65,26 @@ La sesión continúa almacenada localmente para compatibilidad; el servidor sigu
 
 El contexto local tampoco debe confundirse con una revisión oficial confirmada. Las escrituras remotas solo se consideran persistidas tras ACK verificable del backend.
 
+## Inventario del puente heredado
+
+Implementación documental: `docs/LEGACY_HANDOFF_INVENTORY.md`.
+
+- Se han identificado los lectores y escritores de los hand-offs de participantes y propuestas de ronda.
+- Se han inventariado `panelLink.idMap`, los cursores remotos, snapshots base, reconciliaciones pendientes y ACKs de publicación.
+- Se ha identificado la outbox durable de IndexedDB y los borradores/operaciones pendientes de actas.
+- Se ha detectado que `HomeView` todavía parsea `ledu-admin-session` directamente en dos puntos, en lugar de utilizar el contrato `readManagerSession`.
+- Los hand-offs y la propuesta de ronda usan claves globales de una sola posición; la migración debe añadir identidad de entrega y ACK de consumo para evitar carreras entre pestañas.
+- El store local sigue admitiendo múltiples torneos. No se simplifica hasta que exista exportación, migración y restauración verificables.
+
+**Resultado:** inventario completado; no se ha cambiado el comportamiento ni se ha eliminado o migrado ninguna clave. La siguiente implementación debe centralizar el acceso a sesión y diseñar el repositorio común con compatibilidad v1, dual-read/dual-write y rollback.
+
 ## Siguiente paso arquitectónico
 
-1. Inventariar los puntos de entrada que seleccionan/cargan el torneo en Gestión y Tabulación, y sus consumidores.
-2. Definir un bootstrap común que resuelva sesión y contexto activo una sola vez.
-3. Integrar el snapshot común de participantes en un bootstrap compartido, manteniendo los modelos especializados como propietarios de sus campos.
-4. Migrar rutas y shells a ese bootstrap sin cambiar todavía la propiedad de datos de cada módulo.
-5. Retirar accesos duplicados a almacenamiento y simplificar el índice local solo después de exportación/backup, migración y pruebas de recuperación.
+1. Sustituir las lecturas directas de sesión de `HomeView` por `readManagerSession` y añadir pruebas para sesión caducada, corrupta y actualizada entre pestañas.
+2. Diseñar e implementar el repositorio común de persistencia y los contratos versionados de hand-off, propuesta, mappings, cursor, snapshot base, conflictos y ACKs.
+3. Introducir el nuevo formato en paralelo, con dual-read/dual-write verificable y sin limpiar los datos v1.
+4. Migrar y probar operaciones pendientes, mappings, snapshots, conflictos y ACKs; mantener rollback al lector v1.
+5. Retirar lectores/escritores heredados solo cuando se demuestre que no quedan consumidores y la restauración esté probada.
+6. Abordar la simplificación del índice multi-torneo local en una fase separada, después de exportación y recuperación verificables.
 
-La aplicación mantiene un único torneo activo por instalación. El ID estable del torneo sigue siendo necesario para integridad, auditoría e idempotencia; no implica soporte multi-torneo.
+No se deben borrar `HANDOFF_KEY`, `OUTBOX_KEY`, `PANEL_SYNC_BASE_PREFIX`, `PANEL_SYNC_PENDING_PREFIX`, ACKs, mappings ni operaciones IndexedDB durante los pasos anteriores.
