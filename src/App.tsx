@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TabulationRulesPanel } from './components/TabulationRulesPanel';
+import { clearManagerSession, readManagerSession, writeManagerSession } from './contracts/managerSession';
 import { TabulationTournamentRanking } from './components/TabulationTournamentRanking';
 import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
@@ -22,7 +23,6 @@ import type { PendingSyncOperation } from './tabulation/syncOutbox';
 import { createSyncOutboxWorker } from './tabulation/syncOutboxWorker';
 import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from './tabulation/syncDispatcher';
 
-const SESSION_KEY = 'ledu-admin-session';
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
 const DEMO_PASSWORD = 'gestor123';
 type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
@@ -34,12 +34,7 @@ function makeSlug(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
 }
 
-function getSession(): { token: string; expiresAt: number } | null {
-  try {
-    const session = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null') as { token?: string; expiresAt?: number } | null;
-    return session?.token && (session.expiresAt ?? 0) > Date.now() ? { token: session.token, expiresAt: session.expiresAt ?? 0 } : null;
-  } catch { return null; }
-}
+function getSession() { return readManagerSession(localStorage); }
 
 function makeId(prefix: string): string { return prefix + Math.random().toString(36).slice(2, 9); }
 
@@ -181,7 +176,7 @@ export default function App() {
           connected: false,
           disconnectedAt: status.lastSeenAt === null ? null : status.disconnectedAt ?? status.lastSeenAt + 18_000,
         }])));
-        if (error instanceof Error && 'code' in error && (error as Error & { code?: string }).code === 'UNAUTHORIZED') { localStorage.removeItem(SESSION_KEY); setSession(null); }
+        if (error instanceof Error && 'code' in error && (error as Error & { code?: string }).code === 'UNAUTHORIZED') { clearManagerSession(localStorage); setSession(null); }
         setServerError(error instanceof Error ? error.message : 'No se ha podido cargar el torneo.');
       } finally {
         setAdminLoading(false);
@@ -373,7 +368,7 @@ export default function App() {
       dispatch: createTabulationSyncDispatcher({
         token: session.token,
         onUnauthorized: () => {
-          localStorage.removeItem(SESSION_KEY);
+          clearManagerSession(localStorage);
           setSession(null);
           setServerError('La sesión ha caducado. Inicia sesión para reanudar la sincronización.');
         },
@@ -483,11 +478,11 @@ export default function App() {
     try {
       const result = apiConfigured ? await login(password) : password === DEMO_PASSWORD ? { token: 'demo-session', expiresAt: Date.now() + 8 * 60 * 60 * 1000 } : null;
       if (!result) throw new Error('Contraseña incorrecta.');
-      localStorage.setItem(SESSION_KEY, JSON.stringify(result));
+      const savedSession = writeManagerSession(localStorage, result);
       setDemoMode(false);
       setConnected(false);
       setAdminLoading(apiConfigured);
-      setSession(result);
+      setSession(savedSession);
       setPassword('');
     } catch (error) { setLoginError(error instanceof Error ? error.message : 'No se ha podido iniciar sesión.'); }
   };
@@ -503,7 +498,7 @@ export default function App() {
 
   const logout = () => {
     const token = session?.token;
-    localStorage.removeItem(SESSION_KEY);
+    clearManagerSession(localStorage);
     setSession(null);
     setDemoMode(false);
     setAdminLoading(false);
