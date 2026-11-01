@@ -5,8 +5,9 @@
  * accessed only through an explicit adapter; this module never deletes them.
  */
 export const APPLICATION_DATABASE_NAME = 'ledu-application-runtime-v1';
-export const APPLICATION_DATABASE_VERSION = 1;
+export const APPLICATION_DATABASE_VERSION = 2;
 export const APPLICATION_RECORDS_STORE = 'records';
+export const APPLICATION_DELIVERIES_STORE = 'deliveries';
 
 export interface ApplicationRecord<T = unknown> {
   readonly schemaVersion: 1;
@@ -115,6 +116,11 @@ export function createIndexedDbApplicationRecordRepository(
       if (!db.objectStoreNames.contains(APPLICATION_RECORDS_STORE)) {
         const store = db.createObjectStore(APPLICATION_RECORDS_STORE, { keyPath: 'id' });
         store.createIndex('byNamespaceUpdatedAt', ['namespace', 'updatedAt'], { unique: false });
+      }
+      if (!db.objectStoreNames.contains(APPLICATION_DELIVERIES_STORE)) {
+        const deliveries = db.createObjectStore(APPLICATION_DELIVERIES_STORE, { keyPath: 'deliveryId' });
+        deliveries.createIndex('byCreatedAt', 'createdAt', { unique: false });
+        deliveries.createIndex('byTargetCreatedAt', ['target', 'createdAt'], { unique: false });
       }
     };
     request.onsuccess = () => {
