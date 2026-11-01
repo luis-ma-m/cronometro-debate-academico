@@ -53,7 +53,7 @@ La implementación proporciona:
 - resolución de mappings explícitos con comprobación de propiedad de clave;
 - pruebas unitarias para entradas inválidas, IDs legacy, procedencia, inmutabilidad y ausencia de heurísticas.
 
-**Todavía no está conectado a los modelos ni a los endpoints existentes.** Esta separación es deliberada: primero se fija el contrato, luego se migran adaptadores y consumidores de forma incremental con pruebas de caracterización. No se deben sustituir campos `string` en bloque ni hacer casts globales.
+**Integración inicial realizada:** el adaptador de publicación de rondas en `panelBridge.buildOutbox` utiliza el resolver validado para convertir IDs locales en IDs del Gestor y rechaza mappings malformados de forma controlada. El contrato todavía no sustituye los tipos de los modelos ni se ha propagado a los endpoints; esa migración seguirá siendo incremental y cubierta por pruebas de caracterización. No se deben sustituir campos `string` en bloque ni hacer casts globales.
 
 ## Siguiente incremento
 
