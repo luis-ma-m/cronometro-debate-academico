@@ -180,7 +180,19 @@ La app móvil migra borradores antiguos v1 a v2 al leerlos. La migración futura
 3. Mantener formatos históricos de actas y enlaces mientras existan enlaces compartidos.
 4. Eliminar código y claves únicamente con evidencia de ausencia de consumidores y procedimiento de rollback probado.
 
-## 6. Pruebas de aceptación necesarias
+## 6. Primer repositorio común implementado
+
+Se añadió `src/contracts/applicationPersistence.ts` como primera capa técnica de la transición:
+
+- IndexedDB `ledu-application-runtime-v1`, object store `records`, registros con `schemaVersion`, namespace, clave, revisión y timestamp.
+- Escritura compare-and-set para creación condicional y actualización por revisión; la transacción evita que dos pestañas sobrescriban una revisión leída anteriormente.
+- Adaptador dual por registro: lee v2 y v1, migra v1 a v2 sin borrar el origen, detecta divergencias y escribe v2 antes de intentar el espejo v1.
+- Si el espejo falla, el error conserva la referencia al registro v2 confirmado para reconciliación.
+- Implementación en memoria y pruebas unitarias de contrato.
+
+Este incremento **no está conectado aún** a los hand-offs reales. El siguiente paso es crear adaptadores específicos para handoff, propuesta de ronda, snapshots base, conflictos y ACKs, con validación de cada DTO y pruebas de recuperación antes de activar dual-write en producción. La nueva base IndexedDB es independiente de `ledu-tabulation-sync-v1`; no se migra ni modifica la outbox actual.
+
+## 7. Pruebas de aceptación necesarias
 
 - Dos pestañas producen hand-offs consecutivos: ningún consumidor puede borrar una entrega posterior.
 - Gestión y Tabulación abiertas simultáneamente: una propuesta no se sobrescribe ni se importa en el torneo incorrecto.
@@ -193,15 +205,15 @@ La app móvil migra borradores antiguos v1 a v2 al leerlos. La migración futura
 - Borradores móviles v1 y v2: lectura, migración, escritura y recuperación sin perder el original antes de verificar el destino.
 - Exportación/restauración de todos los datos locales, incluidos backups, logs y operaciones IndexedDB.
 
-## 7. Estado y límites de esta entrega
+## 8. Estado y límites de esta entrega
 
 - [x] CI del HEAD inspeccionado `2145631cff3c8257957892ff2bff72669c066920`: E2E, cobertura, typecheck y build correctos (run `41266254358`).
 - [x] Lectores/escritores principales de hand-off y outbox manual identificados.
 - [x] Persistencia de mappings, snapshots base, conflictos y ACKs identificada.
 - [x] Persistencia IndexedDB y borradores de actas identificados.
 - [x] Duplicación de lectura de sesión detectada y corregida en `1dde284333ce2c2caa6d3deb602b973c58df9992`.
-- [ ] Repositorio de persistencia común implementado.
-- [ ] Dual-read/dual-write implementado y probado.
+- [x] Primera capa del repositorio común versionado y compare-and-set implementada (aún sin conexión a los flujos reales).
+- [x] Adaptador dual-read/dual-write genérico probado en memoria; [ ] adaptadores específicos por clave heredada e integración de flujos pendientes.
 - [ ] Migración/rollback de datos locales implementados y probados.
 - [ ] Retirada de claves heredadas autorizada y completada.
 
