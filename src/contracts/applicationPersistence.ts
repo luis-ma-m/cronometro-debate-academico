@@ -46,7 +46,7 @@ export class ApplicationPersistenceConflict extends ApplicationPersistenceError 
 
 function validatePart(value: unknown, label: string, maxLength: number): string {
   if (typeof value !== 'string' || value.trim().length === 0 || value.length > maxLength
-    || /[\\u0000-\\u001f\\u007f]/.test(value)) {
+    || /[\x00-\x1f\x7f]/.test(value)) {
     throw new ApplicationPersistenceError(label + ' no es válido.');
   }
   return value;
