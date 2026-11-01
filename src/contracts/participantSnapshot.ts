@@ -86,8 +86,8 @@ function finalizeSnapshot(
   uniqueIds(speakers, 'oradores');
   uniqueIds(judges, 'jueces');
   uniqueIds(physicalRooms, 'salas físicas');
-  const teamIds = new Set(teams.map((team) => team.identity.canonicalId));
-  const judgeIds = new Set(judges.map((judge) => judge.identity.canonicalId));
+  const teamIds = new Set<string>(teams.map((team) => team.identity.canonicalId));
+  const judgeIds = new Set<string>(judges.map((judge) => judge.identity.canonicalId));
   for (const speaker of speakers) {
     if (!teamIds.has(speaker.teamId)) throw new ParticipantSnapshotError('El orador ' + speaker.name + ' referencia un equipo inexistente.');
   }
