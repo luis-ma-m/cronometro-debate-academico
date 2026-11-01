@@ -273,7 +273,6 @@ export interface LegacyApplicationRecordAdapter<T> {
   read(): string | null;
   write(value: T): void;
   parse(value: unknown): T;
-  serialize(value: T): string;
 }
 
 export type DualReadResult<T> =
@@ -300,7 +299,9 @@ function stableJson(value: unknown): string {
     const record = value as Record<string, unknown>;
     return '{' + Object.keys(record).sort().map((key) => JSON.stringify(key) + ':' + stableJson(record[key])).join(',') + '}';
   }
-  return JSON.stringify(value);
+  const serialized = JSON.stringify(value);
+  if (typeof serialized !== 'string') throw new ApplicationPersistenceError('El valor no tiene una representación JSON estable.');
+  return serialized;
 }
 
 /**
