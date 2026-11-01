@@ -76,7 +76,8 @@ Este documento evita que el pivote se interprete como una cancelación o una ree
 
 - **PR #84:** identidad canónica tipada integrada inicialmente en `panelBridge.buildOutbox`; contrato común de sesión adoptado por Gestión y Tabulación. La CI del HEAD `4595bd2149671185dc76e27d05103968b90a5338` terminó correctamente.
 - **Implementado en el incremento actual:** contrato tipado de contexto del torneo activo; validación runtime del handoff heredado de participantes (estructura, IDs, revisiones, duplicados y relaciones equipo-orador/juez-incompatibilidad), con rechazo seguro de snapshots inválidos.
-- **Pendiente en PR #84:** bootstrap que resuelva e inyecte el contexto activo en ambos shells, snapshot canónico de participantes compartido y propagación de identidad fuera del bridge temporal.
+- **Implementado en PR #84:** contrato versionado de snapshot común de participantes con adaptadores tipados desde Gestión y Tabulación, mappings explícitos en el adaptador de Tabulación, validación runtime de IDs/referencias/duplicados y tests de round-trip. Los campos específicos de cada módulo permanecen en sus modelos.
+- **Pendiente en PR #84:** bootstrap que resuelva e inyecte el contexto activo y el snapshot en ambos shells; retirar gradualmente el handoff temporal solo tras migración/rollback probados; propagación de identidad a los casos de uso comunes.
 - **No se declara completada la aplicación única:** todavía existen shells, stores y modelos especializados separados.
 - **No se declara completada la validación de PR #79:** las pruebas reales con PostgreSQL/Neon aislado, Redis Preview independiente, concurrencia multi-dispositivo y validación completa de short links siguen sujetas a sus evidencias específicas.
 - **No se ha autorizado ni ejecutado en este incremento:** merge, deployment, migraciones o escrituras en Neon.
