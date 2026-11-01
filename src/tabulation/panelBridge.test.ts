@@ -58,6 +58,7 @@ describe('panel → tabulation', () => {
     expect(tab.speakers).toEqual([{ id: 's1', teamId: 't1', name: 'Ana' }]);
     expect(tab.panelLink).toEqual({ tournamentName: 'Torneo de prueba', linkedAt: now });
     expect(readHandoff(memoryStorage({ 'ledu-tabulacion-handoff-v1': '{"format":"otra"}' }))).toBeNull();
+  });
 
   it('rejects malformed handoff snapshots and broken participant relationships at runtime', () => {
     const valid = buildPanelHandoff(panel(), now);
@@ -73,7 +74,6 @@ describe('panel → tabulation', () => {
     for (const value of malformed) {
       expect(readHandoff(memoryStorage({ 'ledu-tabulacion-handoff-v1': JSON.stringify(value) }))).toBeNull();
     }
-  });
   });
 
 
