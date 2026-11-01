@@ -78,6 +78,27 @@ Implementación documental: `docs/LEGACY_HANDOFF_INVENTORY.md`.
 
 **Resultado:** inventario completado; no se ha cambiado el comportamiento ni se ha eliminado o migrado ninguna clave. La siguiente implementación debe centralizar el acceso a sesión y diseñar el repositorio común con compatibilidad v1, dual-read/dual-write y rollback.
 
+
+## Persistencia común versionada (primer incremento)
+
+Implementación: `src/contracts/applicationPersistence.ts`.
+
+- Define un repositorio común por `namespace/key` con envoltorio versionado, revisión monotónica y timestamp.
+- La implementación de navegador usa IndexedDB (`ledu-application-runtime-v1`, object store `records`) con transacciones read-write y compare-and-set por revisión.
+- `expectedRevision: null` permite crear solo si el registro no existe; un entero exige que coincida la revisión leída; omitirlo permite una escritura incondicional.
+- Incluye una implementación en memoria para tests/adaptadores.
+- El adaptador de compatibilidad implementa dual-read/dual-write para un registro heredado: valida el valor antiguo, migra al leer sin borrar v1, detecta divergencias entre v1 y v2 y escribe primero el registro principal antes de intentar el espejo heredado.
+- Si falla la escritura espejo, lanza `LegacyMirrorWriteError` con el registro principal ya confirmado. El consumidor debe conservar el mismo registro/revisión y reconciliar; no debe generar otra operación con ID nuevo.
+- Los conflictos compare-and-set no sobrescriben una revisión concurrente.
+
+**Límites deliberados de esta entrega:**
+- El repositorio aún no está conectado a los flujos de hand-off, outbox manual, mappings, snapshots base, conflictos ni ACKs. No se cambia el comportamiento existente.
+- IndexedDB se añade como almacén de runtime independiente; no se modifica ni migra la base `ledu-tabulation-sync-v1` que contiene operaciones pendientes.
+- El adaptador dual todavía se aplica por registro y requiere un parser/serializador específico del formato v1. No se debe conectar a una clave real hasta añadir ese adaptador específico y pruebas de recuperación.
+- No hay borrado automático de claves v1 ni de datos históricos.
+
+Tests: `src/contracts/applicationPersistence.test.ts` cubre revisiones, compare-and-set, aislamiento JSON, listado, borrado condicionado, migración v1 no destructiva, divergencia y fallo de escritura espejo.
+
 ## Siguiente paso arquitectónico
 
 1. [x] Sustituir las lecturas directas de sesión de `HomeView` por `readManagerSession`. La validación está cubierta por `managerSession.test.ts`; verificar CI del nuevo HEAD.
