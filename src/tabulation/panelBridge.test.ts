@@ -342,6 +342,15 @@ describe('tabulation → panel', () => {
     expect(result.issues.join(' ')).toContain('no tiene correspondencia');
   });
 
+  it('rejects malformed mapped IDs without throwing or creating an outbox', () => {
+    const source = { ...panel(), remoteId: 'remote-tournament-123' };
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.panelLink!.idMap!.teams.t1 = 'x'.repeat(201);
+    const result = buildOutbox(tab, 'r1', now);
+    expect(result.outbox).toBeNull();
+    expect(result.issues.join(' ')).toContain('no tiene correspondencia');
+  });
+
 describe('ADUMA rounds sent to the panel', () => {
   it('skips debates against a fallen team, which are not held', () => {
     const source = panel();
