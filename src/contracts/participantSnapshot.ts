@@ -70,14 +70,13 @@ function makeIdentity<K extends EntityKind>(kind: K, id: string, source: Partici
   return entityIdentity(kind, mapId(kind, id, source, maps), source, id);
 }
 
-function uniqueIds(items: readonly { identity: EntityIdentity<EntityKind> }[], label: string): void {
+function uniqueIds(items: readonly { identity: { canonicalId: string } }[], label: string): void {
   const ids = items.map((item) => item.identity.canonicalId);
   if (new Set(ids).size !== ids.length) throw new ParticipantSnapshotError('Hay IDs canónicos duplicados en ' + label + '.');
 }
 
 function finalizeSnapshot(
   context: ActiveTournamentContext,
-  source: ParticipantSource,
   teams: ParticipantTeam[],
   speakers: ParticipantSpeaker[],
   judges: ParticipantJudge[],
@@ -140,7 +139,7 @@ export function participantSnapshotFromManager(
   const physicalRooms = input.physicalRooms.map((item) => ({
     identity: makeIdentity('physical-room', item.id, source, maps), name: item.name, active: item.active,
   }));
-  return finalizeSnapshot(context, source, teams, speakers, judges, physicalRooms);
+  return finalizeSnapshot(context, teams, speakers, judges, physicalRooms);
 }
 
 /** Tabulation must provide explicit local→canonical mappings for every entity and relation. */
@@ -196,7 +195,7 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot {
     return entityIdentity(kind, item.canonicalId, item.source as IdentitySource, item.sourceId);
   };
   const readText = (value: unknown, label: string): string => {
-    if (typeof value !== 'string' || !value.trim() || value.length > 200) throw new ParticipantSnapshotError(label + ' no es válido.');
+    if (typeof value !== 'string' || (!allowEmpty && !value.trim()) || value.length > 200) throw new ParticipantSnapshotError(label + ' no es válido.');
     return value;
   };
   const readBoolean = (value: unknown, label: string): boolean => {
@@ -211,7 +210,7 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ParticipantSnapshotError('Equipo inválido.');
     const item = raw as Record<string, unknown>;
     return { identity: readIdentity('team', item.identity), name: readText(item.name, 'Nombre de equipo'),
-      institution: readText(item.institution, 'Institución'), active: readBoolean(item.active, 'Estado de equipo'),
+      institution: readText(item.institution, 'Institución', true), active: readBoolean(item.active, 'Estado de equipo'),
       incompatibleJudgeIds: readIds(item.incompatibleJudgeIds, 'Incompatibilidades de equipo') };
   });
   const speakers = candidate.speakers.map((raw) => {
@@ -223,7 +222,7 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ParticipantSnapshotError('Juez inválido.');
     const item = raw as Record<string, unknown>;
     return { identity: readIdentity('judge', item.identity), name: readText(item.name, 'Nombre de juez'),
-      institution: readText(item.institution, 'Institución del juez'), active: readBoolean(item.active, 'Estado de juez'),
+      institution: readText(item.institution, 'Institución del juez', true), active: readBoolean(item.active, 'Estado de juez'),
       incompatibleJudgeIds: readIds(item.incompatibleJudgeIds, 'Incompatibilidades de juez') };
   });
   const physicalRooms = candidate.physicalRooms.map((raw) => {
@@ -235,5 +234,5 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot {
   const tournamentId = canonicalId('tournament', candidate.tournamentId);
   const context = Object.freeze({ schemaVersion: 1 as const, tournamentId, revision: candidate.revision as number,
     source: 'server' as const, updatedAt: candidate.updatedAt as number });
-  return finalizeSnapshot(context, 'manager', teams, speakers, judges, physicalRooms);
+  return finalizeSnapshot(context, teams, speakers, judges, physicalRooms);
 }
