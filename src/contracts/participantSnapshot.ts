@@ -171,7 +171,7 @@ export function participantSnapshotFromTabulation(
   const physicalRooms = input.venues.map((item) => ({
     identity: makeIdentity('physical-room', item.id, source, maps), name: item.name, active: item.active,
   }));
-  return finalizeSnapshot(context, source, teams, speakers, judges, physicalRooms);
+  return finalizeSnapshot(context, teams, speakers, judges, physicalRooms);
 }
 
 /** Validate snapshots received from persistence or another module before consuming them. */
@@ -194,7 +194,7 @@ export function parseParticipantSnapshot(value: unknown): ParticipantSnapshot {
     }
     return entityIdentity(kind, item.canonicalId, item.source as IdentitySource, item.sourceId);
   };
-  const readText = (value: unknown, label: string): string => {
+  const readText = (value: unknown, label: string, allowEmpty = false): string => {
     if (typeof value !== 'string' || (!allowEmpty && !value.trim()) || value.length > 200) throw new ParticipantSnapshotError(label + ' no es válido.');
     return value;
   };
