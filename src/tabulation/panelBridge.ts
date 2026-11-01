@@ -1,4 +1,5 @@
 import type { Judge, Room, Speaker, Team, Tournament } from '../domain';
+import { resolveMappedIdentity, type EntityKind } from '../contracts/identity';
 import { createTimer, resolvePhases, validateAssignments, withRoomStatus } from '../timer';
 import { pickChair } from './adjudication';
 import { createTabTournament } from './presets';
@@ -379,7 +380,15 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
     if (!tournament.panelLink?.remoteId) return localId;
     // Early linked copies used identical local/manager IDs before the explicit map existed.
     if (!idMap) return localId;
-    return idMap[kind][localId] ?? null;
+    const entityKind: EntityKind = kind === 'teams' ? 'team'
+      : kind === 'speakers' ? 'speaker'
+        : kind === 'judges' ? 'judge' : 'physical-room';
+    try {
+      return resolveMappedIdentity(entityKind, idMap[kind], localId);
+    } catch {
+      // Keep malformed IDs inside the normal proposal-validation path.
+      return null;
+    }
   };
   let fallen = 0;
   for (const debate of round.debates) {
