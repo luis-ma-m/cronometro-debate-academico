@@ -97,13 +97,11 @@ Las claves de sesión, cronómetro, borradores y datos del torneo comparten el e
 
 ## 4. Hallazgos que condicionan la migración
 
-### H1 — La sesión compartida no es todavía el único lector
+### H1 — Sesión compartida: resuelto en el incremento actual
 
-`src/App.tsx` ya utiliza `readManagerSession`, pero `HomeView.tsx` mantiene:
-- `readManagerToken()`, que vuelve a parsear directamente `ledu-admin-session`.
-- Otro parseo inline de la misma clave en el pull periódico.
+El hallazgo se corrigió en `src/tabulation/views/HomeView.tsx`: tanto el bootstrap desde Gestión como el pull remoto periódico utilizan ahora `readManagerSession(window.localStorage)`. Se retiró el parser local y el parseo inline. Los límites de longitud del token, token no vacío y expiración entera segura quedan centralizados en `src/contracts/managerSession.ts`.
 
-Estos caminos no aplican todas las validaciones del contrato compartido (por ejemplo, el límite de longitud del token y la validación de entero seguro de expiración). Deben migrarse al contrato común antes de declarar un bootstrap único.
+La cobertura de parseo/expiración/corrupción permanece en `src/contracts/managerSession.test.ts`; la CI del nuevo HEAD debe confirmar la integración. No se cambia la clave persistida ni el formato, por lo que no requiere migración de sesiones.
 
 ### H2 — Los hand-offs son buzones de una sola posición
 
@@ -201,7 +199,7 @@ La app móvil migra borradores antiguos v1 a v2 al leerlos. La migración futura
 - [x] Lectores/escritores principales de hand-off y outbox manual identificados.
 - [x] Persistencia de mappings, snapshots base, conflictos y ACKs identificada.
 - [x] Persistencia IndexedDB y borradores de actas identificados.
-- [x] Duplicación de lectura de sesión detectada.
+- [x] Duplicación de lectura de sesión detectada y corregida en `1dde284333ce2c2caa6d3deb602b973c58df9992`.
 - [ ] Repositorio de persistencia común implementado.
 - [ ] Dual-read/dual-write implementado y probado.
 - [ ] Migración/rollback de datos locales implementados y probados.
