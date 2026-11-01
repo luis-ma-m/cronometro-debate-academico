@@ -16,7 +16,7 @@ describe('canonical identity contracts', () => {
 
   it('rejects empty, oversized and control-character IDs', () => {
     expect(() => canonicalId('team', '   ')).toThrow(IdentityContractError);
-    expect(() => sourceId('judge', 'bad\\nid')).toThrow(IdentityContractError);
+    expect(() => sourceId('judge', 'bad\nid')).toThrow(IdentityContractError);
     expect(() => canonicalId('team', 'x'.repeat(201))).toThrow(IdentityContractError);
   });
 
