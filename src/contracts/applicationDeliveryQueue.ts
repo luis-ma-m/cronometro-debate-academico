@@ -113,6 +113,18 @@ function validateStored<T>(value: unknown): ApplicationDelivery<T> {
   });
 }
 
+function deliveryIdentity<T>(item: ApplicationDelivery<T>) {
+  return {
+    schemaVersion: item.schemaVersion,
+    deliveryId: item.deliveryId,
+    source: item.source,
+    target: item.target,
+    kind: item.kind,
+    createdAt: item.createdAt,
+    payload: item.payload,
+  };
+}
+
 function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
@@ -125,8 +137,7 @@ export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue
       const input = validateInput(raw);
       const current = items.get(input.deliveryId);
       if (current) {
-        const { status: _status, attempts: _attempts, leaseOwner: _owner, leaseUntil: _until, ackedAt: _acked, ...identity } = current;
-        if (!sameJson(identity, { schemaVersion: 1, ...input })) {
+        if (!sameJson(deliveryIdentity(current), { schemaVersion: 1, ...input })) {
           throw new ApplicationPersistenceError('El deliveryId ya existe con un contenido diferente.');
         }
         return validateStored<T>(current);
@@ -233,8 +244,7 @@ export function createIndexedDbApplicationDeliveryQueue(
           try {
             if (request.result) {
               const existing = validateStored<T>(request.result);
-              const { status: _s, attempts: _a, leaseOwner: _o, leaseUntil: _u, ackedAt: _ack, ...identity } = existing;
-              if (!sameJson(identity, { schemaVersion: 1, ...input })) throw new ApplicationPersistenceError('El deliveryId ya existe con un contenido diferente.');
+              if (!sameJson(deliveryIdentity(existing), { schemaVersion: 1, ...input })) throw new ApplicationPersistenceError('El deliveryId ya existe con un contenido diferente.');
               result = existing;
             } else {
               result = validateStored<T>({ schemaVersion: 1, ...input, status: 'pending', attempts: 0 });
