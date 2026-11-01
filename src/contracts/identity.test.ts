@@ -35,6 +35,8 @@ describe('canonical identity contracts', () => {
     const mapping = { 'tab-team-9': 'team-1' };
     expect(resolveMappedIdentity('team', mapping, 'tab-team-9')).toBe('team-1');
     expect(resolveMappedIdentity('team', mapping, 'Team A')).toBeNull();
+    const inherited = Object.create({ 'legacy-team': 'team-2' }) as Record<string, string>;
+    expect(resolveMappedIdentity('team', inherited, 'legacy-team')).toBeNull();
   });
 
   it('validates external identity DTOs at runtime', () => {
