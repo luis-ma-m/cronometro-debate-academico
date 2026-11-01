@@ -52,7 +52,7 @@ export class IdentityContractError extends Error {
  */
 function validateOpaqueId(value: unknown, label: string): string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 200
-    || value.trim().length === 0 || /[\\u0000-\\u001f\\u007f]/.test(value)) {
+    || /[\u0000-\u001f\u007f]/.test(value)) {
     throw new IdentityContractError(label + ' debe ser una cadena no vacía de hasta 200 caracteres y sin caracteres de control.');
   }
   return value;
