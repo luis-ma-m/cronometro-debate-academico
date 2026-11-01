@@ -168,7 +168,74 @@ export function buildPanelHandoff(panel: Tournament, now = Date.now()): PanelHan
 }
 
 export const writeHandoff = (storage: SimpleStorage, handoff: PanelHandoff) => storage.setItem(HANDOFF_KEY, JSON.stringify(handoff));
-export const readHandoff = (storage: SimpleStorage) => readJson<PanelHandoff>(storage, HANDOFF_KEY, 'ledu-tabulacion-handoff');
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && value.length <= 200;
+}
+export function parsePanelHandoff(value: unknown): PanelHandoff | null {
+  if (!isRecord(value) || value.format !== 'ledu-tabulacion-handoff' || value.version !== 1
+    || !Number.isSafeInteger(value.createdAt) || (value.createdAt as number) < 0
+    || !isNonEmptyString(value.tournamentName)
+    || (value.tournamentId !== undefined && !isNonEmptyString(value.tournamentId))
+    || (value.revision !== undefined && (!Number.isSafeInteger(value.revision) || (value.revision as number) < 0))
+    || (value.updatedAt !== undefined && (!Number.isSafeInteger(value.updatedAt) || (value.updatedAt as number) < 0))
+    || !Array.isArray(value.teams) || !Array.isArray(value.speakers)
+    || !Array.isArray(value.judges) || !Array.isArray(value.venues)) return null;
+  const readRows = <T extends { id: string }>(rows: unknown[], read: (row: Record<string, unknown>) => T | null): T[] | null => {
+    const result: T[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (!isRecord(row)) return null;
+      const item = read(row);
+      if (!item || seen.has(item.id)) return null;
+      seen.add(item.id);
+      result.push(item);
+    }
+    return result;
+  };
+  const teams = readRows(value.teams, (row) => {
+    if (!isNonEmptyString(row.id) || !isNonEmptyString(row.name) || typeof row.institution !== 'string'
+      || typeof row.active !== 'boolean' || !Array.isArray(row.incompatibleJudgeIds)
+      || !row.incompatibleJudgeIds.every(isNonEmptyString)) return null;
+    return { id: row.id, name: row.name, institution: row.institution, active: row.active, incompatibleJudgeIds: [...row.incompatibleJudgeIds] };
+  });
+  const speakers = readRows(value.speakers, (row) => {
+    if (!isNonEmptyString(row.id) || !isNonEmptyString(row.name) || !isNonEmptyString(row.teamId)) return null;
+    return { id: row.id, name: row.name, teamId: row.teamId };
+  });
+  const judges = readRows(value.judges, (row) => {
+    if (!isNonEmptyString(row.id) || !isNonEmptyString(row.name) || typeof row.institution !== 'string'
+      || typeof row.active !== 'boolean' || !Array.isArray(row.incompatibleJudgeIds)
+      || !row.incompatibleJudgeIds.every(isNonEmptyString)) return null;
+    return { id: row.id, name: row.name, institution: row.institution, active: row.active, incompatibleJudgeIds: [...row.incompatibleJudgeIds] };
+  });
+  const venues = readRows(value.venues, (row) => {
+    if (!isNonEmptyString(row.id) || !isNonEmptyString(row.name) || typeof row.active !== 'boolean') return null;
+    return { id: row.id, name: row.name, active: row.active };
+  });
+  if (!teams || !speakers || !judges || !venues) return null;
+  const teamIds = new Set(teams.map((item) => item.id));
+  const judgeIds = new Set(judges.map((item) => item.id));
+  if (speakers.some((item) => !teamIds.has(item.teamId))
+    || teams.some((item) => item.incompatibleJudgeIds.some((id) => !judgeIds.has(id)))
+    || judges.some((item) => item.incompatibleJudgeIds.some((id) => !judgeIds.has(id)))) return null;
+  return {
+    format: 'ledu-tabulacion-handoff',
+    version: 1,
+    createdAt: value.createdAt as number,
+    ...(typeof value.tournamentId === 'string' ? { tournamentId: value.tournamentId } : {}),
+    ...(typeof value.revision === 'number' ? { revision: value.revision } : {}),
+    ...(typeof value.updatedAt === 'number' ? { updatedAt: value.updatedAt } : {}),
+    tournamentName: value.tournamentName,
+    teams, speakers, judges, venues,
+  };
+}
+export function readHandoff(storage: SimpleStorage): PanelHandoff | null {
+  try { return parsePanelHandoff(JSON.parse(storage.getItem(HANDOFF_KEY) ?? 'null')); }
+  catch { return null; }
+}
 export const clearHandoff = (storage: SimpleStorage) => storage.removeItem(HANDOFF_KEY);
 export const writeOutbox = (storage: SimpleStorage, outbox: PanelOutbox) => storage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
 export const readOutbox = (storage: SimpleStorage) => readJson<PanelOutbox>(storage, OUTBOX_KEY, 'ledu-tabulacion-outbox');
