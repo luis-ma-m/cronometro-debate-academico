@@ -7,6 +7,7 @@ import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
 import { apiConfigured } from '../api';
+import { readManagerSession } from '../contracts/managerSession';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
 import type { PendingSyncOperation } from './syncOutbox';
 import { createSyncOutboxWorker } from './syncOutboxWorker';
@@ -14,12 +15,8 @@ import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 
-const MANAGER_SESSION_KEY = 'ledu-admin-session';
 function readManagerSessionToken(): string | undefined {
-  try {
-    const session = JSON.parse(window.localStorage.getItem(MANAGER_SESSION_KEY) ?? 'null') as { token?: unknown; expiresAt?: unknown } | null;
-    return typeof session?.token === 'string' && typeof session.expiresAt === 'number' && session.expiresAt > Date.now() ? session.token : undefined;
-  } catch { return undefined; }
+  return readManagerSession(window.localStorage)?.token;
 }
 import { BallotsView } from './views/BallotsView';
 import { HomeView } from './views/HomeView';
