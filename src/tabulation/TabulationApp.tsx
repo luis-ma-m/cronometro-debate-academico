@@ -8,6 +8,8 @@ import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
 import { apiConfigured } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
+import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
+import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
 import { activeTournamentContext } from '../contracts/activeTournamentContext';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
 import type { PendingSyncOperation } from './syncOutbox';
@@ -16,9 +18,6 @@ import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 
-function readManagerSessionToken(): string | undefined {
-  return readManagerSession(window.localStorage)?.token;
-}
 import { BallotsView } from './views/BallotsView';
 import { HomeView } from './views/HomeView';
 import { LogView } from './views/LogView';
@@ -60,7 +59,7 @@ function TabulationShell() {
   const [projection, setProjection] = useState(false);
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const [managerSessionToken, setManagerSessionToken] = useState(readManagerSessionToken);
+  const [managerSession, setManagerSession] = useState(() => readManagerSession(window.localStorage));
   const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   const [managerConnection, setManagerConnection] = useState<{ connected: boolean; checkedAt: number | null; lastSuccessAt: number | null }>({ connected: false, checkedAt: null, lastSuccessAt: null });
   const tournament = state.tournament;
@@ -78,9 +77,27 @@ function TabulationShell() {
       return null;
     }
   }, [tournament?.panelLink?.remoteId, tournament?.panelLink?.remoteRevision, tournament?.panelLink?.remoteUpdatedAt, tournament?.updatedAt]);
+  const tabulationParticipants = useMemo(() => {
+    if (!tournament || !activeTournament || !tournament.panelLink?.idMap) return null;
+    try {
+      return participantSnapshotFromTabulation(activeTournament, {
+        teams: tournament.teams,
+        speakers: tournament.speakers,
+        judges: tournament.judges,
+        venues: tournament.venues,
+      }, tournament.panelLink.idMap);
+    } catch {
+      return null;
+    }
+  }, [tournament, activeTournament]);
+  const applicationBootstrap = useMemo(() => createApplicationBootstrap({
+    session: managerSession,
+    activeTournament,
+    participants: tabulationParticipants,
+  }), [managerSession, activeTournament, tabulationParticipants]);
 
   useEffect(() => {
-    const refreshSession = () => setManagerSessionToken(readManagerSessionToken());
+    const refreshSession = () => setManagerSession(readManagerSession(window.localStorage));
     const onStorage = (event: StorageEvent) => {
       if (event.key === MANAGER_SESSION_STORAGE_KEY) refreshSession();
     };
@@ -98,7 +115,7 @@ function TabulationShell() {
     };
   }, []);
   useEffect(() => {
-    if (!apiConfigured || !managerSessionToken || !activeTournament || state.readOnly) {
+    if (!apiConfigured || !applicationBootstrap.session?.token || !applicationBootstrap.activeTournament || state.readOnly) {
       setSyncQueue([]);
       return;
     }
@@ -112,9 +129,9 @@ function TabulationShell() {
     }
     const worker = createSyncOutboxWorker({
       outbox,
-      tournamentId: activeTournament.tournamentId,
+      tournamentId: applicationBootstrap.activeTournament.tournamentId,
       workerId: makeTabId('sync-worker'),
-      dispatch: createTabulationSyncDispatcher({ token: managerSessionToken }),
+      dispatch: createTabulationSyncDispatcher({ token: applicationBootstrap.session.token }),
       onQueueChange: (operations) => { if (!disposed) setSyncQueue(operations); },
       onAcknowledged: (operation, response) => {
         if (disposed) return;
@@ -131,7 +148,7 @@ function TabulationShell() {
     });
     worker.start();
     return () => { disposed = true; worker.stop(); };
-  }, [managerSessionToken, activeTournament?.tournamentId, state.readOnly, store]);
+  }, [applicationBootstrap.session?.token, applicationBootstrap.activeTournament?.tournamentId, state.readOnly, store]);
 
   useEffect(() => {
     const onHashChange = () => setViewState(readHashView());
@@ -278,7 +295,7 @@ function TabulationShell() {
           : state.lastSavedAt ? 'Guardado en este navegador · hace ' + Math.max(0, Math.round((now - state.lastSavedAt) / 1000)) + ' s'
             : tournament ? 'Guardado en este navegador' : 'Sin torneo abierto';
 
-  const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store, managerSessionToken } : null;
+  const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store, managerSessionToken: applicationBootstrap.session?.token } : null;
 
   return <div className={'app-shell tab-shell' + (projection ? ' tab-projection' : '')}>
     <aside className="sidebar">
