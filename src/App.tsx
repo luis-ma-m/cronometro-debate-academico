@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TabulationRulesPanel } from './components/TabulationRulesPanel';
 import { clearManagerSession, readManagerSession, writeManagerSession } from './contracts/managerSession';
+import { activeTournamentContext } from './contracts/activeTournamentContext';
 import { TabulationTournamentRanking } from './components/TabulationTournamentRanking';
 import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
@@ -130,6 +131,14 @@ export default function App() {
   const [activatingRound, setActivatingRound] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => { try { return localStorage.getItem('debate-control-timer-sound') === 'true'; } catch { return false; } });
   const controllerToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('control') ?? '';
+  const activeTournament = useMemo(() => {
+    if (!data.remoteId) return null;
+    try {
+      return activeTournamentContext(data.remoteId, data.revision, 'server', data.updatedAt);
+    } catch {
+      return null;
+    }
+  }, [data.remoteId, data.revision, data.updatedAt]);
 
   const reloadAdmin = useCallback(async () => {
     if (demoMode) return;
@@ -349,7 +358,7 @@ export default function App() {
   }, [roomId, session, reloadAdmin, reloadRoom]);
 
   useEffect(() => {
-    if (roomId || !apiConfigured || !session?.token || !data.remoteId) {
+    if (roomId || !apiConfigured || !session?.token || !activeTournament) {
       setSyncQueue([]);
       return;
     }
@@ -363,7 +372,7 @@ export default function App() {
     }
     const worker = createSyncOutboxWorker({
       outbox,
-      tournamentId: data.remoteId,
+      tournamentId: activeTournament.tournamentId,
       workerId: makeId('sync-worker'),
       dispatch: createTabulationSyncDispatcher({
         token: session.token,
@@ -384,7 +393,7 @@ export default function App() {
     });
     worker.start();
     return () => { disposed = true; worker.stop(); };
-  }, [roomId, session?.token, data.remoteId, reloadAdmin]);
+  }, [roomId, session?.token, activeTournament?.tournamentId, reloadAdmin]);
   useEffect(() => {
     if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
   }, [data.rounds, selectedRound]);
