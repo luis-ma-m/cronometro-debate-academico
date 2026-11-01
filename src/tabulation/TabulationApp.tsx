@@ -7,7 +7,7 @@ import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
 import { apiConfigured } from '../api';
-import { readManagerSession } from '../contracts/managerSession';
+import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
 import type { PendingSyncOperation } from './syncOutbox';
 import { createSyncOutboxWorker } from './syncOutboxWorker';
@@ -67,7 +67,7 @@ function TabulationShell() {
   useEffect(() => {
     const refreshSession = () => setManagerSessionToken(readManagerSessionToken());
     const onStorage = (event: StorageEvent) => {
-      if (event.key === MANAGER_SESSION_KEY) refreshSession();
+      if (event.key === MANAGER_SESSION_STORAGE_KEY) refreshSession();
     };
     window.addEventListener('storage', onStorage);
     window.addEventListener('focus', refreshSession);
