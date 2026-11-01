@@ -27,20 +27,35 @@ describe('application delivery queue', () => {
   it('claims once, rejects another consumer, and acknowledges only by the lease owner', async () => {
     const queue = createMemoryApplicationDeliveryQueue();
     await queue.enqueue(delivery('delivery-1'));
-    const claimed = await queue.claimNext({ consumer: 'tabulation-tab-1', now: 100, leaseMs: 5000 });
+    const claimed = await queue.claimNext({ consumer: 'tabulation-tab-1', target: 'tabulation', now: 100, leaseMs: 5000 });
     expect(claimed).toMatchObject({ status: 'claimed', attempts: 1, leaseOwner: 'tabulation-tab-1', leaseUntil: 5100 });
-    expect(await queue.claimNext({ consumer: 'tabulation-tab-2', now: 101, leaseMs: 5000 })).toBeNull();
+    expect(await queue.claimNext({ consumer: 'tabulation-tab-2', target: 'tabulation', now: 101, leaseMs: 5000 })).toBeNull();
     expect(await queue.acknowledge('delivery-1', 'tabulation-tab-2', 102)).toBe(false);
     expect(await queue.acknowledge('delivery-1', 'tabulation-tab-1', 103)).toBe(true);
     expect(await queue.acknowledge('delivery-1', 'tabulation-tab-1', 104)).toBe(false);
     expect(await queue.get('delivery-1')).toMatchObject({ status: 'acked', ackedAt: 103, attempts: 1 });
   });
 
+  it('does not allow a consumer to claim deliveries addressed to the other module', async () => {
+    const queue = createMemoryApplicationDeliveryQueue();
+    await queue.enqueue({ ...delivery('for-manager'), source: 'tabulation', target: 'manager' });
+    expect(await queue.claimNext({ consumer: 'tab', target: 'tabulation', now: 100, leaseMs: 500 })).toBeNull();
+    expect(await queue.claimNext({ consumer: 'manager', target: 'manager', now: 100, leaseMs: 500 })).toMatchObject({ deliveryId: 'for-manager' });
+  });
+
+  it('does not acknowledge after its lease has expired', async () => {
+    const queue = createMemoryApplicationDeliveryQueue();
+    await queue.enqueue(delivery('expired-ack'));
+    await queue.claimNext({ consumer: 'tab-1', target: 'tabulation', now: 100, leaseMs: 10 });
+    expect(await queue.acknowledge('expired-ack', 'tab-1', 110)).toBe(false);
+    expect(await queue.get('expired-ack')).toMatchObject({ status: 'claimed' });
+  });
+
   it('recovers an expired claim with the same delivery identity', async () => {
     const queue = createMemoryApplicationDeliveryQueue();
     await queue.enqueue(delivery('delivery-1'));
-    await queue.claimNext({ consumer: 'tab-1', now: 100, leaseMs: 50 });
-    const recovered = await queue.claimNext({ consumer: 'tab-2', now: 150, leaseMs: 50 });
+    await queue.claimNext({ consumer: 'tab-1', target: 'tabulation', now: 100, leaseMs: 50 });
+    const recovered = await queue.claimNext({ consumer: 'tab-2', target: 'tabulation', now: 150, leaseMs: 50 });
     expect(recovered).toMatchObject({ deliveryId: 'delivery-1', status: 'claimed', attempts: 2, leaseOwner: 'tab-2' });
     expect(await queue.acknowledge('delivery-1', 'tab-1', 151)).toBe(false);
     expect(await queue.acknowledge('delivery-1', 'tab-2', 152)).toBe(true);
@@ -49,11 +64,11 @@ describe('application delivery queue', () => {
   it('allows the current lease owner to release for retry', async () => {
     const queue = createMemoryApplicationDeliveryQueue();
     await queue.enqueue(delivery('delivery-1'));
-    await queue.claimNext({ consumer: 'tab-1', now: 100, leaseMs: 500 });
+    await queue.claimNext({ consumer: 'tab-1', target: 'tabulation', now: 100, leaseMs: 500 });
     expect(await queue.release('delivery-1', 'wrong-tab')).toBe(false);
     expect(await queue.release('delivery-1', 'tab-1')).toBe(true);
     expect(await queue.get('delivery-1')).toMatchObject({ status: 'pending', attempts: 1 });
-    expect(await queue.claimNext({ consumer: 'tab-2', now: 101, leaseMs: 500 })).toMatchObject({ attempts: 2 });
+    expect(await queue.claimNext({ consumer: 'tab-2', target: 'tabulation', now: 101, leaseMs: 500 })).toMatchObject({ attempts: 2 });
   });
 
   it('validates payloads, endpoints, lease duration, and identifiers', async () => {
@@ -62,6 +77,6 @@ describe('application delivery queue', () => {
     await expect(queue.enqueue({ ...delivery('same'), source: 'manager', target: 'manager' } as never))
       .rejects.toBeInstanceOf(ApplicationPersistenceError);
     await expect(queue.enqueue({ ...delivery('undefined'), payload: undefined })).rejects.toBeInstanceOf(ApplicationPersistenceError);
-    await expect(queue.claimNext({ consumer: 'tab', now: 0, leaseMs: 0 })).rejects.toBeInstanceOf(ApplicationPersistenceError);
+    await expect(queue.claimNext({ consumer: 'tab', target: 'tabulation', now: 0, leaseMs: 0 })).rejects.toBeInstanceOf(ApplicationPersistenceError);
   });
 });
