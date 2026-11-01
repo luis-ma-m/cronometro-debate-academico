@@ -20,6 +20,7 @@ describe('application delivery queue', () => {
     const first = await queue.enqueue(delivery('delivery-1'));
     const second = await queue.enqueue(delivery('delivery-1'));
     expect(second).toEqual(first);
+    await queue.enqueue({ ...delivery('delivery-1'), payload: { teams: [{ id: 'team-1' }], tournamentId: 't-1' } });
     await expect(queue.enqueue({ ...delivery('delivery-1'), payload: { tournamentId: 'other' } }))
       .rejects.toBeInstanceOf(ApplicationPersistenceError);
   });
