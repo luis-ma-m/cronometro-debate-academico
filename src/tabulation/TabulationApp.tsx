@@ -8,6 +8,7 @@ import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
 import { apiConfigured } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
+import { activeTournamentContext } from '../contracts/activeTournamentContext';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
 import type { PendingSyncOperation } from './syncOutbox';
 import { createSyncOutboxWorker } from './syncOutboxWorker';
@@ -63,6 +64,20 @@ function TabulationShell() {
   const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   const [managerConnection, setManagerConnection] = useState<{ connected: boolean; checkedAt: number | null; lastSuccessAt: number | null }>({ connected: false, checkedAt: null, lastSuccessAt: null });
   const tournament = state.tournament;
+  const activeTournament = useMemo(() => {
+    const remoteId = tournament?.panelLink?.remoteId;
+    if (!remoteId || !tournament) return null;
+    try {
+      return activeTournamentContext(
+        remoteId,
+        tournament.panelLink?.remoteRevision ?? 0,
+        'server',
+        tournament.panelLink?.remoteUpdatedAt ?? tournament.updatedAt,
+      );
+    } catch {
+      return null;
+    }
+  }, [tournament?.panelLink?.remoteId, tournament?.panelLink?.remoteRevision, tournament?.panelLink?.remoteUpdatedAt, tournament?.updatedAt]);
 
   useEffect(() => {
     const refreshSession = () => setManagerSessionToken(readManagerSessionToken());
@@ -83,7 +98,7 @@ function TabulationShell() {
     };
   }, []);
   useEffect(() => {
-    if (!apiConfigured || !managerSessionToken || !tournament?.panelLink?.remoteId || state.readOnly) {
+    if (!apiConfigured || !managerSessionToken || !activeTournament || state.readOnly) {
       setSyncQueue([]);
       return;
     }
@@ -97,7 +112,7 @@ function TabulationShell() {
     }
     const worker = createSyncOutboxWorker({
       outbox,
-      tournamentId: tournament.panelLink.remoteId,
+      tournamentId: activeTournament.tournamentId,
       workerId: makeTabId('sync-worker'),
       dispatch: createTabulationSyncDispatcher({ token: managerSessionToken }),
       onQueueChange: (operations) => { if (!disposed) setSyncQueue(operations); },
@@ -116,7 +131,7 @@ function TabulationShell() {
     });
     worker.start();
     return () => { disposed = true; worker.stop(); };
-  }, [managerSessionToken, tournament?.panelLink?.remoteId, state.readOnly, store]);
+  }, [managerSessionToken, activeTournament?.tournamentId, state.readOnly, store]);
 
   useEffect(() => {
     const onHashChange = () => setViewState(readHashView());
