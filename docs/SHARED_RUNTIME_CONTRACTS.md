@@ -72,7 +72,7 @@ Implementación documental: `docs/LEGACY_HANDOFF_INVENTORY.md`.
 - Se han identificado los lectores y escritores de los hand-offs de participantes y propuestas de ronda.
 - Se han inventariado `panelLink.idMap`, los cursores remotos, snapshots base, reconciliaciones pendientes y ACKs de publicación.
 - Se ha identificado la outbox durable de IndexedDB y los borradores/operaciones pendientes de actas.
-- Se ha detectado que `HomeView` todavía parsea `ledu-admin-session` directamente en dos puntos, en lugar de utilizar el contrato `readManagerSession`.
+- Se detectó y corrigió que `HomeView` parseaba `ledu-admin-session` directamente: tanto el bootstrap como el pull remoto utilizan ahora `readManagerSession`.
 - Los hand-offs y la propuesta de ronda usan claves globales de una sola posición; la migración debe añadir identidad de entrega y ACK de consumo para evitar carreras entre pestañas.
 - El store local sigue admitiendo múltiples torneos. No se simplifica hasta que exista exportación, migración y restauración verificables.
 
@@ -80,7 +80,7 @@ Implementación documental: `docs/LEGACY_HANDOFF_INVENTORY.md`.
 
 ## Siguiente paso arquitectónico
 
-1. Sustituir las lecturas directas de sesión de `HomeView` por `readManagerSession` y añadir pruebas para sesión caducada, corrupta y actualizada entre pestañas.
+1. [x] Sustituir las lecturas directas de sesión de `HomeView` por `readManagerSession`. La validación está cubierta por `managerSession.test.ts`; verificar CI del nuevo HEAD.
 2. Diseñar e implementar el repositorio común de persistencia y los contratos versionados de hand-off, propuesta, mappings, cursor, snapshot base, conflictos y ACKs.
 3. Introducir el nuevo formato en paralelo, con dual-read/dual-write verificable y sin limpiar los datos v1.
 4. Migrar y probar operaciones pendientes, mappings, snapshots, conflictos y ACKs; mantener rollback al lector v1.
