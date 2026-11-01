@@ -118,8 +118,8 @@ Implementación: `src/contracts/applicationDeliveryQueue.ts`; persistencia Index
 - La base `ledu-application-runtime-v1` evoluciona de versión 1 a versión 2 mediante una actualización IndexedDB no destructiva. Se conserva el object store `records` y se añade `deliveries` con clave primaria `deliveryId` e índices por creación y destino/creación.
 - Cada entrega tiene ID estable, origen, destino, tipo, timestamp, payload JSON, estado (`pending`, `claimed`, `acked`) e intentos.
 - `enqueue` es idempotente: repetir el mismo ID y contenido devuelve la entrega existente; reutilizar el ID con contenido distinto se rechaza.
-- `claimNext` reclama atómicamente una entrega pendiente o con lease vencido. El lease identifica al consumidor y tiene duración limitada (máximo cinco minutos).
-- Solo el propietario del lease puede confirmar (`acknowledge`) o liberar (`release`) la entrega. Un consumidor distinto no puede confirmar ni liberar el trabajo ajeno.
+- `claimNext` exige el módulo destino (`manager` o `tabulation`) y reclama atómicamente solo entregas dirigidas a ese módulo, pendientes o con lease vencido. El lease identifica al consumidor y tiene duración limitada (máximo cinco minutos).
+- Solo el propietario del lease vigente puede confirmar (`acknowledge`); un ACK posterior a la expiración se rechaza. Solo el propietario puede liberar (`release`). Un consumidor distinto no puede confirmar ni liberar el trabajo ajeno.
 - Las entregas confirmadas se conservan; no hay purga automática ni borrado de históricos.
 - Hay implementación en memoria para tests y una implementación IndexedDB para el navegador.
 
