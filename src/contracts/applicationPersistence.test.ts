@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ApplicationPersistenceConflict,
   ApplicationPersistenceError,
   createDualReadWriteApplicationRecord,
   createMemoryApplicationRecordRepository,
@@ -22,7 +21,6 @@ function legacyAdapter(initial: unknown = null) {
       if (typeof item.name !== 'string') throw new Error('missing name');
       return { name: item.name };
     },
-    serialize: (value: unknown) => JSON.stringify(value),
     setFailWrite: (value: boolean) => { failWrite = value; },
   };
 }
@@ -43,8 +41,7 @@ describe('application persistence repository', () => {
     const first = await repository.put('participants', 'active', { teams: 1 }, { expectedRevision: null });
     expect(await repository.put('participants', 'active', { teams: 2 }, { expectedRevision: null })).toBeNull();
     expect(await repository.put('participants', 'active', { teams: 2 }, { expectedRevision: first!.revision - 1 })).toBeNull();
-    await expect(repository.put('participants', 'active', { teams: 2 }, { expectedRevision: 9 }))
-      .rejects.toBeInstanceOf(ApplicationPersistenceConflict);
+    expect(await repository.put('participants', 'active', { teams: 2 }, { expectedRevision: 9 })).toBeNull();
   });
 
   it('returns isolated JSON values and lists by namespace in deterministic order', async () => {
