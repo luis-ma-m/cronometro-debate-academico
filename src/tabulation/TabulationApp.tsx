@@ -97,7 +97,10 @@ function TabulationShell() {
   }), [managerSession, activeTournament, tabulationParticipants]);
 
   useEffect(() => {
-    const refreshSession = () => setManagerSession(readManagerSession(window.localStorage));
+    const refreshSession = () => {
+      const next = readManagerSession(window.localStorage);
+      setManagerSession((current) => current?.token === next?.token && current?.expiresAt === next?.expiresAt ? current : next);
+    };
     const onStorage = (event: StorageEvent) => {
       if (event.key === MANAGER_SESSION_STORAGE_KEY) refreshSession();
     };
