@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { validateTournamentInput } from '../../server/core.js';
 import type { Room, Tournament } from '../domain';
 import { createTimer, LEDU_PHASES } from '../timer';
-import { appendPanelPublishAcknowledgement, applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, readPanelPublishAcknowledgements, removePanelPublishAcknowledgements, PANEL_PUBLISH_ACK_KEY, suggestPanelEntityMatches, validatePanelEntityIdMap, tournamentFromHandoff, writeHandoff } from './panelBridge';
+import { appendPanelPublishAcknowledgement, applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, readPanelPublishAcknowledgements, removePanelPublishAcknowledgements, PANEL_PUBLISH_ACK_KEY, parsePanelOutbox, suggestPanelEntityMatches, validatePanelEntityIdMap, tournamentFromHandoff, writeHandoff } from './panelBridge';
 import { memoryStorage } from './store';
 import { qualifyingRound } from './test-fixtures';
 import { createTabTournament } from './presets';
@@ -434,4 +434,15 @@ describe('Tabulation publication acknowledgements', () => {
     });
     expect(readPanelPublishAcknowledgements(storage)).toEqual([]);
   });
+  it('parses round proposals strictly and rejects broken identities or assignments', () => {
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(panel(), now), 'ledu-groups', now, 1));
+    const valid = buildOutbox(tab, 'r1', now).outbox!;
+    expect(parsePanelOutbox(valid)).toEqual(valid);
+    expect(parsePanelOutbox({ ...valid, roundNumber: 0 })).toBeNull();
+    expect(parsePanelOutbox({ ...valid, entityIdMap: { ...valid.entityIdMap, teams: {} } })).toBeNull();
+    expect(parsePanelOutbox({ ...valid, debates: [{ ...valid.debates[0], teamFavorId: 'missing-team' }] })).toBeNull();
+    expect(parsePanelOutbox({ ...valid, debates: [{ ...valid.debates[0], chairId: 'not-a-judge' }] })).toBeNull();
+    expect(parsePanelOutbox({ ...valid, debates: [valid.debates[0], valid.debates[0]] })).toBeNull();
+  });
+
 });
