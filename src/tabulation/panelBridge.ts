@@ -239,7 +239,8 @@ export function readHandoff(storage: SimpleStorage): PanelHandoff | null {
 export const clearHandoff = (storage: SimpleStorage) => storage.removeItem(HANDOFF_KEY);
 export const writeOutbox = (storage: SimpleStorage, outbox: PanelOutbox) => storage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
 function isStringMap(value: unknown): value is Record<string, string> {
-  return isRecord(value) && Object.entries(value).every(([key, mapped]) => isNonEmptyString(key) && isNonEmptyString(mapped));
+  if (!isRecord(value) || !Object.entries(value).every(([key, mapped]) => isNonEmptyString(key) && isNonEmptyString(mapped))) return false;
+  return new Set(Object.values(value)).size === Object.keys(value).length;
 }
 
 export function parsePanelOutbox(value: unknown): PanelOutbox | null {
@@ -293,10 +294,16 @@ export function parsePanelOutbox(value: unknown): PanelOutbox | null {
     });
   }
   if (metadata.some((item) => !Object.values(map.teams).includes(item.teamId))
-    || debates.some((item) => !Object.values(map.teams).includes(item.teamFavorId)
-      || !Object.values(map.teams).includes(item.teamContraId)
-      || !Object.values(map.venues).includes(item.physicalRoomId)
-      || item.judgeIds.some((judgeId) => !Object.values(map.judges).includes(judgeId)))) return null;
+    || debates.some((item) => !Object.prototype.hasOwnProperty.call(map.teams, item.tabulationTeamFavorId)
+      || !Object.prototype.hasOwnProperty.call(map.teams, item.tabulationTeamContraId)
+      || map.teams[item.tabulationTeamFavorId] !== item.teamFavorId
+      || map.teams[item.tabulationTeamContraId] !== item.teamContraId
+      || !Object.prototype.hasOwnProperty.call(map.venues, item.tabulationVenueId)
+      || map.venues[item.tabulationVenueId] !== item.physicalRoomId
+      || item.tabulationJudgeIds.some((judgeId, index) => !Object.prototype.hasOwnProperty.call(map.judges, judgeId)
+        || !item.judgeIds.includes(map.judges[judgeId]))
+      || (item.tabulationChairId !== '' && (!Object.prototype.hasOwnProperty.call(map.judges, item.tabulationChairId)
+        || map.judges[item.tabulationChairId] !== item.chairId)))) return null;
   return {
     format: 'ledu-tabulacion-outbox', version: 1, tabTournamentId: value.tabTournamentId,
     tabulationRoundId: value.tabulationRoundId, createdAt: value.createdAt as number,
