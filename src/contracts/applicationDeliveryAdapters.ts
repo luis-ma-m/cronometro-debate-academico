@@ -74,7 +74,7 @@ export async function claimPanelHandoff(
   queue = getApplicationDeliveryQueue(),
 ): Promise<ApplicationDelivery<PanelHandoff> | null> {
   const delivery = await queue.claimNext<unknown>({
-    consumer, target: 'tabulation', now: Date.now(), leaseMs: APPLICATION_DELIVERY_LEASE_MS,
+    consumer, target: 'tabulation', kind: PANEL_HANDOFF_DELIVERY, now: Date.now(), leaseMs: APPLICATION_DELIVERY_LEASE_MS,
   });
   if (!delivery) return null;
   if (delivery.kind !== PANEL_HANDOFF_DELIVERY) {
@@ -94,7 +94,7 @@ export async function claimPanelOutbox(
   queue = getApplicationDeliveryQueue(),
 ): Promise<ApplicationDelivery<PanelOutbox> | null> {
   const delivery = await queue.claimNext<unknown>({
-    consumer, target: 'manager', now: Date.now(), leaseMs: APPLICATION_DELIVERY_LEASE_MS,
+    consumer, target: 'manager', kind: PANEL_OUTBOX_DELIVERY, now: Date.now(), leaseMs: APPLICATION_DELIVERY_LEASE_MS,
   });
   if (!delivery) return null;
   if (delivery.kind !== PANEL_OUTBOX_DELIVERY) {
@@ -144,7 +144,7 @@ export async function claimPanelPublishAck(
   queue = getApplicationDeliveryQueue(),
 ): Promise<ApplicationDelivery<PanelPublishAcknowledgement> | null> {
   const delivery = await queue.claimNext<unknown>({
-    consumer, target: 'tabulation', now: Date.now(), leaseMs: APPLICATION_DELIVERY_LEASE_MS,
+    consumer, target: 'tabulation', kind: PANEL_PUBLISH_ACK_DELIVERY, now: Date.now(), leaseMs: APPLICATION_DELIVERY_LEASE_MS,
   });
   if (!delivery) return null;
   if (delivery.kind !== PANEL_PUBLISH_ACK_DELIVERY) {
