@@ -35,6 +35,7 @@ export interface EnqueueApplicationDelivery<T = unknown> {
 export interface ClaimApplicationDeliveryOptions {
   consumer: string;
   target: ApplicationDeliveryEndpoint;
+  kind?: string;
   now: number;
   leaseMs: number;
 }
@@ -167,12 +168,12 @@ export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue
         .sort((a, b) => a.createdAt - b.createdAt || a.deliveryId.localeCompare(b.deliveryId))
         .map(item => validateStored<T>(item));
     },
-    async claimNext<T>({ consumer, target, now, leaseMs }) {
+    async claimNext<T>({ consumer, target, kind, now, leaseMs }) {
       validText(consumer, 'El consumidor');
       if (target !== 'manager' && target !== 'tabulation') throw new ApplicationPersistenceError('El destino de consumo no es válido.');
       validTime(now, 'La fecha actual');
       if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 300_000) throw new ApplicationPersistenceError('La duración del lease debe estar entre 1 y 300000 ms.');
-      const candidate = [...items.values()].filter(item => item.target === target && (item.status === 'pending'
+      const candidate = [...items.values()].filter(item => item.target === target && (!kind || item.kind === kind) && (item.status === 'pending'
         || (item.status === 'claimed' && (item.leaseUntil ?? 0) <= now)))
         .sort((a, b) => a.createdAt - b.createdAt || a.deliveryId.localeCompare(b.deliveryId))[0];
       if (!candidate) return null;
@@ -298,7 +299,7 @@ export function createIndexedDbApplicationDeliveryQueue(
         request.onsuccess = () => {
           try {
             const candidate = (request.result as unknown[]).map(item => validateStored<T>(item))
-              .filter(item => item.target === target && (item.status === 'pending' || (item.status === 'claimed' && (item.leaseUntil ?? 0) <= now)))
+              .filter(item => item.target === target && (!kind || item.kind === kind) && (item.status === 'pending' || (item.status === 'claimed' && (item.leaseUntil ?? 0) <= now)))
               .sort((a,b) => a.createdAt-b.createdAt || a.deliveryId.localeCompare(b.deliveryId))[0];
             if (!candidate) return;
             result = validateStored<T>({ ...candidate, status: 'claimed', attempts: candidate.attempts + 1, leaseOwner: consumer, leaseUntil: now + leaseMs });
