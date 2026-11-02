@@ -405,18 +405,18 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     onNavigate(sample ? 'rondas' : 'participantes');
   };
 
-  const createFromPanel = () => {
+  const createFromPanel = async () => {
     if (!handoff || readOnlyNotice()) return;
     const created = tournamentFromHandoff(handoff, presetId);
     store.create(created);
+    if (!store.flush()) { notify('El torneo se ha creado en memoria, pero no se ha confirmado su guardado local. La entrega seguirá pendiente.', 'error'); return; }
     if (handoff.tournamentId) writePanelSyncBase(window.localStorage, created.id, handoff);
-    clearHandoff(window.localStorage);
-    setHandoffVersion((value) => value + 1);
+    if (!await acknowledgeHandoffDelivery()) { notify('El torneo se ha guardado, pero no se pudo confirmar la entrega. Se recuperará al vencer el lease.', 'warning'); return; }
     notify('Torneo creado y vinculado con la identidad del panel. Revisa las reglas, los niveles de los jueces y quién puede presidir.');
     onNavigate('reglas');
   };
 
-  const mergeFromPanel = () => {
+  const mergeFromPanel = async () => {
     if (!handoff || !tournament) return;
     const merged = mergeHandoff(tournament, handoff);
     if (merged.issues.length) { notify(merged.issues.join(' '), 'error'); return; }
@@ -425,18 +425,17 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
       notify('No se han podido aplicar los datos del panel en esta pestaña.', 'error');
       return;
     }
+    if (!store.flush()) { notify('No se ha podido confirmar el guardado local. La entrega seguirá pendiente.', 'error'); return; }
     if (handoff.tournamentId) {
-      if (!store.flush()) { notify('No se ha podido confirmar el guardado local.', 'error'); return; }
       writePanelSyncBase(window.localStorage, tournament.id, handoff);
       clearPendingPanelReconciliation(window.localStorage, tournament.id);
       setPendingReconciliation(null);
     }
-    clearHandoff(window.localStorage);
-    setHandoffVersion((value) => value + 1);
+    if (!await acknowledgeHandoffDelivery()) { notify('Los participantes se han guardado, pero no se pudo confirmar la entrega. Se recuperará al vencer el lease.', 'warning'); return; }
     notify('Participantes actualizados: ' + merged.added + ' nuevos y ' + merged.updated + ' modificados.' + (merged.warnings.length ? ' ' + merged.warnings.join(' ') : ''), merged.warnings.length ? 'warning' : 'success');
   };
 
-  const linkExistingFromPanel = (idMap: PanelEntityIdMap) => {
+  const linkExistingFromPanel = async (idMap: PanelEntityIdMap) => {
     if (!handoff || !tournament || readOnlyNotice()) return;
     const merged = mergeHandoff(tournament, handoff, Date.now(), idMap);
     if (merged.issues.length) { notify(merged.issues.join(' '), 'error'); return; }
@@ -452,8 +451,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     writePanelSyncBase(window.localStorage, tournament.id, handoff);
     clearPendingPanelReconciliation(window.localStorage, tournament.id);
     setPendingReconciliation(null);
-    clearHandoff(window.localStorage);
-    setHandoffVersion((value) => value + 1);
+    if (!await acknowledgeHandoffDelivery()) { notify('El vínculo se ha guardado, pero no se pudo confirmar la entrega. Se recuperará al vencer el lease.', 'warning'); return; }
     setShowLinkReview(false);
     notify('Torneo vinculado. Se han conservado los IDs locales y se han importado las entidades remotas no vinculadas.', 'success');
   };
@@ -551,7 +549,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           && <p className="muted">Este snapshot pertenece a otra identidad remota. No se puede aplicar a «{tournament.name}».</p>}
         {tournament && handoff.tournamentId && tournament.panelLink && !tournament.panelLink.remoteId
           && <p className="muted">Este torneo conserva un vínculo antiguo sin identidad verificable. Para evitar una asociación incorrecta, crea una copia nueva vinculada desde el panel.</p>}
-        <button type="button" className="text-button" onClick={() => { clearHandoff(window.localStorage); setHandoffVersion((value) => value + 1); setShowLinkReview(false); }}>Descartar</button>
+        <button type="button" className="text-button" onClick={() => { void (async () => { if (!await acknowledgeHandoffDelivery()) { notify('No se pudo confirmar el descarte; la entrega seguirá pendiente.', 'error'); return; } setShowLinkReview(false); })(); }}>Descartar</button>
       </div>
     </section>}
     {showLinkReview && tournament && handoff?.tournamentId && !tournament.panelLink && <PanelLinkReview key={handoff.createdAt + '-' + handoff.tournamentId}
