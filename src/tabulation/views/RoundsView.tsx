@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { enqueuePanelOutbox } from '../../contracts/applicationDeliveryAdapters';
 import { Check, ClipboardList, Copy, Dices, Download, FileText, Gavel, MessageCircle, MonitorPlay, MoreHorizontal, Projector, RotateCcw, Search, Send, Shuffle, Sparkles, Star, Trash2, Trophy, Undo2, X } from 'lucide-react';
 import { allocateJudgesForRound, judgesConflict, teamConflicts, type RoundProblem } from '../adjudication';
 import { computeBreak, tournamentChampion } from '../bracket';
@@ -263,17 +264,22 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     }
   };
 
-  const sendToPanel = (target: TabRound) => {
+  const sendToPanel = async (target: TabRound) => {
     const { outbox, issues, warnings } = buildOutbox(tournament, target.id);
     if (!outbox) { notify(issues.join(' '), 'error'); return; }
-    try {
-      writeOutbox(window.localStorage, outbox);
-    } catch {
-      notify('No hay espacio en el navegador para preparar el envío.', 'error');
+    let queued = false;
+    let legacy = false;
+    try { await enqueuePanelOutbox(outbox); queued = true; } catch { /* Preserve the compatibility path below. */ }
+    try { writeOutbox(window.localStorage, outbox); legacy = true; } catch { /* The durable queue may already contain the proposal. */ }
+    if (!queued && !legacy) {
+      notify('No se pudo guardar la propuesta ni en la cola duradera ni en el buzón compatible.', 'error');
       return;
     }
     update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === target.id ? { ...item, pushedAt: Date.now() } : item)) }), { type: 'round.export', message: target.name + ' enviada al panel de cronómetros.' });
-    notify('Emparejamientos de ' + target.name + ' listos para el panel. En el panel (en este mismo navegador) abre «Rondas y salas», elige la ronda y pulsa «Cargar desde tabulación».' + (warnings.length ? ' ' + warnings.join(' ') : ''), warnings.length ? 'warning' : 'success');
+    notify(queued
+      ? 'Propuesta de ' + target.name + ' guardada en la cola duradera. En el panel (este mismo navegador) abre «Rondas y salas» y pulsa «Cargar desde tabulación». ' + (warnings.length ? warnings.join(' ') : '')
+      : 'Propuesta de ' + target.name + ' guardada mediante el buzón compatible; la cola duradera no está disponible. ' + (warnings.length ? warnings.join(' ') : ''),
+    warnings.length ? 'warning' : 'success');
   };
 
   const audit = (target: TabRound) => {
