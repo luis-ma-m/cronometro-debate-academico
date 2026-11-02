@@ -250,7 +250,7 @@ export function parsePanelOutbox(value: unknown): PanelOutbox | null {
     || !Array.isArray(value.teamMetadata) || !Array.isArray(value.debates) || !isRecord(value.entityIdMap)) return null;
   const rawMap = value.entityIdMap;
   if (!isRecord(rawMap) || !isStringMap(rawMap.teams) || !isStringMap(rawMap.speakers) || !isStringMap(rawMap.judges) || !isStringMap(rawMap.venues)) return null;
-  const map = rawMap as PanelEntityIdMap;
+  const map = rawMap as unknown as PanelEntityIdMap;
   const metadata: PanelOutbox['teamMetadata'] = [];
   const seenTeams = new Set<string>();
   for (const raw of value.teamMetadata) {
