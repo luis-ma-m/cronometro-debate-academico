@@ -155,8 +155,40 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
       notify('La ronda se ha confirmado, pero el navegador no la ha podido guardar: todavía no se exporta. Resuelve el aviso de guardado y pulsa «Descargar ZIP».', 'error');
       return;
     }
+    const savedTournament = store.getState().tournament;
+    let deliveryQueued = false;
+    let deliveryIssue = '';
+    if (savedTournament?.panelLink?.remoteId) {
+      const proposal = buildOutbox(savedTournament, pending.round.id);
+      if (proposal.outbox) {
+        try {
+          await enqueuePanelOutbox(proposal.outbox);
+          deliveryQueued = true;
+        } catch (error) {
+          deliveryIssue = errorText(error);
+        }
+        // Keep the old mailbox as a compatibility fallback, but never treat it as an ACK.
+        if (!deliveryQueued) {
+          try {
+            writeOutbox(window.localStorage, proposal.outbox);
+            deliveryIssue = 'La cola durable no está disponible; se ha usado el buzón compatible.';
+          } catch (error) {
+            deliveryIssue = errorText(error);
+          }
+        }
+      } else {
+        deliveryIssue = proposal.issues.join(' ');
+      }
+    } else {
+      deliveryIssue = 'El torneo todavía no está vinculado a Gestión; la ronda permanece guardada localmente.';
+    }
     exportZip(pending.round.id, true);
     setScreenId(pending.round.id);
+    if (deliveryQueued) {
+      notify('Ronda confirmada, guardada y enviada automáticamente a la bandeja de Gestión. Allí sigue pendiente de revisión y publicación oficial.', 'success');
+    } else {
+      notify('Ronda confirmada y guardada localmente. No se ha podido enviar automáticamente a Gestión. ' + deliveryIssue, 'warning');
+    }
   };
 
   const editDraft = (edit: DraftEdit) => applyLogged((current) => {
