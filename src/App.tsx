@@ -3,6 +3,7 @@ import { TabulationRulesPanel } from './components/TabulationRulesPanel';
 import { clearManagerSession, readManagerSession, writeManagerSession } from './contracts/managerSession';
 import { activeTournamentContext } from './contracts/activeTournamentContext';
 import { createApplicationBootstrap } from './contracts/applicationBootstrap';
+import { acknowledgeApplicationDelivery, claimPanelOutbox, createDeliveryConsumerId, enqueuePanelHandoff, releaseApplicationDelivery } from './contracts/applicationDeliveryAdapters';
 import { participantSnapshotFromManager } from './contracts/participantSnapshot';
 import { TabulationTournamentRanking } from './components/TabulationTournamentRanking';
 import type { FormEvent } from 'react';
@@ -115,6 +116,8 @@ export default function App() {
   const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   // Reuse already fetched room-control links for the lifetime of this admin session.
   const preparedRoomLinksRef = useRef<Record<string, { roomName: string; href: string }>>({});
+  const managerDeliveryConsumer = useRef<string | null>(null);
+  const pendingLoadedOutboxDelivery = useRef<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const hasUnsavedRef = useRef(false);
   const [connected, setConnected] = useState(false);
@@ -1310,33 +1313,57 @@ export default function App() {
       rounds: current.rounds.map((item) => item.id === round.id ? { ...item, name: name.trim() } : item),
     }));
   };
-  // The local tabulation lives in this same browser: both directions go through versioned localStorage hand-offs.
-  const sendToTabulation = () => {
-    try {
-      writeHandoff(localStorage, buildPanelHandoff(data));
-    } catch {
-      setServerError('No hay espacio en el almacenamiento del navegador para enviar los datos a la tabulación.');
+  // The durable queue is primary; localStorage remains a compatibility fallback for older tabs.
+  const deliveryConsumerId = () => {
+    if (!managerDeliveryConsumer.current) managerDeliveryConsumer.current = createDeliveryConsumerId('manager');
+    return managerDeliveryConsumer.current;
+  };
+  const sendToTabulation = async () => {
+    const handoff = buildPanelHandoff(data);
+    let queued = false;
+    let legacy = false;
+    try { await enqueuePanelHandoff(handoff); queued = true; } catch { /* Try the compatibility mailbox below. */ }
+    try { writeHandoff(localStorage, handoff); legacy = true; } catch { /* The durable queue may still have succeeded. */ }
+    if (!queued && !legacy) {
+      setServerError('No se pudo guardar la entrega de participantes ni en la cola duradera ni en el buzón compatible.');
       return;
     }
     window.open('/tabulacion#inicio', '_blank', 'noopener');
-    setTabulationNotice('Equipos, oradores, jueces y salas enviados a la tabulación local de este navegador. Si no se ha abierto, entra en /tabulacion.');
+    setTabulationNotice(queued
+      ? 'Participantes enviados mediante la cola duradera. Se conserva también el buzón compatible para versiones anteriores.'
+      : 'Participantes enviados por el mecanismo compatible; la cola duradera no está disponible. Si no se ha abierto, entra en /tabulacion.');
   };
-  const loadFromTabulation = () => {
+  const loadFromTabulation = async () => {
     const round = data.rounds.find((item) => item.id === activeRound);
     if (!round) { setServerError('Selecciona antes una ronda.'); return; }
-    const outbox = readOutbox(localStorage);
+    if (pendingLoadedOutboxDelivery.current) {
+      setServerError('Ya hay una propuesta cargada pendiente de guardar. Guarda los cambios antes de cargar otra.');
+      return;
+    }
+    let delivery: Awaited<ReturnType<typeof claimPanelOutbox>> = null;
+    let consumer = '';
+    try {
+      consumer = deliveryConsumerId();
+      delivery = await claimPanelOutbox(consumer);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo leer la cola duradera.');
+      return;
+    }
+    const outbox = delivery?.payload ?? readOutbox(localStorage);
     if (!outbox) { setServerError('No hay ninguna ronda enviada desde la tabulación. En /tabulacion, abre la ronda y pulsa «Más acciones» → «Enviar al panel de cronómetros».'); return; }
+    const release = async () => { if (delivery) await releaseApplicationDelivery(delivery.deliveryId, consumer).catch(() => false); };
     const result = applyOutboxToPanel(data, round.id, outbox, { makeId });
-    if (!result.rooms) { setServerError('No se puede cargar «' + outbox.roundName + '» en ' + round.name + ': ' + result.issues.join(' ')); return; }
-    if (!result.changed) { setTabulationNotice(round.name + ' ya coincide con «' + outbox.roundName + '» de la tabulación.'); return; }
+    if (!result.rooms) { await release(); setServerError('No se puede cargar «' + outbox.roundName + '» en ' + round.name + ': ' + result.issues.join(' ')); return; }
+    if (!result.changed) { await release(); setTabulationNotice(round.name + ' ya coincide con «' + outbox.roundName + '» de la tabulación.'); return; }
     const otherTournament = outbox.panelTournamentName && outbox.panelTournamentName !== data.tournamentName
       ? '\n\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».' : '';
     if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament
-      + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
+      + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) { await release(); return; }
     const rooms = result.rooms;
     updateData((current) => ({ ...current, rooms }));
+    if (delivery) pendingLoadedOutboxDelivery.current = delivery.deliveryId;
     setServerError('');
-    setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
+    setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios»; la entrega se confirmará al guardar.');
   };
 
   const publishFromTabulation = async () => {
