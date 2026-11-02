@@ -238,7 +238,84 @@ export function readHandoff(storage: SimpleStorage): PanelHandoff | null {
 }
 export const clearHandoff = (storage: SimpleStorage) => storage.removeItem(HANDOFF_KEY);
 export const writeOutbox = (storage: SimpleStorage, outbox: PanelOutbox) => storage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
-export const readOutbox = (storage: SimpleStorage) => readJson<PanelOutbox>(storage, OUTBOX_KEY, 'ledu-tabulacion-outbox');
+function isStringMap(value: unknown): value is Record<string, string> {
+  return isRecord(value) && Object.entries(value).every(([key, mapped]) => isNonEmptyString(key) && isNonEmptyString(mapped));
+}
+
+export function parsePanelOutbox(value: unknown): PanelOutbox | null {
+  if (!isRecord(value) || value.format !== 'ledu-tabulacion-outbox' || value.version !== 1
+    || !isNonEmptyString(value.tabTournamentId) || !isNonEmptyString(value.tabulationRoundId)
+    || !Number.isSafeInteger(value.createdAt) || (value.createdAt as number) < 0
+    || (value.tournamentId !== undefined && !isNonEmptyString(value.tournamentId))
+    || (value.basePanelRevision !== undefined && (!Number.isSafeInteger(value.basePanelRevision) || (value.basePanelRevision as number) < 0))
+    || (value.basePanelUpdatedAt !== undefined && (!Number.isSafeInteger(value.basePanelUpdatedAt) || (value.basePanelUpdatedAt as number) < 0))
+    || !isNonEmptyString(value.tabTournamentName)
+    || !(value.panelTournamentName === null || isNonEmptyString(value.panelTournamentName))
+    || !isNonEmptyString(value.roundName) || !Number.isSafeInteger(value.roundNumber) || (value.roundNumber as number) < 1
+    || !['qualifying', 'elimination'].includes(String(value.roundKind))
+    || !['draw', 'balanced'].includes(String(value.sideMode))
+    || !Array.isArray(value.teamMetadata) || !Array.isArray(value.debates) || !isRecord(value.entityIdMap)) return null;
+  const map = value.entityIdMap;
+  if (!isStringMap(map.teams) || !isStringMap(map.speakers) || !isStringMap(map.judges) || !isStringMap(map.venues)) return null;
+  const metadata: PanelOutbox['teamMetadata'] = [];
+  const seenTeams = new Set<string>();
+  for (const raw of value.teamMetadata) {
+    if (!isRecord(raw) || !isNonEmptyString(raw.teamId) || seenTeams.has(raw.teamId)
+      || typeof raw.swing !== 'boolean' || typeof raw.breakEligible !== 'boolean'
+      || (raw.fallenFromRound !== undefined && (!Number.isSafeInteger(raw.fallenFromRound) || (raw.fallenFromRound as number) < 1))) return null;
+    seenTeams.add(raw.teamId);
+    metadata.push({ teamId: raw.teamId, swing: raw.swing, breakEligible: raw.breakEligible,
+      ...(typeof raw.fallenFromRound === 'number' ? { fallenFromRound: raw.fallenFromRound } : {}) });
+  }
+  const debates: PanelOutboxDebate[] = [];
+  const seenDebates = new Set<string>();
+  for (const raw of value.debates) {
+    if (!isRecord(raw) || !isNonEmptyString(raw.tabulationDebateId) || seenDebates.has(raw.tabulationDebateId)
+      || !isNonEmptyString(raw.tabulationVenueId) || !isNonEmptyString(raw.tabulationTeamFavorId)
+      || !isNonEmptyString(raw.tabulationTeamContraId) || raw.tabulationTeamFavorId === raw.tabulationTeamContraId
+      || !Array.isArray(raw.tabulationJudgeIds) || !raw.tabulationJudgeIds.every(isNonEmptyString)
+      || new Set(raw.tabulationJudgeIds).size !== raw.tabulationJudgeIds.length
+      || !isNonEmptyString(raw.tabulationChairId) && raw.tabulationChairId !== ''
+      || !isNonEmptyString(raw.physicalRoomId) || !isNonEmptyString(raw.venueName)
+      || !isNonEmptyString(raw.teamFavorId) || !isNonEmptyString(raw.teamContraId) || raw.teamFavorId === raw.teamContraId
+      || !Array.isArray(raw.judgeIds) || !raw.judgeIds.every(isNonEmptyString)
+      || new Set(raw.judgeIds).size !== raw.judgeIds.length
+      || !(raw.chairId === '' || isNonEmptyString(raw.chairId)) || typeof raw.sidesProvisional !== 'boolean') return null;
+    if (raw.chairId && !raw.judgeIds.includes(raw.chairId)) return null;
+    seenDebates.add(raw.tabulationDebateId);
+    debates.push({
+      tabulationDebateId: raw.tabulationDebateId, tabulationVenueId: raw.tabulationVenueId,
+      tabulationTeamFavorId: raw.tabulationTeamFavorId, tabulationTeamContraId: raw.tabulationTeamContraId,
+      tabulationJudgeIds: [...raw.tabulationJudgeIds], tabulationChairId: raw.tabulationChairId,
+      physicalRoomId: raw.physicalRoomId, venueName: raw.venueName, teamFavorId: raw.teamFavorId,
+      teamContraId: raw.teamContraId, judgeIds: [...raw.judgeIds], chairId: raw.chairId,
+      sidesProvisional: raw.sidesProvisional,
+    });
+  }
+  if (metadata.some((item) => !Object.values(map.teams).includes(item.teamId))
+    || debates.some((item) => !Object.values(map.teams).includes(item.teamFavorId)
+      || !Object.values(map.teams).includes(item.teamContraId)
+      || !Object.values(map.venues).includes(item.physicalRoomId)
+      || item.judgeIds.some((judgeId) => !Object.values(map.judges).includes(judgeId)))) return null;
+  return {
+    format: 'ledu-tabulacion-outbox', version: 1, tabTournamentId: value.tabTournamentId,
+    tabulationRoundId: value.tabulationRoundId, createdAt: value.createdAt as number,
+    ...(typeof value.tournamentId === 'string' ? { tournamentId: value.tournamentId } : {}),
+    ...(typeof value.basePanelRevision === 'number' ? { basePanelRevision: value.basePanelRevision } : {}),
+    ...(typeof value.basePanelUpdatedAt === 'number' ? { basePanelUpdatedAt: value.basePanelUpdatedAt } : {}),
+    tabTournamentName: value.tabTournamentName, panelTournamentName: value.panelTournamentName as string | null,
+    roundName: value.roundName, roundNumber: value.roundNumber as number,
+    roundKind: value.roundKind as PanelOutbox['roundKind'], sideMode: value.sideMode as PanelOutbox['sideMode'],
+    teamMetadata: metadata, entityIdMap: {
+      teams: { ...map.teams }, speakers: { ...map.speakers }, judges: { ...map.judges }, venues: { ...map.venues },
+    }, debates,
+  };
+}
+
+export function readOutbox(storage: SimpleStorage): PanelOutbox | null {
+  try { return parsePanelOutbox(JSON.parse(storage.getItem(OUTBOX_KEY) ?? 'null')); }
+  catch { return null; }
+}
 
 export interface MergeSummary { tournament: TabTournament; added: number; updated: number; warnings: string[]; issues: string[] }
 
