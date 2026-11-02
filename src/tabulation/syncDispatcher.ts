@@ -1,5 +1,6 @@
 import { ApiError, previewTabulationActa, publishTabulationRound, saveTabulationActa } from '../api';
 import { appendPanelPublishAcknowledgement } from './panelBridge';
+import { enqueuePanelPublishAck } from '../contracts/applicationDeliveryAdapters';
 import type { PendingSyncOperation } from './syncOutbox';
 import type { SyncDispatchResult } from './syncOutboxWorker';
 
@@ -49,12 +50,18 @@ async function dispatchRound(token: string, operation: PendingSyncOperation): Pr
     || typeof payload.tabTournamentId !== 'string' || typeof payload.tabulationRoundId !== 'string') {
     throw new Error('El servidor confirmó la ronda, pero no devolvió el mapping de debates esperado. Se requiere reconciliación por operationId.');
   }
-  appendPanelPublishAcknowledgement(window.localStorage, {
-    version: 1, operationId: operation.operationId,
+  const acknowledgement = {
+    version: 1 as const, operationId: operation.operationId,
     tabTournamentId: payload.tabTournamentId, tabulationRoundId: payload.tabulationRoundId,
     managerRoundId: published.roundId, revision: published.revision, updatedAt: published.updatedAt,
     debateAssignments: published.debateAssignments,
-  });
+  };
+  // The durable queue is authoritative for the current app; localStorage remains a rollback bridge.
+  let queued = false;
+  try { await enqueuePanelPublishAck(acknowledgement); queued = true; } catch { /* Use the legacy ACK below as recovery. */ }
+  try { appendPanelPublishAcknowledgement(window.localStorage, acknowledgement); } catch {
+    if (!queued) throw new Error('El servidor confirmó la ronda, pero no se pudo persistir su ACK. Recupera el resultado mediante operationId antes de volver a publicar.');
+  }
   return { status: 'acknowledged', response: published };
 }
 
