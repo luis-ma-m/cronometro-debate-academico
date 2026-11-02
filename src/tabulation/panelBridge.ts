@@ -300,7 +300,7 @@ export function parsePanelOutbox(value: unknown): PanelOutbox | null {
       || map.teams[item.tabulationTeamContraId] !== item.teamContraId
       || !Object.prototype.hasOwnProperty.call(map.venues, item.tabulationVenueId)
       || map.venues[item.tabulationVenueId] !== item.physicalRoomId
-      || item.tabulationJudgeIds.some((judgeId, index) => !Object.prototype.hasOwnProperty.call(map.judges, judgeId)
+      || item.tabulationJudgeIds.some((judgeId) => !Object.prototype.hasOwnProperty.call(map.judges, judgeId)
         || !item.judgeIds.includes(map.judges[judgeId]))
       || (item.tabulationChairId !== '' && (!Object.prototype.hasOwnProperty.call(map.judges, item.tabulationChairId)
         || map.judges[item.tabulationChairId] !== item.chairId)))) return null;
