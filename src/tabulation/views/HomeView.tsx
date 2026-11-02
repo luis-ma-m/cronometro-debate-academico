@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ArrowRight, Check, ClipboardList, Database, Download, Flag, Gavel, Plus, RotateCcw, ShieldCheck, Sparkles, Stethoscope, Trash2, Trophy, Upload, Users } from 'lucide-react';
 import { readManagerSession } from '../../contracts/managerSession';
-import { acknowledgeApplicationDelivery, claimPanelHandoff, createDeliveryConsumerId } from '../../contracts/applicationDeliveryAdapters';
+import { acknowledgeApplicationDelivery, claimPanelHandoff, claimPanelPublishAck, createDeliveryConsumerId, releaseApplicationDelivery } from '../../contracts/applicationDeliveryAdapters';
 import { tournamentChampion } from '../bracket';
 import { PanelLinkReview } from '../PanelLinkReview';
 import { parseBackupFile } from '../emergency';
