@@ -242,6 +242,65 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   }, [tournament, state.readOnly, store]);
 
   useEffect(() => {
+    if (!tournament || state.readOnly) return;
+    let disposed = false;
+    let running = false;
+    const consume = async () => {
+      if (disposed || running || !tabulationDeliveryConsumer.current) return;
+      running = true;
+      let delivery: Awaited<ReturnType<typeof claimPanelPublishAck>> = null;
+      const consumer = tabulationDeliveryConsumer.current;
+      try {
+        delivery = await claimPanelPublishAck(consumer);
+        if (!delivery) return;
+        const ack = delivery.payload;
+        if (readPanelPublishAcknowledgements(window.localStorage).some((item) => item.operationId === ack.operationId)) {
+          await releaseApplicationDelivery(delivery.deliveryId, consumer);
+          return;
+        }
+        const round = tournament.rounds.find((item) => item.id === ack.tabulationRoundId);
+        if (ack.tabTournamentId !== tournament.id || !round) {
+          await releaseApplicationDelivery(delivery.deliveryId, consumer);
+          return;
+        }
+        const map = new Map(ack.debateAssignments.map((item) => [item.tabulationDebateId, item.assignmentId]));
+        const applied = round.managerRoundId === ack.managerRoundId
+          && round.debates.every((debate) => !map.has(debate.id) || debate.managerAssignmentId === map.get(debate.id));
+        if (!applied) {
+          const changed = store.update((current) => ({
+            ...current,
+            rounds: current.rounds.map((item) => item.id !== ack.tabulationRoundId ? item : ({
+              ...item, managerRoundId: ack.managerRoundId,
+              debates: item.debates.map((debate) => map.has(debate.id)
+                ? { ...debate, managerAssignmentId: map.get(debate.id)! } : debate),
+            })),
+            panelLink: current.panelLink ? {
+              ...current.panelLink,
+              remoteRevision: Math.max(current.panelLink.remoteRevision ?? 0, ack.revision),
+              remoteUpdatedAt: Math.max(current.panelLink.remoteUpdatedAt ?? 0, ack.updatedAt ?? 0),
+            } : current.panelLink,
+          }), { type: 'panel.round.ack', message: 'ACK de publicación recuperado desde la cola duradera.' });
+          if (!changed || !store.flush()) {
+            await releaseApplicationDelivery(delivery.deliveryId, consumer);
+            setSyncStatus('El ACK está recibido, pero no se ha podido guardar localmente; se reintentará.');
+            return;
+          }
+        }
+        if (await acknowledgeApplicationDelivery(delivery.deliveryId, consumer)) {
+          removePanelPublishAcknowledgements(window.localStorage, [ack.operationId]);
+          setSyncStatus('Publicación confirmada y ACK persistido en Tabulación.');
+        }
+      } catch (error) {
+        if (delivery) await releaseApplicationDelivery(delivery.deliveryId, consumer).catch(() => false);
+        if (!disposed) setSyncStatus(error instanceof Error ? error.message : 'No se pudo recuperar el ACK.');
+      } finally { running = false; }
+    };
+    void consume();
+    const interval = window.setInterval(() => void consume(), 15000);
+    return () => { disposed = true; window.clearInterval(interval); };
+  }, [tournament, state.readOnly, store]);
+
+  useEffect(() => {
     if (!tournament || !tournament.panelLink?.remoteId || state.readOnly) return;
     const linkedRemoteId = tournament.panelLink.remoteId;
     let disposed = false;
