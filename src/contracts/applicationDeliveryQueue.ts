@@ -45,6 +45,7 @@ export interface ApplicationDeliveryQueue {
   get<T = unknown>(deliveryId: string): Promise<ApplicationDelivery<T> | null>;
   list<T = unknown>(target?: ApplicationDeliveryEndpoint): Promise<ApplicationDelivery<T>[]>;
   claimNext<T = unknown>(options: ClaimApplicationDeliveryOptions): Promise<ApplicationDelivery<T> | null>;
+  claim<T = unknown>(deliveryId: string, consumer: string, now: number, leaseMs: number): Promise<ApplicationDelivery<T> | null>;
   acknowledge(deliveryId: string, consumer: string, now: number): Promise<boolean>;
   release(deliveryId: string, consumer: string): Promise<boolean>;
 }
@@ -145,7 +146,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue {
   const items = new Map<string, ApplicationDelivery>();
   return {
-    async enqueue<T>(raw) {
+    async enqueue<T>(raw: EnqueueApplicationDelivery<T>): Promise<ApplicationDelivery<T>> {
       const input = validateInput(raw);
       const current = items.get(input.deliveryId);
       if (current) {
@@ -158,17 +159,17 @@ export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue
       items.set(record.deliveryId, record);
       return record;
     },
-    async get<T>(id) {
+    async get<T = unknown>(id: string): Promise<ApplicationDelivery<T> | null> {
       validText(id, 'El deliveryId');
       const item = items.get(id);
       return item ? validateStored<T>(item) : null;
     },
-    async list<T>(target) {
+    async list<T = unknown>(target?: ApplicationDeliveryEndpoint): Promise<ApplicationDelivery<T>[]> {
       return [...items.values()].filter(item => !target || item.target === target)
         .sort((a, b) => a.createdAt - b.createdAt || a.deliveryId.localeCompare(b.deliveryId))
         .map(item => validateStored<T>(item));
     },
-    async claimNext<T>({ consumer, target, kind, now, leaseMs }) {
+    async claimNext<T = unknown>({ consumer, target, kind, now, leaseMs }: ClaimApplicationDeliveryOptions): Promise<ApplicationDelivery<T> | null> {
       validText(consumer, 'El consumidor');
       if (target !== 'manager' && target !== 'tabulation') throw new ApplicationPersistenceError('El destino de consumo no es válido.');
       validTime(now, 'La fecha actual');
@@ -184,7 +185,21 @@ export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue
       items.set(candidate.deliveryId, claimed);
       return claimed;
     },
-    async acknowledge(id, consumer, now) {
+    async claim<T = unknown>(deliveryId: string, consumer: string, now: number, leaseMs: number): Promise<ApplicationDelivery<T> | null> {
+      validText(deliveryId, 'El deliveryId');
+      validText(consumer, 'El consumidor');
+      validTime(now, 'La fecha actual');
+      if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 300_000) throw new ApplicationPersistenceError('La duración del lease debe estar entre 1 y 300000 ms.');
+      const current = items.get(deliveryId);
+      if (!current || current.status === 'acked') return null;
+      if (current.status === 'claimed' && (current.leaseUntil ?? 0) > now) {
+        return current.leaseOwner === consumer ? validateStored<T>(current) : null;
+      }
+      const claimed = validateStored<T>({ ...current, status: 'claimed', attempts: current.attempts + 1, leaseOwner: consumer, leaseUntil: now + leaseMs });
+      items.set(deliveryId, claimed);
+      return claimed;
+    },
+    async acknowledge(id: string, consumer: string, now: number): Promise<boolean> {
       validText(id, 'El deliveryId');
       validText(consumer, 'El consumidor');
       validTime(now, 'La fecha de ACK');
@@ -193,7 +208,7 @@ export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue
       items.set(id, validateStored({ ...current, status: 'acked', ackedAt: now, leaseOwner: undefined, leaseUntil: undefined }));
       return true;
     },
-    async release(id, consumer) {
+    async release(id: string, consumer: string): Promise<boolean> {
       validText(id, 'El deliveryId');
       validText(consumer, 'El consumidor');
       const current = items.get(id);
@@ -235,7 +250,7 @@ export function createIndexedDbApplicationDeliveryQueue(
     const db = await database;
     const tx = db.transaction(APPLICATION_DELIVERIES_STORE, 'readonly');
     const request = tx.objectStore(APPLICATION_DELIVERIES_STORE).get(id);
-    return new Promise((resolve, reject) => {
+    return new Promise<ApplicationDelivery<T> | null>((resolve, reject) => {
       request.onsuccess = () => resolve(request.result ? validateStored<T>(request.result) : null);
       request.onerror = () => reject(request.error);
       tx.onabort = () => reject(tx.error);
@@ -243,10 +258,10 @@ export function createIndexedDbApplicationDeliveryQueue(
   };
 
   return {
-    async enqueue<T>(raw) {
+    async enqueue<T>(raw: EnqueueApplicationDelivery<T>): Promise<ApplicationDelivery<T>> {
       const input = validateInput(raw);
       const db = await database;
-      return new Promise((resolve, reject) => {
+      return new Promise<ApplicationDelivery<T>>((resolve, reject) => {
         const tx = db.transaction(APPLICATION_DELIVERIES_STORE, 'readwrite');
         const store = tx.objectStore(APPLICATION_DELIVERIES_STORE);
         let result: ApplicationDelivery<T> | null = null;
@@ -270,12 +285,12 @@ export function createIndexedDbApplicationDeliveryQueue(
       });
     },
     get: read,
-    async list<T>(target) {
+    async list<T = unknown>(target?: ApplicationDeliveryEndpoint): Promise<ApplicationDelivery<T>[]> {
       const db = await database;
       const tx = db.transaction(APPLICATION_DELIVERIES_STORE, 'readonly');
       const index = tx.objectStore(APPLICATION_DELIVERIES_STORE).index(target ? 'byTargetCreatedAt' : 'byCreatedAt');
       const request = index.getAll(target ? IDBKeyRange.bound([target, 0], [target, Number.MAX_SAFE_INTEGER]) : undefined);
-      return new Promise((resolve, reject) => {
+      return new Promise<ApplicationDelivery<T>[]>((resolve, reject) => {
         request.onsuccess = () => {
           try { resolve((request.result as unknown[]).map(item => validateStored<T>(item)).sort((a,b) => a.createdAt-b.createdAt || a.deliveryId.localeCompare(b.deliveryId))); }
           catch (error) { reject(error); }
@@ -284,13 +299,13 @@ export function createIndexedDbApplicationDeliveryQueue(
         tx.onabort = () => reject(tx.error);
       });
     },
-    async claimNext<T>({ consumer, target, now, leaseMs }) {
+    async claimNext<T = unknown>({ consumer, target, kind, now, leaseMs }: ClaimApplicationDeliveryOptions): Promise<ApplicationDelivery<T> | null> {
       validText(consumer, 'El consumidor');
       if (target !== 'manager' && target !== 'tabulation') throw new ApplicationPersistenceError('El destino de consumo no es válido.');
       validTime(now, 'La fecha actual');
       if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 300_000) throw new ApplicationPersistenceError('La duración del lease debe estar entre 1 y 300000 ms.');
       const db = await database;
-      return new Promise((resolve, reject) => {
+      return new Promise<ApplicationDelivery<T> | null>((resolve, reject) => {
         const tx = db.transaction(APPLICATION_DELIVERIES_STORE, 'readwrite');
         const store = tx.objectStore(APPLICATION_DELIVERIES_STORE);
         const request = store.getAll();
@@ -311,10 +326,40 @@ export function createIndexedDbApplicationDeliveryQueue(
         tx.onabort = () => reject(error ?? tx.error);
       });
     },
-    async acknowledge(id, consumer, now) {
+    async claim<T = unknown>(deliveryId: string, consumer: string, now: number, leaseMs: number): Promise<ApplicationDelivery<T> | null> {
+      validText(deliveryId, 'El deliveryId');
+      validText(consumer, 'El consumidor');
+      validTime(now, 'La fecha actual');
+      if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 300_000) throw new ApplicationPersistenceError('La duración del lease debe estar entre 1 y 300000 ms.');
+      const db = await database;
+      return new Promise<ApplicationDelivery<T> | null>((resolve, reject) => {
+        const tx = db.transaction(APPLICATION_DELIVERIES_STORE, 'readwrite');
+        const store = tx.objectStore(APPLICATION_DELIVERIES_STORE);
+        let result: ApplicationDelivery<T> | null = null;
+        let error: unknown;
+        const request = store.get(deliveryId);
+        request.onsuccess = () => {
+          try {
+            if (!request.result) return;
+            const current = validateStored<T>(request.result);
+            if (current.status === 'acked') return;
+            if (current.status === 'claimed' && (current.leaseUntil ?? 0) > now) {
+              if (current.leaseOwner === consumer) result = current;
+              return;
+            }
+            result = validateStored<T>({ ...current, status: 'claimed', attempts: current.attempts + 1, leaseOwner: consumer, leaseUntil: now + leaseMs });
+            store.put(result);
+          } catch (cause) { error = cause; try { tx.abort(); } catch { /* noop */ } }
+        };
+        tx.oncomplete = () => error ? reject(error) : resolve(result);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(error ?? tx.error);
+      });
+    },
+    async acknowledge(id: string, consumer: string, now: number): Promise<boolean> {
       validText(id, 'El deliveryId'); validText(consumer, 'El consumidor'); validTime(now, 'La fecha de ACK');
       const db = await database;
-      return new Promise((resolve, reject) => {
+      return new Promise<boolean>((resolve, reject) => {
         const tx = db.transaction(APPLICATION_DELIVERIES_STORE, 'readwrite');
         const store = tx.objectStore(APPLICATION_DELIVERIES_STORE);
         let accepted = false;
@@ -333,7 +378,7 @@ export function createIndexedDbApplicationDeliveryQueue(
         tx.onabort = () => reject(tx.error);
       });
     },
-    async release(id, consumer) {
+    async release(id: string, consumer: string): Promise<boolean> {
       validText(id, 'El deliveryId'); validText(consumer, 'El consumidor');
       const db = await database;
       return new Promise((resolve, reject) => {

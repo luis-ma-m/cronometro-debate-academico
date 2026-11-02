@@ -104,7 +104,7 @@ Tests: `src/contracts/applicationPersistence.test.ts` cubre revisiones, compare-
 1. [x] Sustituir las lecturas directas de sesión de `HomeView` por `readManagerSession`. La validación está cubierta por `managerSession.test.ts`; verificar CI del nuevo HEAD.
 2. Diseñar e implementar el repositorio común de persistencia y los contratos versionados de hand-off, propuesta, mappings, cursor, snapshot base, conflictos y ACKs.
 3. Introducir el nuevo formato en paralelo, con dual-read/dual-write verificable y sin limpiar los datos v1.
-4. Migrar y probar operaciones pendientes, mappings, snapshots, conflictos y ACKs; mantener rollback al lector v1.
+4. Migrar y probar operaciones pendientes, mappings, snapshots, conflictos y ACKs; mantener rollback al lector v1. La cola de handoff/propuesta/ACK ya está conectada, pero requiere CI y prueba multi-pestaña antes de retirar el bridge.
 5. Retirar lectores/escritores heredados solo cuando se demuestre que no quedan consumidores y la restauración esté probada.
 6. Abordar la simplificación del índice multi-torneo local en una fase separada, después de exportación y recuperación verificables.
 
@@ -123,4 +123,6 @@ Implementación: `src/contracts/applicationDeliveryQueue.ts`; persistencia Index
 - Las entregas confirmadas se conservan; no hay purga automática ni borrado de históricos.
 - Hay implementación en memoria para tests y una implementación IndexedDB para el navegador.
 
-**Límites del incremento:** el contrato todavía no está conectado a `sendToTabulation`, `RoundsView`, `HomeView` ni a los ACKs actuales. No hay adaptadores específicos de `PanelHandoff`/`PanelOutbox`, ni lógica de presentación/revisión humana. Los tests actuales validan la máquina de estados en memoria; falta prueba real de IndexedDB con dos pestañas, recarga, bloqueo y recuperación. No se debe retirar ni dejar de escribir las claves heredadas por este cambio.
+**Integración funcional:** `sendToTabulation` encola snapshots de participantes; `RoundsView` encola propuestas de ronda; `HomeView` reclama, valida y confirma handoffs solo después de persistirlos localmente; Gestión reclama propuestas, exige revisión humana y las transfiere a su outbox de publicación; `syncDispatcher` guarda ACKs transaccionales en la cola y Tabulación los aplica y confirma tras persistir los mappings. Las claves heredadas siguen como fallback y se limpian solo tras ACK durable. Los IDs de handoff/propuesta son deterministas para el mismo payload.
+
+**Límites y validación pendiente:** los tests actuales ejercitan la cola en memoria; falta prueba real de IndexedDB con dos pestañas, recarga, bloqueo y recuperación. El build de Vercel del HEAD previo detectó errores de TypeScript en las firmas genéricas de la cola y el narrowing del mapa de IDs; corregidos en esta revisión, pendientes de CI. No se debe retirar el bridge heredado hasta validar la ruta completa.

@@ -233,3 +233,16 @@ Se añade `src/contracts/applicationDeliveryQueue.ts` y su suite `applicationDel
 - Tests cubren entregas concurrentes lógicas, idempotencia, colisión de ID/contenido, propietario del lease, recuperación, release y validación de payload.
 
 **No integrado todavía:** los escritores/lectores heredados continúan siendo la ruta funcional. Este incremento no autoriza a retirar `ledu-tabulacion-handoff-v1`, `ledu-tabulacion-outbox-v1` ni `ledu-tabulation-publish-acks-v1`. Antes de activar el flujo hacen falta adaptadores estrictos, una política de revisión/aprobación del operador y pruebas de IndexedDB entre pestañas y tras reinicio.
+
+
+## Transición a la cola común (PR #84)
+
+- Gestión escribe snapshots de participantes en la cola común y mantiene el buzón heredado como fallback.
+- Tabulación reclama por destino y tipo, valida el handoff y solo confirma después de persistir el torneo o la reconciliación local.
+- Tabulación escribe propuestas de ronda en la cola común y mantiene el outbox heredado como fallback.
+- Gestión reclama propuestas, aplica validación y confirmación humana, y las transfiere a la outbox de sincronización del servidor. El ACK de entrega confirma esa transferencia durable; la publicación real sigue dependiendo del ACK transaccional del servidor.
+- El dispatcher publica el ACK transaccional en la cola común y conserva el ACK local heredado como puente. Tabulación aplica mappings y revisión tras guardar localmente y después confirma el ACK.
+- Los IDs de entrega de handoff/propuesta son deterministas para el mismo payload; los ACK usan el `operationId` del servidor.
+- Los leases pueden reclamarse por ID tras expirar, de modo que una revisión humana prolongada no deja el handoff bloqueado por un consumidor antiguo.
+- No se purgan entregas ACK ni se borran claves heredadas salvo al confirmar la entrega correspondiente.
+- Antes de retirar el bridge: ejecutar CI, probar dos pestañas y reinicio, forzar expiración de lease, verificar reintentos idempotentes y comprobar que una publicación no puede duplicar rondas ni asignaciones.

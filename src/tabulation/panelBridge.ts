@@ -142,15 +142,6 @@ export interface PanelOutbox {
   debates: PanelOutboxDebate[];
 }
 
-function readJson<T>(storage: SimpleStorage, key: string, format: string): T | null {
-  try {
-    const value = JSON.parse(storage.getItem(key) ?? 'null') as { format?: string; version?: number } | null;
-    return value && value.format === format && value.version === 1 ? (value as T) : null;
-  } catch {
-    return null;
-  }
-}
-
 export function buildPanelHandoff(panel: Tournament, now = Date.now()): PanelHandoff {
   return {
     format: 'ledu-tabulacion-handoff',
@@ -238,6 +229,7 @@ export function readHandoff(storage: SimpleStorage): PanelHandoff | null {
 }
 export const clearHandoff = (storage: SimpleStorage) => storage.removeItem(HANDOFF_KEY);
 export const writeOutbox = (storage: SimpleStorage, outbox: PanelOutbox) => storage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
+export const clearOutbox = (storage: SimpleStorage) => storage.removeItem(OUTBOX_KEY);
 function isStringMap(value: unknown): value is Record<string, string> {
   if (!isRecord(value) || !Object.entries(value).every(([key, mapped]) => isNonEmptyString(key) && isNonEmptyString(mapped))) return false;
   return new Set(Object.values(value)).size === Object.keys(value).length;
@@ -256,8 +248,9 @@ export function parsePanelOutbox(value: unknown): PanelOutbox | null {
     || !['qualifying', 'elimination'].includes(String(value.roundKind))
     || !['draw', 'balanced'].includes(String(value.sideMode))
     || !Array.isArray(value.teamMetadata) || !Array.isArray(value.debates) || !isRecord(value.entityIdMap)) return null;
-  const map = value.entityIdMap;
-  if (!isStringMap(map.teams) || !isStringMap(map.speakers) || !isStringMap(map.judges) || !isStringMap(map.venues)) return null;
+  const rawMap = value.entityIdMap;
+  if (!isRecord(rawMap) || !isStringMap(rawMap.teams) || !isStringMap(rawMap.speakers) || !isStringMap(rawMap.judges) || !isStringMap(rawMap.venues)) return null;
+  const map = rawMap as PanelEntityIdMap;
   const metadata: PanelOutbox['teamMetadata'] = [];
   const seenTeams = new Set<string>();
   for (const raw of value.teamMetadata) {

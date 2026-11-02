@@ -31,12 +31,28 @@ export function createDeliveryConsumerId(module: 'manager' | 'tabulation'): stri
   return module + ':' + Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function createDeliveryId(): string {
-  const cryptoApi = globalThis.crypto;
-  if (!cryptoApi?.getRandomValues) throw new Error('El navegador no ofrece aleatoriedad criptográfica para identificar la entrega.');
-  const bytes = new Uint8Array(16);
-  cryptoApi.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return '[' + value.map(canonicalJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return '{' + Object.keys(record).sort().map((key) => JSON.stringify(key) + ':' + canonicalJson(record[key])).join(',') + '}';
+  }
+  const serialized = JSON.stringify(value);
+  if (typeof serialized !== 'string') throw new Error('El payload no admite una identidad de entrega estable.');
+  return serialized;
+}
+
+function stableDeliveryId(kind: string, payload: unknown): string {
+  const source = kind + ':' + canonicalJson(payload);
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ (code + index), 0x85ebca6b);
+  }
+  const fingerprint = (first >>> 0).toString(16).padStart(8, '0') + (second >>> 0).toString(16).padStart(8, '0');
+  return kind + ':' + fingerprint;
 }
 
 export async function enqueuePanelHandoff(
@@ -44,8 +60,8 @@ export async function enqueuePanelHandoff(
   queue = getApplicationDeliveryQueue(),
 ): Promise<ApplicationDelivery<PanelHandoff>> {
   return queue.enqueue({
-    deliveryId: createDeliveryId(), source: 'manager', target: 'tabulation',
-    kind: PANEL_HANDOFF_DELIVERY, createdAt: Date.now(), payload: handoff,
+    deliveryId: stableDeliveryId(PANEL_HANDOFF_DELIVERY, handoff), source: 'manager', target: 'tabulation',
+    kind: PANEL_HANDOFF_DELIVERY, createdAt: handoff.createdAt, payload: handoff,
   });
 }
 
@@ -54,8 +70,8 @@ export async function enqueuePanelOutbox(
   queue = getApplicationDeliveryQueue(),
 ): Promise<ApplicationDelivery<PanelOutbox>> {
   return queue.enqueue({
-    deliveryId: createDeliveryId(), source: 'tabulation', target: 'manager',
-    kind: PANEL_OUTBOX_DELIVERY, createdAt: Date.now(), payload: outbox,
+    deliveryId: stableDeliveryId(PANEL_OUTBOX_DELIVERY, outbox), source: 'tabulation', target: 'manager',
+    kind: PANEL_OUTBOX_DELIVERY, createdAt: outbox.createdAt, payload: outbox,
   });
 }
 
@@ -65,7 +81,7 @@ export async function enqueuePanelPublishAck(
 ): Promise<ApplicationDelivery<PanelPublishAcknowledgement>> {
   return queue.enqueue({
     deliveryId: acknowledgement.operationId, source: 'manager', target: 'tabulation',
-    kind: PANEL_PUBLISH_ACK_DELIVERY, createdAt: Date.now(), payload: acknowledgement,
+    kind: PANEL_PUBLISH_ACK_DELIVERY, createdAt: acknowledgement.updatedAt ?? acknowledgement.revision, payload: acknowledgement,
   });
 }
 
@@ -165,6 +181,11 @@ export async function acknowledgeApplicationDelivery(
   consumer: string,
   queue = getApplicationDeliveryQueue(),
 ): Promise<boolean> {
+  const now = Date.now();
+  const current = await queue.get(deliveryId);
+  if (!current || current.status === 'acked') return false;
+  const owned = current.status === 'claimed' && current.leaseOwner === consumer && (current.leaseUntil ?? 0) > now;
+  if (!owned && !await queue.claim(deliveryId, consumer, now, APPLICATION_DELIVERY_LEASE_MS)) return false;
   return queue.acknowledge(deliveryId, consumer, Date.now());
 }
 

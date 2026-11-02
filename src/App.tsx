@@ -21,7 +21,7 @@ import { SPEAKER_POSITIONS, emptyScoringConfig, sumCategoryScores, type RoundSco
 import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 import { SearchableEntityPicker } from './components/SearchableEntityPicker';
-import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
+import { applyOutboxToPanel, buildPanelHandoff, clearOutbox, readOutbox, writeHandoff } from './tabulation/panelBridge';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox, hashSyncPayload, SYNC_OUTBOX_UPDATED_EVENT } from './tabulation/syncOutbox';
 import type { PendingSyncOperation } from './tabulation/syncOutbox';
 import { createSyncOutboxWorker } from './tabulation/syncOutboxWorker';
@@ -117,7 +117,7 @@ export default function App() {
   // Reuse already fetched room-control links for the lifetime of this admin session.
   const preparedRoomLinksRef = useRef<Record<string, { roomName: string; href: string }>>({});
   const managerDeliveryConsumer = useRef<string | null>(null);
-  const pendingLoadedOutboxDelivery = useRef<string | null>(null);
+  const pendingLoadedOutboxDelivery = useRef<{ deliveryId: string; createdAt: number; tabulationRoundId: string } | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const hasUnsavedRef = useRef(false);
   const [connected, setConnected] = useState(false);
@@ -498,10 +498,12 @@ export default function App() {
       setLastSyncedAt(Date.now());
       setServerError('');
       if (pendingLoadedOutboxDelivery.current && managerDeliveryConsumer.current) {
-        const deliveryId = pendingLoadedOutboxDelivery.current;
-        const acknowledged = await acknowledgeApplicationDelivery(deliveryId, managerDeliveryConsumer.current).catch(() => false);
+        const pendingDelivery = pendingLoadedOutboxDelivery.current;
+        const acknowledged = await acknowledgeApplicationDelivery(pendingDelivery.deliveryId, managerDeliveryConsumer.current).catch(() => false);
         if (acknowledged) {
           pendingLoadedOutboxDelivery.current = null;
+          const legacyOutbox = readOutbox(localStorage);
+          if (legacyOutbox?.createdAt === pendingDelivery.createdAt && legacyOutbox.tabulationRoundId === pendingDelivery.tabulationRoundId) clearOutbox(localStorage);
           setTabulationNotice('La propuesta de Tabulación se ha guardado en el Gestor y su entrega quedó confirmada.');
         } else {
           setTabulationNotice('Los cambios se han guardado, pero no se pudo confirmar el ACK de la entrega. Se recuperará al vencer el lease.');
@@ -1371,7 +1373,7 @@ export default function App() {
       + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) { await release(); return; }
     const rooms = result.rooms;
     updateData((current) => ({ ...current, rooms }));
-    if (delivery) pendingLoadedOutboxDelivery.current = delivery.deliveryId;
+    if (delivery) pendingLoadedOutboxDelivery.current = { deliveryId: delivery.deliveryId, createdAt: delivery.createdAt, tabulationRoundId: delivery.payload.tabulationRoundId };
     setServerError('');
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios»; la entrega se confirmará al guardar.');
   };
@@ -1479,6 +1481,8 @@ export default function App() {
       if (delivery) {
         const acknowledged = await acknowledgeApplicationDelivery(delivery.deliveryId, consumer).catch(() => false);
         if (!acknowledged) throw new Error('La propuesta se guardó en la cola de sincronización, pero no se pudo confirmar su entrega. No vuelvas a generarla; se recuperará automáticamente.');
+        const legacyOutbox = readOutbox(localStorage);
+        if (legacyOutbox?.createdAt === delivery.createdAt && legacyOutbox.tabulationRoundId === delivery.payload.tabulationRoundId) clearOutbox(localStorage);
       }
       setTabulationNotice('La propuesta «' + outbox.roundName + '» se ha guardado en la cola duradera. El gestor la publicará automáticamente cuando el servidor esté disponible.');
     } catch (error) {

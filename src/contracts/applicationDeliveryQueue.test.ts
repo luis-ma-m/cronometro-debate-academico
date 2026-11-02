@@ -37,6 +37,28 @@ describe('application delivery queue', () => {
     expect(await queue.get('delivery-1')).toMatchObject({ status: 'acked', ackedAt: 103, attempts: 1 });
   });
 
+  it('filters claims by delivery kind without blocking other kinds for the same module', async () => {
+    const queue = createMemoryApplicationDeliveryQueue();
+    await queue.enqueue({ ...delivery('handoff'), kind: 'participant-handoff' });
+    await queue.enqueue({ ...delivery('proposal'), kind: 'round-proposal' });
+    const proposal = await queue.claimNext({ consumer: 'manager', target: 'tabulation', kind: 'round-proposal', now: 100, leaseMs: 500 });
+    expect(proposal).toMatchObject({ deliveryId: 'proposal', kind: 'round-proposal' });
+    const handoff = await queue.claimNext({ consumer: 'tab', target: 'tabulation', kind: 'participant-handoff', now: 100, leaseMs: 500 });
+    expect(handoff).toMatchObject({ deliveryId: 'handoff', kind: 'participant-handoff' });
+  });
+
+  it('reclaims a specific delivery after lease expiry without stealing another delivery', async () => {
+    const queue = createMemoryApplicationDeliveryQueue();
+    await queue.enqueue(delivery('first'));
+    await queue.enqueue(delivery('second', 20));
+    await queue.claimNext({ consumer: 'tab-1', target: 'tabulation', now: 100, leaseMs: 10 });
+    const recovered = await queue.claim('first', 'tab-2', 110, 500);
+    expect(recovered).toMatchObject({ deliveryId: 'first', attempts: 2, leaseOwner: 'tab-2' });
+    expect(await queue.acknowledge('first', 'tab-1', 111)).toBe(false);
+    expect(await queue.acknowledge('first', 'tab-2', 112)).toBe(true);
+    expect(await queue.get('second')).toMatchObject({ status: 'pending', attempts: 0 });
+  });
+
   it('does not allow a consumer to claim deliveries addressed to the other module', async () => {
     const queue = createMemoryApplicationDeliveryQueue();
     await queue.enqueue({ ...delivery('for-manager'), source: 'tabulation', target: 'manager' });
