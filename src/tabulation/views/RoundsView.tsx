@@ -122,7 +122,7 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     }
   };
 
-  const confirm = () => {
+  const confirm = async () => {
     const current = store.getState().tournament;
     const pending = current?.draftRound;
     if (!current || !pending) return;
