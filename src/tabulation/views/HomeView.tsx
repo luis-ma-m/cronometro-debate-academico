@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ArrowRight, Check, ClipboardList, Database, Download, Flag, Gavel, Plus, RotateCcw, ShieldCheck, Sparkles, Stethoscope, Trash2, Trophy, Upload, Users } from 'lucide-react';
 import { readManagerSession } from '../../contracts/managerSession';
+import { acknowledgeApplicationDelivery, claimPanelHandoff, createDeliveryConsumerId } from '../../contracts/applicationDeliveryAdapters';
 import { tournamentChampion } from '../bracket';
 import { PanelLinkReview } from '../PanelLinkReview';
 import { parseBackupFile } from '../emergency';
@@ -77,6 +78,8 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const [presetId, setPresetId] = useState<CreatablePreset>('ledu-groups');
   const [operator, setOperator] = useState(state.operator);
   const [handoffVersion, setHandoffVersion] = useState(0);
+  const [queuedHandoff, setQueuedHandoff] = useState<Awaited<ReturnType<typeof claimPanelHandoff>>>(null);
+  const tabulationDeliveryConsumer = useRef<string | null>(null);
   const [showLinkReview, setShowLinkReview] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
   const [pendingReconciliation, setPendingReconciliation] = useState<{ base: PanelHandoff; remote: PanelHandoff; detectedAt: number } | null>(null);
@@ -84,8 +87,50 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const [diagnosis, setDiagnosis] = useState<{ integrity: IntegrityReport; log: LogVerification & { issues: string[] } } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const managerBootstrapAttempt = useRef('');
-  const handoff = useMemo(() => readHandoff(window.localStorage), [handoffVersion, state.tournaments]);
+  const handoff = useMemo(() => queuedHandoff?.payload ?? readHandoff(window.localStorage), [queuedHandoff?.deliveryId, handoffVersion, state.tournaments]);
   const backups = useMemo(() => store.listBackups(), [store, tournament?.id, tournament?.revision, backupVersion]);
+  useEffect(() => {
+    if (state.readOnly || queuedHandoff) return;
+    let disposed = false;
+    let running = false;
+    const claim = async () => {
+      if (disposed || running || document.visibilityState === 'hidden') return;
+      running = true;
+      try {
+        if (!tabulationDeliveryConsumer.current) tabulationDeliveryConsumer.current = createDeliveryConsumerId('tabulation');
+        const delivery = await claimPanelHandoff(tabulationDeliveryConsumer.current);
+        if (!disposed && delivery) setQueuedHandoff(delivery);
+      } catch (error) {
+        if (!disposed) setSyncStatus(error instanceof Error ? error.message : 'No se pudo leer la cola de entregas.');
+      } finally { running = false; }
+    };
+    void claim();
+    const interval = window.setInterval(() => void claim(), 15000);
+    const onFocus = () => void claim();
+    const onOnline = () => void claim();
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onOnline);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [state.readOnly, queuedHandoff?.deliveryId]);
+
+  const acknowledgeHandoffDelivery = async (): Promise<boolean> => {
+    if (queuedHandoff) {
+      const consumer = tabulationDeliveryConsumer.current;
+      if (!consumer || !await acknowledgeApplicationDelivery(queuedHandoff.deliveryId, consumer).catch(() => false)) return false;
+    }
+    const legacy = readHandoff(window.localStorage);
+    if (!queuedHandoff || (legacy?.createdAt === queuedHandoff.payload.createdAt
+      && legacy?.tournamentId === queuedHandoff.payload.tournamentId)) clearHandoff(window.localStorage);
+    setQueuedHandoff(null);
+    setHandoffVersion((value) => value + 1);
+    return true;
+  };
+
   useEffect(() => {
     if (state.readOnly) return;
     const token = readManagerSession(window.localStorage)?.token ?? null;
