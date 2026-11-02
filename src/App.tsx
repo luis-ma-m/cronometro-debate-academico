@@ -497,6 +497,16 @@ export default function App() {
       setConnected(true);
       setLastSyncedAt(Date.now());
       setServerError('');
+      if (pendingLoadedOutboxDelivery.current && managerDeliveryConsumer.current) {
+        const deliveryId = pendingLoadedOutboxDelivery.current;
+        const acknowledged = await acknowledgeApplicationDelivery(deliveryId, managerDeliveryConsumer.current).catch(() => false);
+        if (acknowledged) {
+          pendingLoadedOutboxDelivery.current = null;
+          setTabulationNotice('La propuesta de Tabulación se ha guardado en el Gestor y su entrega quedó confirmada.');
+        } else {
+          setTabulationNotice('Los cambios se han guardado, pero no se pudo confirmar el ACK de la entrega. Se recuperará al vencer el lease.');
+        }
+      }
       return saved;
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se han podido guardar los cambios.');
@@ -1375,17 +1385,29 @@ export default function App() {
       setServerError('Guarda o descarta los cambios locales del gestor antes de publicar una ronda.');
       return;
     }
-    const outbox = readOutbox(localStorage);
+    let delivery: Awaited<ReturnType<typeof claimPanelOutbox>> = null;
+    let consumer = '';
+    try {
+      consumer = deliveryConsumerId();
+      delivery = await claimPanelOutbox(consumer);
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo leer la cola duradera.');
+      return;
+    }
+    const release = async () => { if (delivery) await releaseApplicationDelivery(delivery.deliveryId, consumer).catch(() => false); };
+    const outbox = delivery?.payload ?? readOutbox(localStorage);
     if (!outbox) {
       setServerError('No hay ninguna propuesta de ronda. En Tabulación, revisa la ronda y utiliza «Enviar al panel de cronómetros».');
       return;
     }
     if (!outbox.tournamentId || outbox.tournamentId !== data.remoteId) {
+      await release();
       setServerError('La propuesta no contiene la identidad canónica de este torneo o pertenece a otro torneo. Actualiza el vínculo y vuelve a generarla.');
       return;
     }
     const nextRoundNumber = Math.max(0, ...data.rounds.map((round) => round.number)) + 1;
     if (outbox.roundNumber !== nextRoundNumber) {
+      await release();
       setServerError('La propuesta corresponde a la ronda ' + outbox.roundNumber + ', pero el gestor espera la ronda ' + nextRoundNumber + '. Actualiza Tabulación, genera la ronda correcta y vuelve a revisarla.');
       return;
     }
@@ -1405,6 +1427,7 @@ export default function App() {
       { makeId },
     );
     if (!preview.rooms) {
+      await release();
       setServerError('La propuesta no supera la revisión local: ' + preview.issues.join(' '));
       return;
     }
@@ -1419,7 +1442,7 @@ export default function App() {
       '¿Publicar «' + outbox.roundName + '» como nueva ronda oficial del gestor?\n\n'
       + summary + (warnings ? '\n\nAvisos:\n' + warnings : '')
       + '\n\nSe crearán ' + outbox.debates.length + ' asignaciones nuevas. No se sobrescribirán rondas ni actas existentes. La publicación solo se confirmará cuando el servidor responda con un ACK transaccional.',
-    )) return;
+    )) { await release(); return; }
 
     setPublishingTabulationRound(true);
     setServerError('');
@@ -1453,8 +1476,13 @@ export default function App() {
         throw new Error('Esta publicación ya está siendo procesada en otra pestaña. Espera a que termine antes de volver a intentarlo.');
       }
       window.dispatchEvent(new Event(SYNC_OUTBOX_UPDATED_EVENT));
-      setTabulationNotice('La propuesta «' + outbox.roundName + '» se ha guardado en la cola duradera. El gestor la publicará automáticamente cuando el servidor esté disponible; puedes seguir trabajando sin esperar al envío.');
+      if (delivery) {
+        const acknowledged = await acknowledgeApplicationDelivery(delivery.deliveryId, consumer).catch(() => false);
+        if (!acknowledged) throw new Error('La propuesta se guardó en la cola de sincronización, pero no se pudo confirmar su entrega. No vuelvas a generarla; se recuperará automáticamente.');
+      }
+      setTabulationNotice('La propuesta «' + outbox.roundName + '» se ha guardado en la cola duradera. El gestor la publicará automáticamente cuando el servidor esté disponible.');
     } catch (error) {
+      await release();
       setServerError(error instanceof Error ? error.message : 'No se ha podido publicar la ronda.');
     } finally {
       setPublishingTabulationRound(false);
