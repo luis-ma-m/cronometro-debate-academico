@@ -158,3 +158,20 @@ export async function claimPanelPublishAck(
   }
   return { ...delivery, payload: acknowledgement };
 }
+
+
+export async function acknowledgeApplicationDelivery(
+  deliveryId: string,
+  consumer: string,
+  queue = getApplicationDeliveryQueue(),
+): Promise<boolean> {
+  return queue.acknowledge(deliveryId, consumer, Date.now());
+}
+
+export async function releaseApplicationDelivery(
+  deliveryId: string,
+  consumer: string,
+  queue = getApplicationDeliveryQueue(),
+): Promise<boolean> {
+  return queue.release(deliveryId, consumer);
+}
