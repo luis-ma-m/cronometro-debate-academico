@@ -1261,7 +1261,9 @@ export default function App() {
       setTabulationView={(id) => {
         setTabulationView(id);
         if (view !== 'tabulation') setView('tabulation');
-        window.history.replaceState(null, '', '/tabulacion#' + id);
+        // TabulationShell owns the rendered view and listens to hashchange.
+        // Updating history with replaceState does not emit that event.
+        window.location.hash = id;
       }}
       apiConfigured={apiConfigured}
       logout={logout}
