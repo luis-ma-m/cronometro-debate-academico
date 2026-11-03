@@ -20,8 +20,13 @@ function loadFailed(what: string) {
 
 // Judges keep their public acta route; the manager and tabulation now share one application shell.
 const JudgeActaApp = lazy(() => import('./tabulation/JudgeActaApp').catch(() => loadFailed('el acta')));
-const isTabulation = /^\/tabulacion(\/|$)/.test(window.location.pathname);
-if (isTabulation) window.history.replaceState(null, '', '/#tabulation');
+const isTabulation = /^\\/tabulacion(\\/|$)/.test(window.location.pathname);
+if (isTabulation) {
+  const legacySection = window.location.hash.replace(/^#/, '').split('/')[0];
+  const supportedSections = ['inicio', 'reglas', 'participantes', 'rondas', 'actas', 'clasificacion', 'registro'];
+  const destination = supportedSections.includes(legacySection) ? '/#' + legacySection : '/#tabulation';
+  window.history.replaceState(null, '', destination);
+}
 const isJudgeActa = /^\/acta(\/|$)/.test(window.location.pathname);
 
 const root = document.getElementById('root');
