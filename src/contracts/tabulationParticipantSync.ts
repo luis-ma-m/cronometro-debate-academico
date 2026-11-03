@@ -50,6 +50,28 @@ export function applyTabulationParticipantSnapshot(
   return { ...current, teams, speakers, judges, physicalRooms, institutions };
 }
 
+export async function persistTabulationParticipantSnapshot(
+  token: string,
+  snapshot: ParticipantSnapshot,
+  expectedRevision: number | undefined,
+  dependencies: {
+    getTournament: (token: string) => Promise<Tournament>;
+    saveTournament: (token: string, expectedRevision: number, tournament: Tournament) => Promise<Tournament>;
+  },
+): Promise<{ tournament: Tournament; changed: boolean }> {
+  const remote = await dependencies.getTournament(token);
+  if (remote.remoteId !== snapshot.tournamentId) {
+    throw new Error('El torneo remoto activo no coincide con el torneo de la instantánea.');
+  }
+  const candidate = applyTabulationParticipantSnapshot(remote, snapshot);
+  if (sameParticipantDomain(remote, candidate)) return { tournament: remote, changed: false };
+  if (typeof expectedRevision === 'number' && remote.revision !== expectedRevision) {
+    throw new Error('Conflicto de sincronización: Neon ha cambiado desde la última versión confirmada. No se han sobrescrito los cambios remotos.');
+  }
+  const saved = await dependencies.saveTournament(token, remote.revision, candidate);
+  return { tournament: saved, changed: true };
+}
+
 export function sameParticipantDomain(left: Tournament, right: Tournament): boolean {
   const project = (value: Tournament) => ({
     teams: value.teams,
