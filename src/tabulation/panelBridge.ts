@@ -522,6 +522,7 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   const idMap = tournament.panelLink?.idMap;
   const remoteId = (kind: keyof PanelEntityIdMap, localId: string): string | null => {
     if (!tournament.panelLink?.remoteId) return localId;
+    if (tournament.panelLink.identityMode === 'local-canonical') return localId;
     // Early linked copies used identical local/manager IDs before the explicit map existed.
     if (!idMap) return localId;
     const entityKind: EntityKind = kind === 'teams' ? 'team'

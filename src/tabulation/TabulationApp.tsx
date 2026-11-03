@@ -93,13 +93,20 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   }, [tournament?.panelLink?.remoteId, tournament?.panelLink?.remoteRevision, tournament?.panelLink?.remoteUpdatedAt, tournament?.updatedAt]);
   const tabulationParticipants = useMemo(() => {
     if (!tournament || !activeTournament || !tournament.panelLink?.idMap) return null;
+    const stored = tournament.panelLink.idMap;
+    const idMap: PanelEntityIdMap = tournament.panelLink.identityMode === 'local-canonical' ? {
+      teams: { ...stored.teams, ...Object.fromEntries(tournament.teams.map((item) => [item.id, item.id])) },
+      speakers: { ...stored.speakers, ...Object.fromEntries(tournament.speakers.map((item) => [item.id, item.id])) },
+      judges: { ...stored.judges, ...Object.fromEntries(tournament.judges.map((item) => [item.id, item.id])) },
+      venues: { ...stored.venues, ...Object.fromEntries(tournament.venues.map((item) => [item.id, item.id])) },
+    } : stored;
     try {
       return participantSnapshotFromTabulation(activeTournament, {
         teams: tournament.teams,
         speakers: tournament.speakers,
         judges: tournament.judges,
         venues: tournament.venues,
-      }, tournament.panelLink.idMap);
+      }, idMap);
     } catch {
       return null;
     }
