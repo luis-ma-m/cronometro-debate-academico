@@ -193,3 +193,20 @@ La implementación inicial `sharedTournamentRepository.ts` (un objeto con proyec
 **No confundir este endurecimiento con el cierre de la sincronización completa:** el repositorio canónico local sigue usando la fachada síncrona de `localStorage`, con IndexedDB como espejo asíncrono. Esa frontera no puede ofrecer por sí sola compare-and-swap multi-pestaña y multi-dispositivo. La outbox/worker de Tabulación sincroniza las operaciones autorizadas de publicación y actas, pero las escrituras locales de Gestión y el estado completo de Tabulación todavía no pasan en su totalidad por un journal remoto común. El siguiente cambio funcional debe reemplazar las escrituras de snapshot por comandos tipados persistidos en IndexedDB y enviados a Neon; no se debe adaptar con un LWW global.
 
 La prueba real requiere `NEON_TEST_DATABASE_URL` y `NEON_TEST_DATABASE_ISOLATED=1`; CI normal la omite. No se ha ejecutado contra Neon Preview ni Production por esta integración.
+
+
+## Diario remoto de sincronización (iteración feat/remote-tournament-sync)
+
+- Nueva migración `0022_sync_operations_journal.sql`: journal por torneo con `operationId` único, hash, revisión base, tipo/entidad, payload JSON acotado, estado terminal, ACK/resultado y timestamps.
+- Nuevo servicio `server/sync-operation-journal.ts`: valida envelope/hash, autentica en el handler, bloquea la identidad canónica durante el alta, devuelve la operación existente en reintentos idempotentes y rechaza el reuso del ID con otro contenido.
+- Nuevas acciones API privadas: `recordSyncOperation`, `getSyncOperations` y `ackSyncOperation`.
+- `src/api.ts` expone DTOs tipados para el cliente. El dispatcher de Tabulación registra antes de ejecutar publicación de ronda o acta y guarda ACK después del commit de dominio. Un timeout en ACK permite repetir el mismo operationId y recuperar la respuesta idempotente del servicio especializado.
+- Conflictos y rechazos se registran como estados terminales inmutables; los fallos de red se mantienen pendientes para reintento.
+- El journal solo acepta `publish-round` y `replace-acta`. No permite upserts genéricos ni hace que Tabulación adquiera autoridad sobre entidades del Gestor.
+
+### Limitaciones abiertas antes de Production
+- Esta iteración todavía no migra todas las escrituras completas de Gestión ni las mutaciones locales de Tabulación (equipos, jueces, oradores, asignaciones, reglas y estado especializado) a comandos remotos tipados.
+- `getSyncOperations` ofrece una lectura autenticada por cursor; todavía falta un reconciliador de cliente que hidrate/compare el estado de ambos módulos desde snapshots canónicos remotos.
+- El commit del repositorio canónico de navegador sigue localStorage-first con espejo IndexedDB; no se ha sustituido por una escritura atómica IndexedDB-first.
+- Hace falta probar dos navegadores contra una base dedicada, incluidas desconexión, timeout post-commit, carrera concurrente, recuperación de lease y reconstrucción completa desde el servidor.
+- La migración 0022 no ha sido ejecutada contra Neon Production. No desplegar ni fusionar esta PR como sincronización completa production-ready hasta cerrar esos puntos.
