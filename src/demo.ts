@@ -1,5 +1,6 @@
 import type { Room, Tournament } from './domain';
 import { createTimer, LEDU_PHASES, withRoomStatus } from './timer';
+import { getBrowserSharedTournamentRepository } from './contracts/sharedTournamentRepository';
 
 const now = Date.now();
 const room = (id: string, name: string, favor: string, contra: string, judgeIds: string[], roundId = 'r1'): Room => withRoomStatus({
@@ -53,7 +54,8 @@ export const demoTournament: Tournament = {
 const STORAGE_KEY = 'ledu-tournament-demo-v1';
 export function readDemo(): Tournament {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const shared = getBrowserSharedTournamentRepository().readManager<Tournament>();
+    const raw = shared ? JSON.stringify(shared) : localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Tournament;
       if (!Array.isArray(parsed.physicalRooms) || !Array.isArray(parsed.formats)) return demoTournament;
@@ -72,6 +74,9 @@ export function readDemo(): Tournament {
   return demoTournament;
 }
 export function writeDemo(data: Tournament): void {
+  // The shared runtime document is now the canonical local projection. Keep the
+  // old key as a rollback/export-compatible mirror; never remove it here.
+  getBrowserSharedTournamentRepository().writeManager(data);
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 export function demoStorageKey(): string { return STORAGE_KEY; }
