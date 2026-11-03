@@ -162,7 +162,10 @@ function mapTabCanonical(kind: EntityKind, sourceId: string, tournament: TabTour
 }
 
 function tabScope(tournament: TabTournament): string {
-  return tournament.panelLink?.remoteId ? 'remote:' + tournament.panelLink.remoteId : 'tabulation:' + tournament.id;
+  if (tournament.panelLink?.remoteId) return 'remote:' + tournament.panelLink.remoteId;
+  // A local/demo handoff is an explicit link even without a server ID. Its
+  // mappings still decide which records actually share canonical identity.
+  return tournament.panelLink ? 'manager:local' : 'tabulation:' + tournament.id;
 }
 
 function managerScope(tournament: Tournament): string {
