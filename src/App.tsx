@@ -1239,7 +1239,7 @@ export default function App() {
     if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament
       + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
     const rooms = result.rooms;
-    updateData((current) => ({ ...current, rooms }));
+    updateData((current) => ({ ...current, teams: result.teams, judges: result.judges, institutions: result.institutions, rooms }));
     setServerError('');
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
   };
