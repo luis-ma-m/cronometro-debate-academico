@@ -97,6 +97,9 @@ describe('canonical tournament repository', () => {
     expect(repository.readTabulation<TabTournament>('tab-1')?.teams[0].id).toBe('team-tab');
     expect(local.getItem('ledu-tournament-demo-v1')).toBe(JSON.stringify(legacyManager));
     expect(local.getItem('ledu-tabulacion-v1:tab-1')).toBe(JSON.stringify(legacyTab));
+    repository.deleteTabulation('tab-1');
+    migrateLegacyTournamentStorage(local);
+    expect(repository.readTabulation<TabTournament>('tab-1')).toBeNull();
   });
   it('never overwrites a malformed canonical document during legacy migration', () => {
     const malformed = '{broken';
