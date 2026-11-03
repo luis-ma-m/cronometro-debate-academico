@@ -552,6 +552,7 @@ async function getAuthoritativeTabulationSnapshot(tabTournamentId: string): Prom
     schemaVersion: num(row.schema_version), revision: num(row.revision), snapshot, snapshotSha256: digest, updatedAt: num(row.updated_at) };
 }
 
+
 async function publishAuthoritativeTabulationSnapshot(payload: Record<string, unknown>, actor: string) {
   const input = validateAuthoritativeTabulationSnapshot(payload);
   const digest = sha256(canonicalJson(input.snapshot));
@@ -560,6 +561,8 @@ async function publishAuthoritativeTabulationSnapshot(payload: Record<string, un
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    // Serialize even the first publication for a given tournament ID.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [input.tabTournamentId]);
     const previous = await client.query(
       "SELECT tab_tournament_id, base_revision, committed_revision, snapshot_sha256 FROM tabulation_publication_operations WHERE operation_id = $1 FOR UPDATE",
       [input.operationId],
@@ -570,17 +573,17 @@ async function publishAuthoritativeTabulationSnapshot(payload: Record<string, un
           || num(prior.base_revision) !== input.expectedRevision || str(prior.snapshot_sha256) !== digest) {
         throw new ApiError("IDEMPOTENCY_MISMATCH", "El operationId ya se utilizó con otra identidad, revisión o snapshot.", 409);
       }
-      const existing = await client.query(
-        `SELECT tab_tournament_id, tournament_name, schema_version, revision, snapshot, snapshot_sha256,
+      const exact = await client.query(
+        `SELECT tournament_name, schema_version, snapshot, snapshot_sha256,
                 floor(extract(epoch FROM updated_at) * 1000)::bigint AS updated_at
-           FROM tabulation_tournaments WHERE tab_tournament_id = $1`,
-        [input.tabTournamentId],
+           FROM tabulation_tournaments WHERE tab_tournament_id = $1 AND revision = $2`,
+        [input.tabTournamentId, num(prior.committed_revision)],
       );
-      const row = existing.rows[0] as Record<string, unknown> | undefined;
-      if (!row) throw new ApiError("IDEMPOTENCY_INCOMPLETE", "La publicación anterior no tiene snapshot recuperable.", 409);
+      const row = exact.rows[0] as Record<string, unknown> | undefined;
+      if (!row || str(row.snapshot_sha256) !== digest) throw new ApiError("IDEMPOTENCY_INCOMPLETE", "La revisión publicada no conserva un snapshot recuperable.", 409);
       await client.query("COMMIT");
       return { tabTournamentId: input.tabTournamentId, tournamentName: str(row.tournament_name), schemaVersion: num(row.schema_version),
-        revision: num(row.revision), snapshot: row.snapshot, snapshotSha256: str(row.snapshot_sha256), updatedAt: num(row.updated_at), created: false };
+        revision: num(prior.committed_revision), snapshot: row.snapshot, snapshotSha256: digest, updatedAt: num(row.updated_at), created: num(prior.committed_revision) === 1 };
     }
     const current = await client.query("SELECT revision FROM tabulation_tournaments WHERE tab_tournament_id = $1 FOR UPDATE", [input.tabTournamentId]);
     const currentRevision = current.rows[0] ? num(current.rows[0].revision) : 0;
