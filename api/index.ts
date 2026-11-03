@@ -465,6 +465,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       return getRoomConnectionStatuses();
     case "getRoomControllerToken":
       return roomControllerToken(payload);
+    case "replaceActiveTournament":
+      await requireSession(payload.token);
+      return replaceActiveTournament(payload);
     case "saveTournament":
       await requireSession(payload.token);
       return saveTournament(payload);
@@ -733,6 +736,165 @@ async function saveTabulationSettings(payload: Record<string, unknown>): Promise
       throw new ApiError("MIGRATION_REQUIRED", "Falta aplicar la migración 0010_tabulation_settings.sql en la base de datos del entorno. No se ha modificado ningún dato.", 503);
     }
     throw new ApiError("DATABASE_UNAVAILABLE", "No se han podido guardar las reglas de tabulación en PostgreSQL.", 503);
+  } finally {
+    client.release();
+  }
+}
+
+async function replaceActiveTournament(payload: Record<string, unknown>): Promise<{ tournament: Tournament; archiveId: string }> {
+  const operationId = str(payload.operationId).trim();
+  const expectedRevision = num(payload.expectedRevision);
+  const settings = validateTabulationSettings(payload.settings);
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(operationId)) {
+    throw new ApiError("INVALID_PAYLOAD", "La sustitución requiere un identificador idempotente válido.");
+  }
+  const operationKey = sha256("replaceActiveTournament:" + operationId);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET CONSTRAINTS ALL DEFERRED");
+    const cached = await client.query("SELECT response FROM idempotency_keys WHERE operation_key=$1 AND scope='replaceActiveTournament' AND response IS NOT NULL", [operationKey]);
+    if (cached.rows[0]?.response) {
+      await client.query("COMMIT");
+      return cached.rows[0].response as { tournament: Tournament; archiveId: string };
+    }
+    const locked = await client.query(
+      `SELECT ti.tournament_id::text AS tournament_id, ti.generation, ts.revision, ts.tournament_name
+         FROM tournament_identity ti JOIN tournament_settings ts ON ts.id=1
+        WHERE ti.id=1 FOR UPDATE OF ti, ts`,
+    );
+    const currentIdentity = locked.rows[0] as Record<string, unknown> | undefined;
+    if (!currentIdentity) throw new ApiError("DATABASE_NOT_INITIALIZED", "No existe una identidad canónica activa.", 503);
+    if (num(currentIdentity.revision) !== expectedRevision) {
+      throw new ApiError("REVISION_CONFLICT", "El torneo activo cambió antes de la sustitución. Actualiza y vuelve a confirmar.", 409);
+    }
+
+    const data = await loadPostgresSheetData(client);
+    const oldTournamentId = str(currentIdentity.tournament_id);
+    const oldGeneration = num(currentIdentity.generation);
+    const newTournamentId = randomBytes(16).toString("hex").replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
+    const nextGeneration = oldGeneration + 1;
+    const now = Date.now();
+
+    const [actaSources, settingsVersions, settingsOperations, debateAssignments, roundMetadata, identityMaps, syncOperations, shortLinks] = await Promise.all([
+      client.query("SELECT * FROM tabulation_acta_sources WHERE tournament_id=$1::uuid ORDER BY created_at,id", [oldTournamentId]),
+      client.query("SELECT * FROM tabulation_settings_versions ORDER BY revision"),
+      client.query("SELECT * FROM tabulation_settings_operations ORDER BY created_at"),
+      client.query("SELECT * FROM tabulation_debate_assignments WHERE tournament_id=$1::uuid ORDER BY tabulation_round_id,tabulation_debate_id", [oldTournamentId]),
+      client.query("SELECT * FROM tabulation_round_metadata WHERE tournament_id=$1::uuid ORDER BY manager_round_id", [oldTournamentId]),
+      client.query("SELECT * FROM tabulation_entity_identity_maps WHERE tournament_id=$1::uuid ORDER BY tab_tournament_id,entity_kind,local_id", [oldTournamentId]),
+      client.query("SELECT * FROM sync_operations WHERE tournament_id=$1::uuid ORDER BY created_at,operation_id", [oldTournamentId]),
+      client.query("SELECT to_jsonb(link) AS row FROM tabulation_acta_short_links link ORDER BY created_at,id").catch(() => ({ rows: [] })),
+    ]);
+    const snapshot = {
+      schemaVersion: 1,
+      tournament: data.rows,
+      raw: data.raw,
+      tabulationActaSources: actaSources.rows,
+      tabulationSettingsVersions: settingsVersions.rows,
+      tabulationSettingsOperations: settingsOperations.rows,
+      tabulationDebateAssignments: debateAssignments.rows,
+      tabulationRoundMetadata: roundMetadata.rows,
+      tabulationEntityIdentityMaps: identityMaps.rows,
+      syncOperations: syncOperations.rows,
+      shortLinks: shortLinks.rows,
+    };
+    const snapshotJson = JSON.stringify(snapshot);
+    const snapshotHash = sha256(snapshotJson);
+    const archived = await client.query(
+      `INSERT INTO tournament_archives
+        (tournament_id,generation,tournament_name,snapshot,snapshot_sha256,replaced_by_tournament_id,operation_id,created_by)
+       VALUES($1::uuid,$2,$3,$4::jsonb,$5,$6::uuid,$7,'manager-session')
+       RETURNING archive_id::text`,
+      [oldTournamentId, oldGeneration, str(currentIdentity.tournament_name) || "Torneo LEDU", snapshotJson, snapshotHash, newTournamentId, operationId],
+    );
+    const archiveId = str(archived.rows[0]?.archive_id);
+
+    // Keep immutable acta source rows and their old tournament UUID in the registry.
+    // Remove only their mutable heads and the active projections.
+    await client.query("DELETE FROM tabulation_acta_heads");
+    await client.query("DELETE FROM tabulation_debate_assignments");
+    await client.query("DELETE FROM tabulation_round_metadata");
+    await client.query("DELETE FROM tabulation_entity_identity_maps");
+    await client.query("DELETE FROM sync_operations");
+    await client.query("DELETE FROM tabulation_settings_operations");
+    await client.query("DELETE FROM tabulation_settings_versions");
+    await client.query("DELETE FROM scorecard_category_scores");
+    await client.query("DELETE FROM scorecard_team_scores");
+    await client.query("DELETE FROM scorecard_judges");
+    await client.query("DELETE FROM scorecard_speaker_scores");
+    await client.query("DELETE FROM scorecards");
+    await client.query("DELETE FROM room_assignments");
+    await client.query("DELETE FROM audit_events");
+
+    await client.query(
+      "UPDATE tournament_identity_registry SET archived=true,archived_at=now() WHERE tournament_id=$1::uuid",
+      [oldTournamentId],
+    );
+    await client.query(
+      "INSERT INTO tournament_identity_registry(tournament_id,generation,tournament_name) VALUES($1::uuid,$2,$3)",
+      [newTournamentId, nextGeneration, str(payload.tournamentName).trim() || "Nuevo torneo"],
+    );
+    await client.query(
+      "UPDATE tournament_identity SET tournament_id=$1::uuid,generation=$2,updated_at=now() WHERE id=1",
+      [newTournamentId, nextGeneration],
+    );
+    await client.query("UPDATE tournament_settings SET tournament_id=$1::uuid WHERE id=1", [newTournamentId]);
+    await client.query(
+      `UPDATE tabulation_settings SET tournament_id=$1::uuid,revision=0,schema_version=$2,
+              settings=$3::jsonb,updated_by='manager-session',updated_at=now() WHERE id=1`,
+      [newTournamentId, TAB_SCHEMA_VERSION, JSON.stringify(settings)],
+    );
+
+    const configRows = data.rows.Config.map((row) => ({ ...row }));
+    const set = (key: string, value: string) => {
+      const row = configRows.find((item) => str(item.key) === key);
+      if (row) row.value = value;
+      else configRows.push({ key, value });
+    };
+    const tournamentName = str(payload.tournamentName).trim() || "Nuevo torneo";
+    set("tournamentName", tournamentName);
+    set("activeRoundId", "");
+    set("activationRevision", "0");
+    set("activatedAt", "0");
+    set("revision", "1");
+    set("updatedAt", String(now));
+    set("institutions", "[]");
+    set("speakers", "[]");
+    set("scoring", JSON.stringify(emptyScoringConfig()));
+    set("roundTypes", "{}");
+    const replacements: Partial<Record<SheetName, SheetRow[]>> = {
+      Config: configRows,
+      Rondas: [],
+      Equipos: [],
+      Jueces: [],
+      Salas: [],
+      Cronometros: [],
+      SalasFisicas: [],
+      Formatos: data.rows.Formatos,
+    };
+    await writePostgresTables(data, replacements, [{
+      eventKey: "tournament-replaced:" + operationId,
+      eventType: "tournament.replaced",
+      details: { oldTournamentId, newTournamentId, generation: nextGeneration, archiveId, snapshotHash },
+    }], client);
+
+    const tournament = tournamentFromData(await loadPostgresSheetData(client));
+    const response = { tournament, archiveId };
+    await client.query(
+      "INSERT INTO idempotency_keys(operation_key,scope,response,completed_at) VALUES($1,'replaceActiveTournament',$2::jsonb,now())",
+      [operationKey, JSON.stringify(response)],
+    );
+    await client.query("COMMIT");
+    return response;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    const code = (error as { code?: string })?.code;
+    if (code === "23505" || code === "23503" || code === "23514") {
+      throw new ApiError("DATABASE_CONSTRAINT", "La sustitución ha incumplido una restricción de integridad y se ha revertido íntegramente.", 409);
+    }
+    throw new ApiError("DATABASE_REPLACEMENT_FAILED", "No se ha podido sustituir el torneo. La transacción se ha revertido.", 503);
   } finally {
     client.release();
   }
