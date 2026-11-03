@@ -10,15 +10,15 @@ import { checkIntegrity, type IntegrityReport } from '../integrity';
 import { type LogVerification } from '../log';
 import { TabDataError } from '../normalize';
 import { buildPanelHandoff, clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, readPanelPublishAcknowledgements, removePanelPublishAcknowledgements, PANEL_PUBLISH_ACK_KEY, tournamentFromHandoff, type PanelHandoff } from '../panelBridge';
-import { getTournament } from '../../api';
+import { getTournament, replaceActiveTournament } from '../../api';
 import { ApiError } from '../../api';
 import { buildLocalPanelBase, comparePanelRevisions, hasRemoteCursorAdvanced } from '../reconciliation';
 import { clearPendingPanelReconciliation, readPanelSyncBase, readPendingPanelReconciliation, writePanelSyncBase, writePendingPanelReconciliation } from '../panelSync';
-import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS } from '../presets';
+import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS, presetSettings } from '../presets';
 import { roundIsComplete, type DebateOutcome } from '../results';
 import { createSampleTournament } from '../sample';
 import { INDEX_KEY, MAX_BACKUPS, tournamentKey, type TabStore, type TabStoreState } from '../store';
-import { eliminationRounds, isFallenAt, qualifyingRounds, type PresetId, type TabTournament, type PanelEntityIdMap } from '../types';
+import { eliminationRounds, isFallenAt, makeTabId, qualifyingRounds, type PresetId, type TabTournament, type PanelEntityIdMap } from '../types';
 import { BUILD_INFO, exportTournamentCopy, Field, formatNumber, IssueList, Notice, type NoticeKind } from '../ui';
 
 function findLinkedLocalTournamentId(remoteId: string): string | null {
@@ -444,12 +444,75 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     return state.readOnly;
   };
 
-  const create = (sample: boolean) => {
+  const create = async (sample: boolean) => {
     if (readOnlyNotice()) return;
-    store.create(sample ? createSampleTournament(presetId) : createTabTournament(name || 'Nuevo torneo', presetId));
-    setName('');
-    notify(sample ? 'Torneo de ejemplo creado para probar la herramienta.' : 'Torneo creado. Revisa las reglas y añade los participantes.');
-    onNavigate(sample ? 'rondas' : 'reglas');
+    if (sample) {
+      store.create(createSampleTournament(presetId));
+      setName('');
+      notify('Torneo de ejemplo creado para probar la herramienta.');
+      onNavigate('rondas');
+      return;
+    }
+    const session = readManagerSession(window.localStorage);
+    if (!session?.token) {
+      notify('Para crear un torneo sincronizado, inicia sesión primero en Gestión. No se ha sustituido ningún dato.', 'error');
+      return;
+    }
+    let manager;
+    try {
+      manager = await getTournament(session.token);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'No se pudo comprobar el torneo activo de Gestión.', 'error');
+      return;
+    }
+    const nextName = name.trim() || 'Nuevo torneo';
+    const confirmed = window.confirm(
+      'Vas a sustituir el torneo activo «' + manager.tournamentName + '» por «' + nextName + '». ' +
+      'Se guardará un archivo recuperable del torneo anterior. Sus rondas, salas, asignaciones, cronómetros y actas dejarán de estar activos. ¿Continuar?',
+    );
+    if (!confirmed) return;
+
+    if (!store.backup('Antes de sustituir el torneo activo')) {
+      notify('No se ha podido crear una copia local de seguridad. No se ha iniciado la sustitución.', 'error');
+      return;
+    }
+    const draft = createTabTournament(nextName, presetId);
+    store.create(draft);
+    if (!store.flush()) {
+      notify('No se ha podido guardar el borrador local. La sustitución remota no se ha iniciado.', 'error');
+      return;
+    }
+    try {
+      const result = await replaceActiveTournament(
+        session.token,
+        manager.revision,
+        nextName,
+        presetSettings(presetId),
+        makeTabId('replace'),
+      );
+      store.update((current) => current.id !== draft.id ? current : ({
+        ...current,
+        panelLink: {
+          tournamentName: result.tournament.tournamentName,
+          linkedAt: Date.now(),
+          remoteId: result.tournament.remoteId,
+          remoteRevision: result.tournament.revision,
+          remoteUpdatedAt: result.tournament.updatedAt,
+          identityMode: 'local-canonical',
+          idMap: { teams: {}, speakers: {}, judges: {}, venues: {} },
+        },
+      }), { type: 'tournament.link', message: 'Nuevo torneo vinculado a la identidad canónica de Gestión', details: { remoteId: result.tournament.remoteId, archiveId: result.archiveId } });
+      if (!store.flush()) {
+        notify('Gestión ha creado el nuevo torneo y archivado el anterior, pero no se ha podido confirmar el vínculo local. Conserva esta pestaña abierta y recupera el borrador desde las copias locales.', 'error');
+        return;
+      }
+      setName('');
+      notify('Nuevo torneo creado y vinculado a Gestión. El anterior queda archivado como ' + result.archiveId + '.');
+      onNavigate('reglas');
+    } catch (error) {
+      notify((error instanceof Error ? error.message : 'No se pudo sustituir el torneo en Gestión.') +
+        ' El borrador local y la copia previa se conservan; el torneo remoto anterior no se ha modificado si la operación falló.', 'error');
+    }
   };
 
   const createAduma = (sample: boolean) => {

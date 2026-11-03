@@ -304,8 +304,14 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     const token = managerSession?.token;
     const local = store.getState().tournament;
     const remoteId = local?.panelLink?.remoteId;
-    const idMap = local?.panelLink?.idMap;
-    if (!apiConfigured || !token || !local || !remoteId || !idMap || participantSyncInFlight.current || participantSyncBlocked.current) return;
+    const storedIdMap = local?.panelLink?.idMap;
+    if (!apiConfigured || !token || !local || !remoteId || !storedIdMap || participantSyncInFlight.current || participantSyncBlocked.current) return;
+    const idMap: PanelEntityIdMap = local.panelLink?.identityMode === 'local-canonical' ? {
+      teams: { ...storedIdMap.teams, ...Object.fromEntries(local.teams.map((item) => [item.id, item.id])) },
+      speakers: { ...storedIdMap.speakers, ...Object.fromEntries(local.speakers.map((item) => [item.id, item.id])) },
+      judges: { ...storedIdMap.judges, ...Object.fromEntries(local.judges.map((item) => [item.id, item.id])) },
+      venues: { ...storedIdMap.venues, ...Object.fromEntries(local.venues.map((item) => [item.id, item.id])) },
+    } : storedIdMap;
     participantSyncInFlight.current = true;
     try {
       const context = activeTournamentContext(remoteId, local.panelLink?.remoteRevision ?? 0, 'server', local.panelLink?.remoteUpdatedAt ?? local.updatedAt);

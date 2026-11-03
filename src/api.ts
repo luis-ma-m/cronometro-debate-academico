@@ -69,6 +69,15 @@ export const logout = (token: string) => apiCall<{ loggedOut: boolean }>('logout
 export const getTournament = (token: string, signal?: AbortSignal) => apiCall<Tournament>('getTournament', { token }, signal);
 export const saveTournament = (token: string, expectedRevision: number, tournament: Tournament) =>
   apiCall<Tournament>('saveTournament', { token, expectedRevision, tournament });
+export const replaceActiveTournament = (
+  token: string,
+  expectedRevision: number,
+  tournamentName: string,
+  settings: unknown,
+  operationId: string,
+) => apiCall<{ tournament: Tournament; archiveId: string }>('replaceActiveTournament', {
+  token, expectedRevision, tournamentName, settings, operationId,
+});
 export const saveScoreConfig = (token: string, expectedRevision: number, categories: ScoreCategory[], scorecards: RoundScorecard[]) =>
   apiCall<Tournament>('saveScoreConfig', { token, expectedRevision, categories, scorecards });
 export const getPublicRoom = (roomId: string) => apiCall<PublicRoom>('getPublicRoom', { roomId });
