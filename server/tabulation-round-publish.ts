@@ -95,56 +95,20 @@ export async function publishTabulationRound(rawOperation: unknown) {
       minimumJudgesPerRoom: Math.max(1, num(settings.minimum_judges_per_room)),
     });
 
-    const existingRoundResult = await client.query(
-      "SELECT id, number, default_format_id, is_active FROM rounds WHERE id = $1 OR number = $2 FOR UPDATE",
-      [operation.entityId, validated.roundNumber],
-    );
-    const existingRound = existingRoundResult.rows.find((row) => str(row.id) === operation.entityId) as Record<string, unknown> | undefined;
-    const roundNumberCollision = existingRoundResult.rows.some((row) => str(row.id) !== operation.entityId);
-    if (roundNumberCollision) {
-      throw new ApiError("REVISION_CONFLICT", "El número de ronda ya pertenece a otra ronda del Gestor.", 409);
+    const nextRoundNumber = await client.query("SELECT COALESCE(MAX(number), 0) + 1 AS next_number FROM rounds");
+    if (validated.roundNumber !== num(nextRoundNumber.rows[0]?.next_number)) {
+      throw new ApiError("REVISION_CONFLICT", "El número de ronda ya no es el siguiente disponible. Actualiza el torneo y vuelve a revisar la propuesta.", 409);
     }
-    let isUpdate = Boolean(existingRound);
-    if (existingRound) {
-      const ownership = await client.query(
-        `SELECT 1 FROM tabulation_debate_assignments
-          WHERE tournament_id=$1::uuid AND tab_tournament_id=$2 AND tabulation_round_id=$3 AND manager_round_id=$4
-          LIMIT 1`,
-        [canonicalTournamentId, validated.tabTournamentId, validated.tabulationRoundId, operation.entityId],
-      );
-      if (!ownership.rows.length) {
-        throw new ApiError("ROUND_OWNERSHIP_CONFLICT", "La ronda ya existe en Gestión, pero no pertenece a esta ronda de Tabulación. No se sobrescribirá.", 409);
-      }
-      if (bool(existingRound.is_active)) {
-        throw new ApiError("ROUND_ALREADY_ACTIVE", "No se puede reescribir una ronda que ya está activa en los cronómetros.", 409);
-      }
-      const protectedAssignments = await client.query(
-        `SELECT ra.id, ra.timer_status, EXISTS(SELECT 1 FROM scorecards sc WHERE sc.assignment_id=ra.id) AS has_scorecard
-           FROM room_assignments ra WHERE ra.round_id=$1`,
-        [operation.entityId],
-      );
-      if (protectedAssignments.rows.some((row) => str(row.timer_status) !== "idle" || bool(row.has_scorecard))) {
-        throw new ApiError("ROUND_ALREADY_IN_USE", "La ronda ya tiene cronómetros iniciados o actas registradas. No se han sobrescrito sus asignaciones.", 409);
-      }
-    } else {
-      const nextRoundNumber = await client.query("SELECT COALESCE(MAX(number), 0) + 1 AS next_number FROM rounds");
-      if (validated.roundNumber !== num(nextRoundNumber.rows[0]?.next_number)) {
-        throw new ApiError("REVISION_CONFLICT", "El número de ronda ya no es el siguiente disponible. Actualiza el torneo y vuelve a revisar la propuesta.", 409);
-      }
-    }
+    const existingRound = await client.query("SELECT id FROM rounds WHERE id = $1 OR number = $2", [operation.entityId, validated.roundNumber]);
+    if (existingRound.rows.length) throw new ApiError("REVISION_CONFLICT", "Ya existe una ronda con ese identificador o número.", 409);
 
-    // The Tabulation regulation preset determines round generation/scoring and is
-    // persisted with Tabulation settings. The manager timer phase snapshot remains
-    // tied to the round's configured manager format; updates preserve that exact
-    // format instead of silently selecting a different one.
-    let defaultFormatId = existingRound ? str(existingRound.default_format_id) : "";
-    if (!defaultFormatId) {
-      const formatResult = await client.query("SELECT id FROM format_presets ORDER BY name, id LIMIT 1");
-      defaultFormatId = str(formatResult.rows[0]?.id);
-    }
+    // Every new assignment must inherit a real manager format snapshot. An empty
+    // assignment_phases array would make the timer load with zero phases/seconds.
+    const formatResult = await client.query("SELECT id FROM format_presets ORDER BY name, id LIMIT 1");
+    const defaultFormatId = str(formatResult.rows[0]?.id);
     if (!defaultFormatId) throw new ApiError("FORMAT_NOT_CONFIGURED", "El gestor no tiene un formato de debate configurado. No se ha publicado la ronda.", 503);
     const phasesResult = await client.query(
-      `SELECT id AS phase_id, phase_order, name, side, speaker, description, duration_seconds,
+      `SELECT phase_id, phase_order, name, side, speaker, description, duration_seconds,
               phase_type, warning_thresholds_seconds, allow_overtime_display
          FROM format_phases WHERE format_id = $1 ORDER BY phase_order`,
       [defaultFormatId],
@@ -152,38 +116,25 @@ export async function publishTabulationRound(rawOperation: unknown) {
     const phases = phasesResult.rows as Array<Record<string, unknown>>;
     const firstPhaseDuration = num(phases[0]?.duration_seconds);
     if (!phases.length || !Number.isSafeInteger(firstPhaseDuration) || firstPhaseDuration < 1) {
-      throw new ApiError("FORMAT_NOT_CONFIGURED", "El formato de debate asociado a la ronda no contiene intervenciones válidas. No se ha publicado la ronda.", 503);
+      throw new ApiError("FORMAT_NOT_CONFIGURED", "El formato predeterminado del gestor no contiene intervenciones válidas. No se ha publicado la ronda.", 503);
     }
 
     const roundKind = validated.roundKind;
-    if (isUpdate) {
-      await client.query(
-        "UPDATE rounds SET number=$2,name=$3,score_type=$4,default_format_id=$5,updated_at=now() WHERE id=$1",
-        [operation.entityId, validated.roundNumber, validated.roundName, roundKind, defaultFormatId],
-      );
-      await client.query("DELETE FROM tabulation_debate_assignments WHERE tournament_id=$1::uuid AND tab_tournament_id=$2 AND tabulation_round_id=$3",
-        [canonicalTournamentId, validated.tabTournamentId, validated.tabulationRoundId]);
-      await client.query("DELETE FROM room_assignments WHERE round_id=$1", [operation.entityId]);
-    } else {
-      await client.query(
-        "INSERT INTO rounds(id, number, name, score_type, default_format_id, is_active) VALUES ($1, $2, $3, $4, $5, false)",
-        [operation.entityId, validated.roundNumber, validated.roundName, roundKind, defaultFormatId],
-      );
-    }
+    await client.query(
+      "INSERT INTO rounds(id, number, name, score_type, default_format_id, is_active) VALUES ($1, $2, $3, $4, $5, false)",
+      [operation.entityId, validated.roundNumber, validated.roundName, roundKind, defaultFormatId],
+    );
     await client.query(
       `INSERT INTO tabulation_round_metadata (tournament_id, manager_round_id, side_mode, team_metadata, updated_by, entity_id_map)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb)
-       ON CONFLICT (tournament_id, manager_round_id) DO UPDATE
-         SET side_mode=EXCLUDED.side_mode, team_metadata=EXCLUDED.team_metadata,
-             updated_by=EXCLUDED.updated_by, entity_id_map=EXCLUDED.entity_id_map`,
+       VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb)`,
       [canonicalTournamentId, operation.entityId, validated.sideMode, JSON.stringify(validated.teamMetadata), "tabulation:" + operation.operationId, JSON.stringify(validated.entityIdMap)],
     );
     await client.query(
       "INSERT INTO audit_events(event_key, event_type, round_id, details) VALUES ($1, $2, $3, $4::jsonb)",
-      ["tabulation-metadata:" + operation.operationId, isUpdate ? "tabulation_round_metadata_updated" : "tabulation_round_metadata_published", operation.entityId,
+      ["tabulation-metadata:" + operation.operationId, "tabulation_round_metadata_published", operation.entityId,
         JSON.stringify({ operationId: operation.operationId, tabTournamentId: validated.tabTournamentId,
           tabulationRoundId: validated.tabulationRoundId, sideMode: validated.sideMode,
-          teamMetadata: validated.teamMetadata, updated: isUpdate })],
+          teamMetadata: validated.teamMetadata })],
     );
 
     const assignmentIds: string[] = [];
@@ -269,7 +220,7 @@ export async function publishTabulationRound(rawOperation: unknown) {
     if (error && typeof error === "object" && "code" in error && String((error as { code?: unknown }).code) === "23505") {
       throw new ApiError("REVISION_CONFLICT", "La publicación entra en conflicto con una asignación o ronda existente. Recarga y revisa la propuesta.", 409);
     }
-    throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido publicar o actualizar la ronda. La transacción se ha revertido.", 503);
+    throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido publicar la ronda. La transacción se ha revertido.", 503);
   } finally {
     client.release();
   }

@@ -11,7 +11,7 @@ import { asciiSlug, latestLogStamp, roundSheet } from '../exports';
 import { drawGroups, generateGroupStage, restingTeams } from '../groups';
 import type { LogInput } from '../log';
 import { drawSides, fallenTeamIds } from '../pairing';
-import { buildOutbox, writeOutbox } from '../panelBridge';
+import { buildOutbox } from '../panelBridge';
 import { hashSeed, randomSeed } from '../random';
 import { cyrb53 } from '../hash';
 import { roundIsComplete, type DebateOutcome } from '../results';
