@@ -246,6 +246,8 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
       teams: entities('team'),
       speakers: entities('speaker'),
       judges: entities('judge'),
+      rounds: entities('round'),
+      rooms: entities('assignment'),
       physicalRooms: entities('venue'),
     } as T;
   }
