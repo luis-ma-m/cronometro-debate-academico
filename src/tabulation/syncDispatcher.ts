@@ -1,5 +1,4 @@
 import { ApiError, ackSyncOperation, previewTabulationActa, publishTabulationRound, recordSyncOperation, saveTabulationActa } from '../api';
-import { hashSyncPayload } from './syncOutbox';
 import { appendPanelPublishAcknowledgement } from './panelBridge';
 import { enqueuePanelPublishAck } from '../contracts/applicationDeliveryAdapters';
 import type { PendingSyncOperation } from './syncOutbox';
