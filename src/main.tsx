@@ -18,10 +18,10 @@ function loadFailed(what: string) {
   };
 }
 
-// The local tabulation and the judges' acta page are separate, frontend-only apps: no login, no API polling.
-const TabulationApp = lazy(() => import('./tabulation/TabulationApp').catch(() => loadFailed('la tabulación')));
+// Judges keep their public acta route; the manager and tabulation now share one application shell.
 const JudgeActaApp = lazy(() => import('./tabulation/JudgeActaApp').catch(() => loadFailed('el acta')));
 const isTabulation = /^\/tabulacion(\/|$)/.test(window.location.pathname);
+if (isTabulation) window.history.replaceState(null, '', '/#tabulation');
 const isJudgeActa = /^\/acta(\/|$)/.test(window.location.pathname);
 
 const root = document.getElementById('root');
@@ -29,10 +29,8 @@ if (!root) throw new Error('No se encontró el elemento raíz de la aplicación.
 
 createRoot(root).render(
   <React.StrictMode>
-    {isTabulation
-      ? <Suspense fallback={<div className="tab-loading">Cargando tabulación…</div>}><TabulationApp /></Suspense>
-      : isJudgeActa
-        ? <Suspense fallback={<div className="tab-loading">Cargando el acta…</div>}><JudgeActaApp /></Suspense>
-        : <App />}
+    {isJudgeActa
+      ? <Suspense fallback={<div className="tab-loading">Cargando el acta…</div>}><JudgeActaApp /></Suspense>
+      : <App />}
   </React.StrictMode>,
 );
