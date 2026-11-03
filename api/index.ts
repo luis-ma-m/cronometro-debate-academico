@@ -346,6 +346,54 @@ function parseRequestBody(body: unknown): { action?: string; payload?: Record<st
   return body as { action?: string; payload?: Record<string, unknown> };
 }
 
+/** Read-only recovery after a domain commit whose HTTP acknowledgement was lost. */
+async function getTabulationSyncOperationStatus(payload: Record<string, unknown>) {
+  const operationId = str(payload.operationId);
+  const entityId = str(payload.entityId);
+  const tournamentId = str(payload.tournamentId);
+  const entityType = str(payload.entityType);
+  const payloadHash = str(payload.payloadHash);
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(operationId)
+    || !/^[a-zA-Z0-9_-]{1,128}$/.test(entityId)
+    || !/^[0-9a-fA-F-]{36}$/.test(tournamentId)
+    || !/^[a-f0-9]{64}$/.test(payloadHash)
+    || !["round", "acta"].includes(entityType)) {
+    throw new ApiError("INVALID_PAYLOAD", "La identidad de la operación de sincronización no es válida.");
+  }
+  const client = await getPool().connect();
+  try {
+    const identity = await client.query("SELECT tournament_id::text AS id FROM tournament_identity WHERE id=1");
+    if (str(identity.rows[0]?.id) !== tournamentId) {
+      throw new ApiError("TOURNAMENT_MISMATCH", "La operación pertenece a otro torneo.", 409);
+    }
+    const journal = await client.query(
+      "SELECT tournament_id::text AS tournament_id, entity_type, entity_id, operation_type, payload_hash FROM sync_operations WHERE operation_id=$1",
+      [operationId],
+    );
+    if (!journal.rows.length) return { found: false };
+    const entry = journal.rows[0];
+    const expectedOperation = entityType === "round" ? "publish-round" : "replace-acta";
+    if (str(entry.tournament_id) !== tournamentId || str(entry.entity_type) !== entityType
+      || str(entry.entity_id) !== entityId || str(entry.operation_type) !== expectedOperation
+      || str(entry.payload_hash).trim() !== payloadHash) {
+      throw new ApiError("IDEMPOTENCY_MISMATCH", "El operationId no coincide con el contenido original.", 409);
+    }
+    const found = await client.query("SELECT scope, response FROM idempotency_keys WHERE operation_key=$1", [operationId]);
+    if (!found.rows.length) return { found: false };
+    const scope = str(found.rows[0].scope);
+    const validScope = entityType === "round"
+      ? scope === ["tabulation-publish-round", tournamentId, entityId, payloadHash].join(":")
+      : scope.startsWith("tabulation-save-acta:" + entityId + ":");
+    if (!validScope) throw new ApiError("IDEMPOTENCY_MISMATCH", "El operationId pertenece a otra operación.", 409);
+    if (found.rows[0].response === null || found.rows[0].response === undefined) {
+      throw new ApiError("IDEMPOTENCY_INCOMPLETE", "La operación no tiene confirmación recuperable.", 409);
+    }
+    return { found: true, response: found.rows[0].response };
+  } finally {
+    client.release();
+  }
+}
+
 async function dispatch(action: string, payload: Record<string, unknown>, req: RequestLike): Promise<unknown> {
   switch (action) {
     case "login":
@@ -370,6 +418,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       return transitionSyncOperation(str(payload.operationId), str(payload.payloadHash),
         payload.status, payload.result,
         payload.error && typeof payload.error === "object" ? payload.error as { code: string; message: string } : undefined, true);
+    case "getTabulationSyncOperationStatus":
+      await requireSession(payload.token);
+      return getTabulationSyncOperationStatus(payload);
     case "createActaShortLink": await requireSession(payload.token); return createActaShortLink(payload);
     case "listActaShortLinks": await requireSession(payload.token); return listActaShortLinks(payload);
     case "updateActaShortLinkExpiry": await requireSession(payload.token); return updateActaShortLinkExpiry(payload);
