@@ -64,8 +64,14 @@ export function createSharedTournamentRepository(storage: SharedTournamentStorag
     writeChain = writeChain.then(async () => {
       try {
         const repository = createIndexedDbApplicationRecordRepository();
-        const existing = await repository.get<SharedTournamentDocument>(SHARED_TOURNAMENT_NAMESPACE, 'active');
-        await repository.put(SHARED_TOURNAMENT_NAMESPACE, 'active', next, { expectedRevision: existing?.revision ?? null, now: next.updatedAt });
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const existing = await repository.get<SharedTournamentDocument>(SHARED_TOURNAMENT_NAMESPACE, 'active');
+          const saved = await repository.put(SHARED_TOURNAMENT_NAMESPACE, 'active', next, {
+            expectedRevision: existing?.revision ?? null,
+            now: next.updatedAt,
+          });
+          if (saved) break;
+        }
       } catch { /* IndexedDB may be unavailable; local-first operation is preserved. */ }
     });
     return next;
