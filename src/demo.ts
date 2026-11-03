@@ -1,6 +1,6 @@
 import type { Room, Tournament } from './domain';
 import { createTimer, LEDU_PHASES, withRoomStatus } from './timer';
-import { getBrowserSharedTournamentRepository } from './contracts/sharedTournamentRepository';
+import { readCanonicalManager, writeCanonicalManager } from './contracts/canonicalTournamentRepository';
 
 const now = Date.now();
 const room = (id: string, name: string, favor: string, contra: string, judgeIds: string[], roundId = 'r1'): Room => withRoomStatus({
@@ -54,8 +54,8 @@ export const demoTournament: Tournament = {
 const STORAGE_KEY = 'ledu-tournament-demo-v1';
 export function readDemo(): Tournament {
   try {
-    const shared = getBrowserSharedTournamentRepository().readManager<Tournament>();
-    const raw = shared ? JSON.stringify(shared) : localStorage.getItem(STORAGE_KEY);
+    const canonical = readCanonicalManager<Tournament>();
+    const raw = canonical ? JSON.stringify(canonical) : localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Tournament;
       if (!Array.isArray(parsed.physicalRooms) || !Array.isArray(parsed.formats)) return demoTournament;
@@ -74,9 +74,8 @@ export function readDemo(): Tournament {
   return demoTournament;
 }
 export function writeDemo(data: Tournament): void {
-  // The shared runtime document is now the canonical local projection. Keep the
-  // old key as a rollback/export-compatible mirror; never remove it here.
-  getBrowserSharedTournamentRepository().writeManager(data);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  // The canonical entity repository owns active tournament data. The legacy
+  // snapshot is retained untouched as a one-way recovery source, not dual-written.
+  writeCanonicalManager(data);
 }
 export function demoStorageKey(): string { return STORAGE_KEY; }
