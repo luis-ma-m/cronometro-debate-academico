@@ -298,7 +298,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   }, [managerSession?.token, store, notify]);
   const refreshRemoteParticipants = useCallback(async () => {
     const token = managerSession?.token;
-    if (!apiConfigured || !token || remoteParticipantRefreshInFlight.current) return;
+    if (!apiConfigured || !token || remoteParticipantRefreshInFlight.current || participantSyncInFlight.current) return;
     remoteParticipantRefreshInFlight.current = true;
     try {
       const remote = await getTournament(token);
