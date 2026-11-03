@@ -550,16 +550,73 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     }
   };
 
-  const createAduma = (sample: boolean) => {
+  const createAduma = async (sample: boolean) => {
     if (readOnlyNotice()) return;
-    const existing = state.tournaments.find((entry) => entry.name === ADUMA_DEFAULT_NAME);
-    if (!sample && existing && !window.confirm('Ya hay un torneo «' + existing.name + '» en este navegador. ¿Crear otro?')) return;
-    const created = sample ? { ...createSampleTournament('aduma'), name: 'Ensayo ADUMA (equipos de ejemplo)' } : createTabTournament(ADUMA_DEFAULT_NAME, 'aduma');
-    store.create(created);
-    notify(sample
-      ? 'Ensayo creado con 20 equipos, 30 jueces y 10 salas de ejemplo: genera rondas y simula resultados sin tocar el torneo real.'
-      : 'Torneo ADUMA creado con su reglamento (4 rondas suizas a ciegas, acta conjunta, cuartos 1–8, 3–6, 2–7, 4–5). Añade ahora los 20 equipos, los jueces, sus incompatibilidades y las salas.');
-    onNavigate(sample ? 'rondas' : 'participantes');
+    if (sample) {
+      const created = { ...createSampleTournament('aduma'), name: 'Ensayo ADUMA (equipos de ejemplo)' };
+      store.create(created);
+      notify('Ensayo creado con 20 equipos, 30 jueces y 10 salas de ejemplo: genera rondas y simula resultados sin tocar el torneo real.');
+      onNavigate('rondas');
+      return;
+    }
+
+    const session = readManagerSession(window.localStorage);
+    if (!session?.token) {
+      notify('Para crear un torneo ADUMA sincronizado, inicia sesión primero en Gestión. No se ha creado ningún torneo local sin vínculo.', 'error');
+      return;
+    }
+    let manager;
+    try {
+      manager = await getTournament(session.token);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'No se pudo comprobar el torneo activo de Gestión.', 'error');
+      return;
+    }
+    const confirmed = window.confirm(
+      'Vas a crear «' + ADUMA_DEFAULT_NAME + '» en Gestión y sustituir el torneo activo «' +
+      manager.tournamentName + '». Gestión archivará el torneo anterior. Tabulación guardará una copia local del torneo que tengas abierto. ¿Continuar?',
+    );
+    if (!confirmed) return;
+    if (tournament && !store.backup('Antes de crear ADUMA y sustituir el torneo activo')) {
+      notify('No se ha podido crear una copia local de seguridad. No se ha iniciado la sustitución.', 'error');
+      return;
+    }
+
+    try {
+      const result = await replaceActiveTournament(
+        session.token,
+        manager.revision,
+        ADUMA_DEFAULT_NAME,
+        presetSettings('aduma'),
+        makeTabId('replace'),
+      );
+      const created = createTabTournament(ADUMA_DEFAULT_NAME, 'aduma');
+      store.create(created);
+      store.update((current) => current.id !== created.id ? current : ({
+        ...current,
+        panelLink: {
+          tournamentName: result.tournament.tournamentName,
+          linkedAt: Date.now(),
+          remoteId: result.tournament.remoteId,
+          remoteRevision: result.tournament.revision,
+          remoteUpdatedAt: result.tournament.updatedAt,
+          identityMode: 'local-canonical',
+          idMap: { teams: {}, speakers: {}, judges: {}, venues: {} },
+        },
+      }), { type: 'tournament.link', message: 'Torneo ADUMA creado y vinculado automáticamente a Gestión', details: {
+        remoteId: result.tournament.remoteId, archiveId: result.archiveId,
+      } });
+      writePanelSyncBase(window.localStorage, created.id, buildPanelHandoff(result.tournament));
+      if (!store.flush()) {
+        notify('Gestión ha creado ADUMA y archivado el torneo anterior, pero Tabulación no ha podido confirmar el vínculo local. Recarga para recuperar el torneo desde Gestión.', 'error');
+        return;
+      }
+      notify('Torneo ADUMA creado y vinculado automáticamente. El torneo anterior queda archivado como ' + result.archiveId + '. Añade ahora equipos, jueces, incompatibilidades y salas.');
+      onNavigate('participantes');
+    } catch (error) {
+      notify((error instanceof Error ? error.message : 'No se pudo crear ADUMA en Gestión.') +
+        ' No se ha creado una copia local sin vínculo.', 'error');
+    }
   };
 
   const createFromPanel = async () => {
