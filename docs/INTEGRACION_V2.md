@@ -2,9 +2,25 @@
 
 ## Estado
 
-**Propuesta técnica y criterios de aceptación. Implementación funcional pendiente.**
+**Implementación parcial en curso. No production-ready; no fusionar todavía.**
 
-Esta rama se ha creado sobre `feat/sync-recovery-operation-status`, que contiene la línea actual de contratos compartidos y recuperación de sincronización. Esta PR no debe considerarse lista para merge hasta completar los criterios de aceptación y las pruebas descritas aquí.
+Implementado en la rama:
+- El gestor conserva Resumen y Rondas y salas e incorpora Tabulación como espacio integrado en su navegación.
+- La ruta heredada `/tabulacion` redirige al espacio integrado; la página pública `/acta` se mantiene.
+- Los cambios de participantes de Tabulación se proyectan al agregado de torneo de Neon mediante la API autenticada existente (`getTournament` / `saveTournament`).
+- La proyección usa IDs canónicos explícitos, conserva rondas/asignaciones/configuración del gestor y aplica control optimista de revisión. Si la revisión remota cambió, bloquea la escritura en vez de sobrescribir.
+- Los cambios locales de participantes mantienen un marcador persistente de sincronización pendiente y se reintentan al iniciar, recuperar conexión o volver a enfocar la aplicación.
+- Hay pruebas del adaptador, persistencia, idempotencia lógica por igualdad de proyección y bloqueo de revisiones obsoletas.
+
+Límites que siguen abiertos:
+- El reintento de participantes aún no es una cola remota de operaciones con ACK/lease/conflict resolution; el marcador local no sustituye ese mecanismo.
+- No está resuelto el bootstrap completo de Tabulación en un segundo dispositivo desde el estado remoto (rondas, emparejamientos, reglas y resultados incluidos).
+- Las entregas de la cola IndexedDB siguen siendo locales al navegador; no deben confundirse con sincronización entre dispositivos.
+- Las lecturas, resultados y clasificación todavía no se han migrado por completo al repositorio Neon único.
+- No se ha validado el recorrido end-to-end con una base Neon aislada y dos dispositivos.
+- El shell se ha integrado visualmente, pero queda retirar código y rutas internas antiguas que ya no deben formar parte de la navegación operativa.
+
+Esta PR no debe considerarse lista para merge hasta completar los criterios de aceptación y las pruebas descritas aquí.
 
 ## Objetivo de producto
 
