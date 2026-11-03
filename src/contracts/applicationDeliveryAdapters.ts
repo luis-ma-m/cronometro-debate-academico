@@ -69,10 +69,40 @@ export async function enqueuePanelOutbox(
   outbox: PanelOutbox,
   queue = getApplicationDeliveryQueue(),
 ): Promise<ApplicationDelivery<PanelOutbox>> {
-  return queue.enqueue({
-    deliveryId: stableDeliveryId(PANEL_OUTBOX_DELIVERY, outbox), source: 'tabulation', target: 'manager',
-    kind: PANEL_OUTBOX_DELIVERY, createdAt: outbox.createdAt, payload: outbox,
-  });
+  const input = {
+    deliveryId: stableDeliveryId(PANEL_OUTBOX_DELIVERY, {
+      tabTournamentId: outbox.tabTournamentId,
+      tabulationRoundId: outbox.tabulationRoundId,
+    }),
+    source: 'tabulation' as const,
+    target: 'manager' as const,
+    kind: PANEL_OUTBOX_DELIVERY,
+    createdAt: outbox.createdAt,
+    payload: outbox,
+  };
+
+  // Upgrade an older fingerprinted pending proposal for this round in place.
+  const pending = (await queue.list<unknown>('manager'))
+    .filter((item) => item.kind === PANEL_OUTBOX_DELIVERY && item.status === 'pending')
+    .reverse();
+  for (const item of pending) {
+    const previous = parsePanelOutbox(item.payload);
+    if (previous?.tabTournamentId !== outbox.tabTournamentId
+      || previous.tabulationRoundId !== outbox.tabulationRoundId) continue;
+    const replaced = await queue.replacePending(item.deliveryId, { ...input, deliveryId: item.deliveryId });
+    if (replaced) return replaced as ApplicationDelivery<PanelOutbox>;
+  }
+
+  try {
+    return await queue.enqueue(input);
+  } catch (error) {
+    // A concurrent first enqueue may have won the stable round key. Replace it
+    // only while pending; if a reviewer already claimed it, preserve it and
+    // append a separate proposal for the newer snapshot.
+    const replaced = await queue.replacePending(input.deliveryId, input);
+    if (replaced) return replaced;
+    return queue.enqueue({ ...input, deliveryId: stableDeliveryId(PANEL_OUTBOX_DELIVERY, outbox) });
+  }
 }
 
 export async function enqueuePanelPublishAck(

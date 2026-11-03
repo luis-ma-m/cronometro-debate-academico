@@ -42,6 +42,8 @@ export interface ClaimApplicationDeliveryOptions {
 
 export interface ApplicationDeliveryQueue {
   enqueue<T>(input: EnqueueApplicationDelivery<T>): Promise<ApplicationDelivery<T>>;
+  /** Replaces a pending delivery in place; older snapshots never overwrite newer ones. */
+  replacePending<T>(deliveryId: string, input: EnqueueApplicationDelivery<T>): Promise<ApplicationDelivery<T> | null>;
   get<T = unknown>(deliveryId: string): Promise<ApplicationDelivery<T> | null>;
   list<T = unknown>(target?: ApplicationDeliveryEndpoint): Promise<ApplicationDelivery<T>[]>;
   claimNext<T = unknown>(options: ClaimApplicationDeliveryOptions): Promise<ApplicationDelivery<T> | null>;
@@ -158,6 +160,20 @@ export function createMemoryApplicationDeliveryQueue(): ApplicationDeliveryQueue
       const record = validateStored<T>({ schemaVersion: 1, ...input, status: 'pending', attempts: 0 });
       items.set(record.deliveryId, record);
       return record;
+    },
+    async replacePending<T>(id: string, raw: EnqueueApplicationDelivery<T>): Promise<ApplicationDelivery<T> | null> {
+      validText(id, 'El deliveryId');
+      const input = validateInput(raw);
+      if (input.deliveryId !== id) throw new ApplicationPersistenceError('La identidad de la entrega no coincide.');
+      const current = items.get(id);
+      if (!current || current.status !== 'pending') return null;
+      if (current.source !== input.source || current.target !== input.target || current.kind !== input.kind) {
+        throw new ApplicationPersistenceError('No se puede reemplazar una entrega pendiente por otra ruta o tipo.');
+      }
+      if (input.createdAt <= current.createdAt) return validateStored<T>(current);
+      const updated = validateStored<T>({ schemaVersion: 1, ...input, status: 'pending', attempts: current.attempts });
+      items.set(id, updated);
+      return updated;
     },
     async get<T = unknown>(id: string): Promise<ApplicationDelivery<T> | null> {
       validText(id, 'El deliveryId');
@@ -280,6 +296,41 @@ export function createIndexedDbApplicationDeliveryQueue(
           } catch (cause) { error = cause; try { tx.abort(); } catch { /* noop */ } }
         };
         tx.oncomplete = () => error ? reject(error) : resolve(result!);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(error ?? tx.error);
+      });
+    },
+    async replacePending<T>(id: string, raw: EnqueueApplicationDelivery<T>): Promise<ApplicationDelivery<T> | null> {
+      validText(id, 'El deliveryId');
+      const input = validateInput(raw);
+      if (input.deliveryId !== id) throw new ApplicationPersistenceError('La identidad de la entrega no coincide.');
+      const db = await database;
+      return new Promise<ApplicationDelivery<T> | null>((resolve, reject) => {
+        const tx = db.transaction(APPLICATION_DELIVERIES_STORE, 'readwrite');
+        const store = tx.objectStore(APPLICATION_DELIVERIES_STORE);
+        let result: ApplicationDelivery<T> | null = null;
+        let error: unknown;
+        const request = store.get(id);
+        request.onsuccess = () => {
+          try {
+            if (!request.result) return;
+            const current = validateStored<T>(request.result);
+            if (current.status !== 'pending') return;
+            if (current.source !== input.source || current.target !== input.target || current.kind !== input.kind) {
+              throw new ApplicationPersistenceError('No se puede reemplazar una entrega pendiente por otra ruta o tipo.');
+            }
+            if (input.createdAt <= current.createdAt) {
+              result = current;
+              return;
+            }
+            result = validateStored<T>({ schemaVersion: 1, ...input, status: 'pending', attempts: current.attempts });
+            store.put(result);
+          } catch (cause) {
+            error = cause;
+            try { tx.abort(); } catch { /* noop */ }
+          }
+        };
+        tx.oncomplete = () => error ? reject(error) : resolve(result);
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(error ?? tx.error);
       });

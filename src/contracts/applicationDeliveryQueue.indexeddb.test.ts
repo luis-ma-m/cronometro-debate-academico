@@ -66,4 +66,20 @@ describe('IndexedDB application delivery queue', () => {
     expect(await firstTab.acknowledge(input.deliveryId, 'tab-1', 1_102)).toBe(false);
     expect(await secondTab.acknowledge(input.deliveryId, 'tab-2', 1_102)).toBe(true);
   });
+
+  it('replaces only pending snapshots and refuses to overwrite a newer snapshot', async () => {
+    const factory = new IDBFactory();
+    const firstTab = createIndexedDbApplicationDeliveryQueue(factory);
+    const secondTab = createIndexedDbApplicationDeliveryQueue(factory);
+    await firstTab.enqueue(input);
+
+    const latestInput = { ...input, createdAt: 200, payload: { tournamentId: 'tournament-1', version: 2 } };
+    const replaced = await firstTab.replacePending(input.deliveryId, latestInput);
+    expect(replaced).toMatchObject({ status: 'pending', createdAt: 200, payload: latestInput.payload });
+
+    const staleInput = { ...input, createdAt: 150, payload: { tournamentId: 'tournament-1', version: 1 } };
+    const staleAttempt = await secondTab.replacePending(input.deliveryId, staleInput);
+    expect(staleAttempt).toMatchObject({ status: 'pending', createdAt: 200, payload: latestInput.payload });
+    expect(await secondTab.get(input.deliveryId)).toMatchObject({ createdAt: 200, payload: latestInput.payload });
+  });
 });

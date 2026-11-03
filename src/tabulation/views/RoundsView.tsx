@@ -74,6 +74,31 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     return update((latest) => (latest === current ? first.next : compute(latest)?.next ?? latest), first.meta);
   };
 
+  const enqueueUpdatedRound = async (roundId: string) => {
+    if (!store.flush()) {
+      notify('El cambio se ha aplicado en la sesión, pero no se ha podido confirmar el guardado local; no se enviará una propuesta incompleta.', 'error');
+      return;
+    }
+    const saved = store.getState().tournament;
+    if (!saved?.panelLink?.remoteId) return;
+    const proposal = buildOutbox(saved, roundId);
+    if (!proposal.outbox) {
+      notify('La ronda se ha guardado localmente, pero no se ha podido actualizar la propuesta de Gestión: ' + proposal.issues.join(' '), 'warning');
+      return;
+    }
+    try {
+      await enqueuePanelOutbox(proposal.outbox);
+      notify('Cambios de ' + (saved.rounds.find((item) => item.id === roundId)?.name ?? 'la ronda') + ' enviados a la bandeja de Gestión. La publicación sigue requiriendo revisión.', proposal.warnings.length ? 'warning' : 'success');
+    } catch (error) {
+      try {
+        writeOutbox(window.localStorage, proposal.outbox);
+        notify('La cola durable no está disponible; los cambios se han dejado en el buzón compatible para que Gestión pueda recuperarlos.', 'warning');
+      } catch {
+        notify('La ronda está guardada localmente, pero no se ha podido entregar a Gestión: ' + errorText(error), 'error');
+      }
+    }
+  };
+
   const newRound = () => {
     const seed = seedFrom(seedText);
     const typed = seedText.trim();
@@ -225,15 +250,18 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     } : null))) notify('Nuevo sorteo de ' + created.round.name + '.' + (result.warnings.length ? ' ' + result.warnings.join(' ') : ''), result.warnings.length ? 'warning' : 'success');
   };
 
-  const editConfirmed = (roundId: string, edit: DraftEdit) => applyLogged((current) => {
-    const target = current.rounds.find((item) => item.id === roundId);
-    if (!target) return null;
-    if ('debateId' in edit && target.debates.find((debate) => debate.id === edit.debateId)?.result) return null;
-    const result = editRound(current, target, edit);
-    return result.change ? { next: { ...current, rounds: current.rounds.map((item) => (item.id === roundId ? result.round : item)) }, meta: { type: 'round.edit', message: target.name + ' · ' + result.change } } : null;
-  });
+  const editConfirmed = async (roundId: string, edit: DraftEdit) => {
+    const applied = applyLogged((current) => {
+      const target = current.rounds.find((item) => item.id === roundId);
+      if (!target) return null;
+      if ('debateId' in edit && target.debates.find((debate) => debate.id === edit.debateId)?.result) return null;
+      const result = editRound(current, target, edit);
+      return result.change ? { next: { ...current, rounds: current.rounds.map((item) => (item.id === roundId ? result.round : item)) }, meta: { type: 'round.edit', message: target.name + ' · ' + result.change } } : null;
+    });
+    if (applied) await enqueueUpdatedRound(roundId);
+  };
 
-  const completeJudges = (target: TabRound) => {
+  const completeJudges = async (target: TabRound) => {
     const applied = applyLogged((current) => {
       const latest = current.rounds.find((item) => item.id === target.id);
       if (!latest) return null;
@@ -244,7 +272,8 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
       const changes = diffRounds(current, latest, next);
       return changes.length ? { next: { ...current, rounds: current.rounds.map((item) => (item.id === target.id ? next : item)) }, meta: { type: 'round.edit', message: target.name + ' · jueces completados automáticamente: ' + changes.join(' ') } } : null;
     });
-    notify(applied ? 'Paneles completados con los jueces disponibles.' : 'No hay asientos de juez que se puedan completar.', applied ? 'success' : 'warning');
+    if (applied) await enqueueUpdatedRound(target.id);
+    else notify('No hay asientos de juez que se puedan completar.', 'warning');
   };
 
   const reopen = (target: TabRound) => {

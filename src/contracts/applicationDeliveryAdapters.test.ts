@@ -54,4 +54,31 @@ describe('application delivery adapters', () => {
     expect(second).toEqual(first);
     expect(await queue.list('tabulation')).toHaveLength(1);
   });
+
+  it('coalesces newer edits into one pending proposal for the same round', async () => {
+    const queue = createMemoryApplicationDeliveryQueue();
+    const first = await enqueuePanelOutbox(outbox, queue);
+    const latestOutbox = { ...outbox, createdAt: 250, roundName: 'Ronda 1 revisada' };
+    const latest = await enqueuePanelOutbox(latestOutbox, queue);
+
+    expect(latest.deliveryId).toBe(first.deliveryId);
+    expect(latest.payload.roundName).toBe('Ronda 1 revisada');
+    expect(latest.createdAt).toBe(250);
+    expect(await queue.list('manager')).toHaveLength(1);
+  });
+
+  it('keeps a proposal already claimed by a reviewer and queues the newer edit separately', async () => {
+    const queue = createMemoryApplicationDeliveryQueue();
+    const first = await enqueuePanelOutbox(outbox, queue);
+    const claimed = await queue.claimNext({
+      consumer: 'manager-reviewer', target: 'manager', kind: 'panel-round-proposal', now: 210, leaseMs: 5_000,
+    });
+    expect(claimed?.deliveryId).toBe(first.deliveryId);
+
+    const latest = await enqueuePanelOutbox({ ...outbox, createdAt: 250, roundName: 'Ronda 1 revisada' }, queue);
+    expect(latest.deliveryId).not.toBe(first.deliveryId);
+    expect(latest.status).toBe('pending');
+    expect(await queue.get(first.deliveryId)).toMatchObject({ status: 'claimed', leaseOwner: 'manager-reviewer' });
+    expect(await queue.list('manager')).toHaveLength(2);
+  });
 });
