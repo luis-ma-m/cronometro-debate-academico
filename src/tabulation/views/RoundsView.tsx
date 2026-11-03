@@ -157,100 +157,93 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     if (check.warnings.length && acknowledged !== check.warnings.join('|')) { notify('Revisa los avisos y marca «Confirmo bajo mi responsabilidad» para confirmar.', 'error'); return; }
     const preview = confirmDraft(current, pending.round.id);
     if (preview.errors.length) { notify(preview.errors.join(' '), 'error'); return; }
-    store.backup('Antes de confirmar ' + pending.round.name);
-    const manual = diffRounds(current, pending.generated, pending.round);
-    const ok = applyLogged((latest) => {
-      const confirmed = confirmDraft(latest, pending.round.id);
-      return confirmed.errors.length || confirmed.alreadyConfirmed ? null : {
-        next: confirmed.tournament,
-        meta: {
-          type: 'round.confirm',
-          message: pending.round.name + ' confirmada ' + (manual.length ? 'con ' + manual.length + ' cambio(s) manual(es)' : 'tal como salió del sorteo') + (check.warnings.length ? '; avisos aceptados: ' + check.warnings.length : '') + '.',
-          details: {
-            seed: pending.seed, manualChanges: manual, acceptedWarnings: check.warnings,
-            debates: pending.round.debates.map((debate) => ({ teams: debate.teamIds, venue: debate.venueId, judges: debate.judgeIds, chair: debate.chairId })),
-          },
-        },
-      };
-    });
-    if (!ok) { notify('No se ha podido confirmar la ronda.', 'error'); return; }
-    setAcknowledged('');
-    setSelectedId(pending.round.id);
-    // Only what is safely stored is exported.
-    if (!store.flush() || store.getState().status !== 'saved') {
-      notify('La ronda se ha confirmado, pero el navegador no la ha podido guardar: todavía no se exporta. Resuelve el aviso de guardado y pulsa «Descargar ZIP».', 'error');
+    if (!current.panelLink?.remoteId) {
+      notify('No se puede confirmar la ronda: el torneo no está vinculado a Gestión. Vincúlalo antes de publicar; el borrador se conserva sin marcar como confirmado.', 'error');
       return;
     }
-    let savedTournament = store.getState().tournament;
-    if (savedTournament?.panelLink?.remoteId) {
-      const synced = syncParticipants ? await syncParticipants() : false;
-      if (!synced) {
-        notify('Ronda confirmada y guardada localmente, pero no se ha enviado: primero hay que confirmar los participantes, jueces y salas en Gestión.', 'error');
-        exportZip(pending.round.id, true);
-        setScreenId(pending.round.id);
+    if (!managerSessionToken) {
+      notify('No hay una sesión autenticada de Gestión. La ronda no se ha confirmado ni enviado.', 'error');
+      return;
+    }
+
+    // Synchronise the manager-owned participant domain before creating the
+    // proposal. A failed participant write must leave the round as a draft.
+    const synced = syncParticipants ? await syncParticipants() : false;
+    if (!synced) {
+      notify('No se han podido sincronizar participantes, jueces y salas con Gestión. La ronda sigue siendo un borrador y no se ha publicado.', 'error');
+      return;
+    }
+
+    const latest = store.getState().tournament;
+    if (!latest || latest.panelLink?.remoteId !== current.panelLink.remoteId) {
+      notify('El vínculo del torneo ha cambiado durante la publicación. Recarga Tabulación y vuelve a intentarlo.', 'error');
+      return;
+    }
+    const confirmed = confirmDraft(latest, pending.round.id);
+    if (confirmed.errors.length || confirmed.alreadyConfirmed) {
+      notify(confirmed.errors.join(' ') || 'La ronda ya no está disponible como borrador. Recarga el torneo.', 'error');
+      return;
+    }
+    const candidate = confirmed.tournament;
+    const proposal = buildOutbox(candidate, pending.round.id);
+    if (!proposal.outbox) {
+      notify('No se ha podido preparar la publicación: ' + proposal.issues.join(' '), 'error');
+      return;
+    }
+
+    const operationId = 'tab-round-' + pending.round.id;
+    try {
+      const operation = {
+        protocolVersion: 1 as const,
+        operationId,
+        tournamentId: latest.panelLink.remoteId,
+        entityType: 'round' as const,
+        entityId: pending.round.id,
+        operation: 'publish-round' as const,
+        baseRevision: latest.panelLink.remoteRevision ?? 0,
+        payload: { ...proposal.outbox },
+        payloadHash: await hashSyncPayload(proposal.outbox),
+      };
+      // The database transaction is the commit point. Do not mark the round
+      // confirmed in the browser before the server acknowledges this write.
+      const published = await publishTabulationRound(managerSessionToken, operation);
+      const assignmentByDebate = new Map(published.debateAssignments.map((item) => [item.tabulationDebateId, item.assignmentId]));
+      const manual = diffRounds(latest, pending.generated, pending.round);
+      store.update((state) => ({
+        ...candidate,
+        panelLink: state.panelLink ? {
+          ...state.panelLink,
+          remoteRevision: published.revision,
+          remoteUpdatedAt: published.updatedAt,
+        } : state.panelLink,
+        rounds: candidate.rounds.map((item) => item.id !== pending.round.id ? item : ({
+          ...item,
+          managerRoundId: published.roundId,
+          pushedAt: Date.now(),
+          debates: item.debates.map((debate) => ({
+            ...debate,
+            ...(assignmentByDebate.has(debate.id) ? { managerAssignmentId: assignmentByDebate.get(debate.id) } : {}),
+          })),
+        })),
+      }), {
+        type: 'round.confirm',
+        message: pending.round.name + ' publicada y confirmada en Gestión' + (manual.length ? ' con ' + manual.length + ' cambio(s) manual(es)' : '') + '.',
+        details: {
+          operationId: published.operationId, roundId: published.roundId,
+          assignmentCount: published.assignmentIds.length, seed: pending.seed,
+          manualChanges: manual, acceptedWarnings: check.warnings,
+        },
+      });
+      if (store.getState().status === 'error' || store.getState().status === 'conflict') {
+        notify('Gestión ha confirmado la ronda, pero el navegador no ha podido actualizar su vista local. Recarga desde Gestión; no vuelvas a publicar con otro identificador.', 'error');
         return;
       }
-      savedTournament = store.getState().tournament;
-    }
-    let publicationSucceeded = false;
-    let publicationIssue = '';
-    if (savedTournament?.panelLink?.remoteId) {
-      const proposal = buildOutbox(savedTournament, pending.round.id);
-      if (!proposal.outbox) {
-        publicationIssue = proposal.issues.join(' ');
-      } else if (!managerSessionToken) {
-        publicationIssue = 'No hay una sesión autenticada de Gestión para escribir la ronda en la base de datos.';
-      } else {
-        try {
-          // Confirmation performs the canonical database write synchronously.
-          // The API transaction inserts rounds, room_assignments, judges,
-          // phases, Tabulation identity metadata and audit records in Neon.
-          const operation = {
-            protocolVersion: 1 as const,
-            operationId: 'tab-round-' + pending.round.id,
-            tournamentId: savedTournament.panelLink.remoteId,
-            entityType: 'round' as const,
-            entityId: pending.round.id,
-            operation: 'publish-round' as const,
-            baseRevision: savedTournament.panelLink.remoteRevision ?? 0,
-            payload: { ...proposal.outbox },
-            payloadHash: await hashSyncPayload(proposal.outbox),
-          };
-          const published = await publishTabulationRound(managerSessionToken, operation);
-          const assignmentByDebate = new Map(published.debateAssignments.map((item) => [item.tabulationDebateId, item.assignmentId]));
-          store.update((current) => ({
-            ...current,
-            panelLink: current.panelLink ? {
-              ...current.panelLink,
-              remoteRevision: published.revision,
-              remoteUpdatedAt: published.updatedAt,
-            } : current.panelLink,
-            rounds: current.rounds.map((item) => item.id !== pending.round.id ? item : ({
-              ...item,
-              managerRoundId: published.roundId,
-              pushedAt: Date.now(),
-              debates: item.debates.map((debate) => ({
-                ...debate,
-                ...(assignmentByDebate.has(debate.id) ? { managerAssignmentId: assignmentByDebate.get(debate.id) } : {}),
-              })),
-            })),
-          }), { type: 'sync.ack', message: 'Ronda y asignaciones escritas directamente en Neon', details: {
-            operationId: published.operationId, roundId: published.roundId, assignmentCount: published.assignmentIds.length,
-          } });
-          publicationSucceeded = true;
-        } catch (error) {
-          publicationIssue = errorText(error);
-        }
-      }
-    } else {
-      publicationIssue = 'El torneo todavía no está vinculado a Gestión; la ronda permanece guardada localmente.';
-    }
-    exportZip(pending.round.id, true);
-    setScreenId(pending.round.id);
-    if (publicationSucceeded) {
-      notify('Ronda confirmada y escrita en la base de datos compartida. Sus salas y asignaciones ya están disponibles en «Rondas y salas».', 'success');
-    } else {
-      notify('La ronda está guardada localmente, pero NO se ha escrito en la base de datos compartida. ' + publicationIssue, 'error');
+      setAcknowledged('');
+      setSelectedId(pending.round.id);
+      setScreenId(pending.round.id);
+      notify('Ronda confirmada por el backend y escrita en la base de datos compartida. No se ha generado ningún ZIP.', 'success');
+    } catch (error) {
+      notify('El backend no ha confirmado la publicación. La ronda sigue como borrador y no se ha marcado como confirmada. ' + errorText(error), 'error');
     }
   };
 
