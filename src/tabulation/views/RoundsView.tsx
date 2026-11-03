@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
-import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from '../syncOutbox';
+import { enqueuePanelOutbox } from '../../contracts/applicationDeliveryAdapters';
 import { Check, ClipboardList, Copy, Dices, Download, FileText, Gavel, MessageCircle, MonitorPlay, MoreHorizontal, Projector, RotateCcw, Search, Send, Shuffle, Sparkles, Star, Trash2, Trophy, Undo2, X } from 'lucide-react';
 import { allocateJudgesForRound, judgesConflict, teamConflicts, type RoundProblem } from '../adjudication';
 import { computeBreak, tournamentChampion } from '../bracket';
@@ -74,39 +74,29 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     return update((latest) => (latest === current ? first.next : compute(latest)?.next ?? latest), first.meta);
   };
 
-  const enqueueRoundSync = async (saved: TabTournament, roundId: string) => {
-    if (!saved.panelLink?.remoteId) return { queued: false, issue: 'El torneo todavía no está vinculado a Gestión.' };
-    const proposal = buildOutbox(saved, roundId);
-    if (!proposal.outbox) return { queued: false, issue: proposal.issues.join(' ') || 'No se pudo construir la publicación.' };
-    try {
-      const outbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
-      await outbox.enqueue({
-        tournamentId: saved.panelLink.remoteId,
-        entityType: 'round',
-        entityId: roundId,
-        operation: 'publish-round',
-        baseRevision: proposal.outbox.basePanelRevision ?? saved.panelLink.remoteRevision ?? 0,
-        payload: proposal.outbox,
-      });
-      return { queued: true, issue: proposal.warnings.join(' ') };
-    } catch (error) {
-      return { queued: false, issue: errorText(error) };
-    }
-  };
-
   const enqueueUpdatedRound = async (roundId: string) => {
     if (!store.flush()) {
       notify('El cambio se ha aplicado en la sesión, pero no se ha podido confirmar el guardado local; no se enviará una propuesta incompleta.', 'error');
       return;
     }
     const saved = store.getState().tournament;
-    if (!saved) return;
-    const result = await enqueueRoundSync(saved, roundId);
-    notify(result.queued
-      ? 'Cambios de ' + (saved.rounds.find((item) => item.id === roundId)?.name ?? 'la ronda') + ' enviados a sincronización automática con Rondas y salas.'
-        + (result.issue ? ' ' + result.issue : '')
-      : 'La ronda está guardada localmente, pero no se ha podido sincronizar con Rondas y salas: ' + result.issue,
-      result.queued ? (result.issue ? 'warning' : 'success') : 'error');
+    if (!saved?.panelLink?.remoteId) return;
+    const proposal = buildOutbox(saved, roundId);
+    if (!proposal.outbox) {
+      notify('La ronda se ha guardado localmente, pero no se ha podido actualizar la propuesta de Gestión: ' + proposal.issues.join(' '), 'warning');
+      return;
+    }
+    try {
+      await enqueuePanelOutbox(proposal.outbox);
+      notify('Cambios de ' + (saved.rounds.find((item) => item.id === roundId)?.name ?? 'la ronda') + ' enviados a la bandeja de Gestión. La publicación sigue requiriendo revisión.', proposal.warnings.length ? 'warning' : 'success');
+    } catch (error) {
+      try {
+        writeOutbox(window.localStorage, proposal.outbox);
+        notify('La cola durable no está disponible; los cambios se han dejado en el buzón compatible para que Gestión pueda recuperarlos.', 'warning');
+      } catch {
+        notify('La ronda está guardada localmente, pero no se ha podido entregar a Gestión: ' + errorText(error), 'error');
+      }
+    }
   };
 
   const newRound = () => {
@@ -191,15 +181,38 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
       return;
     }
     const savedTournament = store.getState().tournament;
-    const sync = savedTournament ? await enqueueRoundSync(savedTournament, pending.round.id)
-      : { queued: false, issue: 'No se ha podido recuperar el torneo guardado.' };
+    let deliveryQueued = false;
+    let deliveryIssue = '';
+    if (savedTournament?.panelLink?.remoteId) {
+      const proposal = buildOutbox(savedTournament, pending.round.id);
+      if (proposal.outbox) {
+        try {
+          await enqueuePanelOutbox(proposal.outbox);
+          deliveryQueued = true;
+        } catch (error) {
+          deliveryIssue = errorText(error);
+        }
+        // Keep the old mailbox as a compatibility fallback, but never treat it as an ACK.
+        if (!deliveryQueued) {
+          try {
+            writeOutbox(window.localStorage, proposal.outbox);
+            deliveryIssue = 'La cola durable no está disponible; se ha usado el buzón compatible.';
+          } catch (error) {
+            deliveryIssue = errorText(error);
+          }
+        }
+      } else {
+        deliveryIssue = proposal.issues.join(' ');
+      }
+    } else {
+      deliveryIssue = 'El torneo todavía no está vinculado a Gestión; la ronda permanece guardada localmente.';
+    }
     exportZip(pending.round.id, true);
     setScreenId(pending.round.id);
-    if (sync.queued) {
-      notify('Ronda confirmada y guardada. Se ha enviado a sincronización automática: aparecerá en Rondas y salas y en el resumen de Gestión al confirmarse en el servidor.'
-        + (sync.issue ? ' ' + sync.issue : ''), sync.issue ? 'warning' : 'success');
+    if (deliveryQueued) {
+      notify('Ronda confirmada, guardada y enviada automáticamente a la bandeja de Gestión. Allí sigue pendiente de revisión y publicación oficial.', 'success');
     } else {
-      notify('Ronda confirmada y guardada localmente, pero no se ha podido sincronizar con Gestión: ' + sync.issue, 'error');
+      notify('Ronda confirmada y guardada localmente. No se ha podido enviar automáticamente a Gestión. ' + deliveryIssue, 'warning');
     }
   };
 
@@ -315,19 +328,21 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
   };
 
   const sendToPanel = async (target: TabRound) => {
-    if (!store.flush()) {
-      notify('No se puede sincronizar: primero debe guardarse la ronda en este navegador.', 'error');
+    const { outbox, issues, warnings } = buildOutbox(tournament, target.id);
+    if (!outbox) { notify(issues.join(' '), 'error'); return; }
+    let queued = false;
+    let legacy = false;
+    try { await enqueuePanelOutbox(outbox); queued = true; } catch { /* Preserve the compatibility path below. */ }
+    try { writeOutbox(window.localStorage, outbox); legacy = true; } catch { /* The durable queue may already contain the proposal. */ }
+    if (!queued && !legacy) {
+      notify('No se pudo guardar la propuesta ni en la cola duradera ni en el buzón compatible.', 'error');
       return;
     }
-    const saved = store.getState().tournament;
-    if (!saved) return;
-    const result = await enqueueRoundSync(saved, target.id);
-    if (!result.queued) {
-      notify('No se ha podido enviar la ronda a sincronización: ' + result.issue, 'error');
-      return;
-    }
-    update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === target.id ? { ...item, pushedAt: Date.now() } : item)) }), { type: 'round.export', message: target.name + ' enviada a sincronización automática con Gestión.' });
-    notify('Ronda enviada a sincronización automática con Rondas y salas.' + (result.issue ? ' ' + result.issue : ''), result.issue ? 'warning' : 'success');
+    update((current) => ({ ...current, rounds: current.rounds.map((item) => (item.id === target.id ? { ...item, pushedAt: Date.now() } : item)) }), { type: 'round.export', message: target.name + ' enviada al panel de cronómetros.' });
+    notify(queued
+      ? 'Propuesta de ' + target.name + ' guardada en la cola duradera. En el panel (este mismo navegador) abre «Rondas y salas» y pulsa «Cargar desde tabulación». ' + (warnings.length ? warnings.join(' ') : '')
+      : 'Propuesta de ' + target.name + ' guardada mediante el buzón compatible; la cola duradera no está disponible. ' + (warnings.length ? warnings.join(' ') : ''),
+    warnings.length ? 'warning' : 'success');
   };
 
   const audit = (target: TabRound) => {
