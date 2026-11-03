@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
   save: vi.fn(),
   publish: vi.fn(),
+  record: vi.fn(),
+  ack: vi.fn(),
+  status: vi.fn(),
 }));
 
 vi.mock('../api', () => ({
@@ -13,6 +16,9 @@ vi.mock('../api', () => ({
   previewTabulationActa: mocks.preview,
   saveTabulationActa: mocks.save,
   publishTabulationRound: mocks.publish,
+  recordSyncOperation: mocks.record,
+  ackSyncOperation: mocks.ack,
+  getTabulationSyncOperationStatus: mocks.status,
 }));
 
 import { ApiError } from '../api';
@@ -28,7 +34,24 @@ function operation(payload: unknown, operationId = 'acta-op-stable-01'): Pending
 }
 
 describe('Tabulation offline sync dispatcher', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.record.mockResolvedValue({ status: 'pending' });
+    mocks.ack.mockResolvedValue({ status: 'committed' });
+    mocks.status.mockResolvedValue({ found: false, response: null });
+  });
+
+  it('recovers a previously committed acta after an ambiguous timeout without writing twice', async () => {
+    const response = { sourceId: 'committed-acta-version' };
+    mocks.status.mockResolvedValue({ found: true, response });
+    const dispatch = createTabulationSyncDispatcher({ token: 'manager-token' });
+    const result = await dispatch(operation({ mode: 'first-save', assignmentId: 'assignment-1', source: {} }));
+    expect(result).toEqual({ status: 'acknowledged', response });
+    expect(mocks.preview).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.status).toHaveBeenCalledOnce();
+    expect(mocks.ack).toHaveBeenCalledWith('manager-token', 'acta-op-stable-01', 'a'.repeat(64), 'committed', response);
+  });
 
   it('previews an offline first-save and only writes when no official version exists', async () => {
     const proposedSource = { sourceMode: 'judges', acta: { winnerTeamId: 'team-a' } };
