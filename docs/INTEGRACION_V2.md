@@ -14,8 +14,8 @@ Implementado en la rama:
 
 Límites que siguen abiertos:
 - El reintento de participantes aún no es una cola remota de operaciones con ACK/lease/conflict resolution; el marcador local no sustituye ese mecanismo.
-- No está resuelto el bootstrap completo de Tabulación en un segundo dispositivo desde el estado remoto (rondas, emparejamientos, reglas y resultados incluidos).
-- Las entregas de la cola IndexedDB siguen siendo locales al navegador; no deben confundirse con sincronización entre dispositivos.
+- El bootstrap y refresco desde Neon ya recuperan participantes en un segundo dispositivo, pero todavía no reconstruyen rondas, emparejamientos, actas, reglas ni resultados completos.
+- Las entregas de la cola IndexedDB siguen siendo locales al navegador; no deben confundirse con sincronización entre dispositivos. El polling de participantes desde Neon cubre ese dominio, no la totalidad de la aplicación.
 - Las lecturas, resultados y clasificación todavía no se han migrado por completo al repositorio Neon único.
 - No se ha validado el recorrido end-to-end con una base Neon aislada y dos dispositivos.
 - El shell se ha integrado visualmente, pero queda retirar código y rutas internas antiguas que ya no deben formar parte de la navegación operativa.
