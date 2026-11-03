@@ -362,3 +362,14 @@ export const publishTabulationSnapshot = (
 ) => apiCall<TabulationPublicationResult>('publishTabulationSnapshot', { token, ...input });
 export const getAuthoritativeTabulationSnapshot = (token: string, tabTournamentId: string) =>
   apiCall<AuthoritativeTabulationSnapshot | null>('getAuthoritativeTabulationSnapshot', { token, tabTournamentId });
+
+export type AuthoritativeTabulationListing = {
+  tabTournamentId: string;
+  tournamentName: string;
+  schemaVersion: number;
+  revision: number;
+  snapshotSha256: string;
+  updatedAt: number;
+};
+export const listAuthoritativeTabulationSnapshots = (token: string) =>
+  apiCall<AuthoritativeTabulationListing[]>('listAuthoritativeTabulationSnapshots', { token });
