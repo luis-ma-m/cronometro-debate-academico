@@ -63,6 +63,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   const [managerSession, setManagerSession] = useState(() => readManagerSession(window.localStorage));
   const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   const [managerConnection, setManagerConnection] = useState<{ connected: boolean; checkedAt: number | null; lastSuccessAt: number | null }>({ connected: false, checkedAt: null, lastSuccessAt: null });
+  const [participantSyncPending, setParticipantSyncPending] = useState(false);
   const participantSyncTimer = useRef<number | null>(null);
   const participantSyncInFlight = useRef(false);
   const participantSyncBlocked = useRef(false);
@@ -277,6 +278,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       });
       const saved = result.tournament;
       window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
+      setParticipantSyncPending(false);
       store.update((current) => ({
         ...current,
         panelLink: current.panelLink ? { ...current.panelLink, remoteRevision: saved.revision, remoteUpdatedAt: saved.updatedAt } : current.panelLink,
@@ -309,6 +311,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       if (participantsChanged && after?.panelLink?.remoteId) {
         participantSyncBlocked.current = false;
         try { window.localStorage.setItem('ledu-tabulation-participant-sync-pending:' + after.panelLink.remoteId, String(Date.now())); } catch { /* IndexedDB remains the local data store. */ }
+        setParticipantSyncPending(true);
         if (participantSyncTimer.current !== null) window.clearTimeout(participantSyncTimer.current);
         participantSyncTimer.current = window.setTimeout(() => { participantSyncTimer.current = null; void syncParticipantDomain(); }, 800);
       }
@@ -318,6 +321,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   useEffect(() => {
     const remoteId = store.getState().tournament?.panelLink?.remoteId;
     if (!remoteId || !window.localStorage.getItem('ledu-tabulation-participant-sync-pending:' + remoteId)) return;
+    setParticipantSyncPending(true);
     void syncParticipantDomain();
     const retry = () => { participantSyncBlocked.current = false; void syncParticipantDomain(); };
     window.addEventListener('online', retry);
@@ -396,6 +400,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
           <Icon size={17} /><span>{item.label}</span>
         </button>;
       })}</nav>}
+      {embedded && participantSyncPending && <div className="notice warning-notice" role="status" aria-live="polite">Cambios de participantes pendientes de confirmación en Neon. La copia local se conserva y se reintentará al recuperar la conexión; si hay conflicto de revisión, no se sobrescriben datos remotos.</div>}
       <header className="topbar">
         <div><span className="eyebrow">TABULACIÓN LOCAL · SIN CONEXIÓN AL SERVIDOR</span><h1>{tournament?.name ?? 'Tabulación de debate académico'}</h1></div>
         {tournament && <div className="top-actions tab-no-project">
