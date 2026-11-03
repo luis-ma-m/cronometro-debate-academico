@@ -182,7 +182,7 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     }
     let savedTournament = store.getState().tournament;
     if (savedTournament?.panelLink?.remoteId) {
-      const synced = await syncParticipants();
+      const synced = syncParticipants ? await syncParticipants() : false;
       if (!synced) {
         notify('Ronda confirmada y guardada localmente, pero no se ha enviado: primero hay que confirmar los participantes, jueces y salas en Gestión.', 'error');
         exportZip(pending.round.id, true);
@@ -338,7 +338,7 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
   };
 
   const sendToPanel = async (target: TabRound) => {
-    if (!(await syncParticipants())) { notify('No se puede enviar la ronda: los participantes, jueces y salas todavía no están confirmados en Gestión. Revisa el estado de sincronización y vuelve a intentarlo.', 'error'); return; }
+    if (!syncParticipants || !(await syncParticipants())) { notify('No se puede enviar la ronda: los participantes, jueces y salas todavía no están confirmados en Gestión. Revisa el estado de sincronización y vuelve a intentarlo.', 'error'); return; }
     const latest = store.getState().tournament ?? tournament;
     const { outbox, issues, warnings } = buildOutbox(latest, target.id);
     if (!outbox) { notify(issues.join(' '), 'error'); return; }
