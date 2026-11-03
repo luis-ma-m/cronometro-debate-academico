@@ -883,3 +883,94 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .acta-summary dd{margin:0;font-weight:650;overflow-wrap:anywhere}
 .acta-summary em{font-style:normal;font-weight:600;color:var(--tab-warn)}
 .acta-send-button{min-height:52px;border-radius:12px}
+
+/* Shared application sidebar and separate functional workspaces. */
+.unified-shell .sidebar{
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(148,163,184,.38) transparent;
+}
+.unified-shell .sidebar::-webkit-scrollbar{width:6px}
+.unified-shell .sidebar::-webkit-scrollbar-track{background:transparent}
+.unified-shell .sidebar::-webkit-scrollbar-thumb{
+  background:rgba(148,163,184,.32);
+  border-radius:999px;
+  border:1px solid transparent;
+  background-clip:padding-box;
+}
+.unified-shell .sidebar:hover::-webkit-scrollbar-thumb{background:rgba(148,163,184,.58);background-clip:padding-box}
+.unified-shell .sidebar::-webkit-scrollbar-thumb:hover{background:rgba(203,213,225,.72);background-clip:padding-box}
+.unified-shell .unified-section{margin-top:26px;padding-top:20px;border-top:1px solid #293648}
+.unified-shell .main-area{min-width:0}
+.unified-shell .workspace-heading{display:flex;align-items:center;justify-content:space-between;padding:22px 0 14px;border-bottom:1px solid #e1e6ee}
+.unified-shell .workspace-heading h1{font-size:18px;margin:0}
+.unified-shell .workspace-tag{display:inline-flex;align-items:center;border-radius:999px;padding:7px 11px;font-size:10px;letter-spacing:1px;font-weight:800;background:#e8f2fb;color:#0f5f9d}
+.unified-shell .tab-embedded{min-height:0}
+.unified-shell .tab-embedded .main-area{margin:0;padding:0;max-width:none}
+.unified-shell .tab-embedded .topbar{border-bottom:0;min-height:76px;padding:4px 0 15px}
+.unified-shell .tab-embedded .footer{margin-top:22px}
+.unified-shell .tab-embedded .sidebar{display:none}
+@media(max-width:760px){
+  .unified-shell .unified-section{margin:0 0 0 8px;padding:0 0 0 12px;border:0;border-left:1px solid #334155}
+  .unified-shell .sidebar nav{align-items:center}
+  .unified-shell .sidebar{padding-bottom:12px}
+  .unified-shell .workspace-heading{padding:12px 0}
+}
+
+/* Shared sidebar: two unmistakable navigation domains, with Tabulation subsections. */
+.unified-shell .sidebar{overflow-y:auto}
+.unified-shell .unified-section{margin-top:26px;padding-top:20px;border-top:1px solid #293648}
+.unified-shell .manager-workspace[hidden],.unified-shell .tabulation-workspace[hidden]{display:none!important}
+.unified-shell .manager-workspace,.unified-shell .tabulation-workspace{min-width:0}
+.unified-shell .tab-workspace-heading{display:flex;align-items:center;justify-content:space-between;padding:22px 0 10px}
+.unified-shell .tab-workspace-heading .workspace-tag{background:#e8f2fb;color:#0f5f9d;border-radius:999px;padding:7px 11px;font-size:10px;letter-spacing:1px;font-weight:800}
+.unified-shell .tab-embedded{min-height:0}
+.unified-shell .tab-embedded .main-area{margin:0;padding:0;max-width:none}
+.unified-shell .tab-embedded .topbar{border-bottom:0;min-height:76px;padding:4px 0 15px}
+.unified-shell .tab-embedded .footer{margin-top:22px}
+@media(max-width:760px){
+  .unified-shell .unified-section{margin:0 0 0 8px;padding:0 0 0 12px;border:0;border-left:1px solid #334155}
+  .unified-shell .sidebar nav{align-items:center}
+  .unified-shell .sidebar{padding-bottom:12px}
+  .unified-shell .tab-workspace-heading{padding:12px 0}
+}
+
+/* Embedded tabulation must use the space to the right of the single shared sidebar.
+   The legacy .tab-shell .main-area rule reserves its own sidebar; cancel that offset here. */
+.unified-shell .tabulation-workspace{
+  width:calc(100% - 246px);
+  margin-left:246px;
+  min-width:0;
+  padding:0 36px;
+}
+.unified-shell .tabulation-workspace .tab-embedded{
+  width:100%;
+  min-width:0;
+  min-height:calc(100vh - 70px);
+  background:#f4f6fa;
+}
+.unified-shell .tabulation-workspace .tab-embedded>.main-area{
+  width:100%;
+  max-width:none;
+  margin:0!important;
+  padding:0!important;
+  min-width:0;
+}
+.unified-shell .tabulation-workspace .tab-embedded .topbar{
+  min-height:106px;
+  padding:0;
+}
+.unified-shell .tabulation-workspace .tab-embedded .tab-no-project,
+.unified-shell .tabulation-workspace .tab-embedded .panel,
+.unified-shell .tabulation-workspace .tab-embedded .stat-card{
+  min-width:0;
+}
+.unified-shell .tab-empty-workspace{margin-top:22px}
+@media(max-width:1100px){
+  .unified-shell .tabulation-workspace{width:calc(100% - 210px);margin-left:210px;padding:0 22px}
+}
+@media(max-width:760px){
+  .unified-shell .tabulation-workspace{width:100%;margin:0;padding:0 16px}
+  .unified-shell .tabulation-workspace .tab-embedded .topbar{min-height:82px}
+}

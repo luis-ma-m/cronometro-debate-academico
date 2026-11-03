@@ -25,7 +25,8 @@ const VIEWS = [
   { id: 'clasificacion', label: 'Clasificación', icon: Trophy },
   { id: 'registro', label: 'Registro', icon: ScrollText },
 ] as const;
-type ViewId = (typeof VIEWS)[number]['id'];
+export type TabulationViewId = (typeof VIEWS)[number]['id'];
+type ViewId = TabulationViewId;
 
 function readHashView(): ViewId {
   const id = window.location.hash.replace(/^#/, '').split('/')[0];
@@ -33,16 +34,16 @@ function readHashView(): ViewId {
 }
 
 /** Even a failure of the shell itself (not only of one screen) leaves the data safe and offers the emergency copy. */
-export default function TabulationApp() {
+export default function TabulationApp({ embedded = false, onViewChange }: { embedded?: boolean; onViewChange?: (id: TabulationViewId) => void }) {
   const onError = (error: Error) => {
     try {
       getBrowserTabStore().logError('Fallo de la aplicación: ' + error.message);
     } catch { /* The crash screen still offers the emergency copy. */ }
   };
-  return <ErrorBoundary resetKey="app" onError={onError} page><TabulationShell /></ErrorBoundary>;
+  return <ErrorBoundary resetKey="app" onError={onError} page={!embedded}><TabulationShell embedded={embedded} onViewChange={onViewChange} /></ErrorBoundary>;
 }
 
-function TabulationShell() {
+function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onViewChange?: (id: TabulationViewId) => void }) {
   const store = getBrowserTabStore();
   const state = useTabStore(store);
   const [view, setViewState] = useState<ViewId>(readHashView);
@@ -52,11 +53,11 @@ function TabulationShell() {
   const tournament = state.tournament;
 
   useEffect(() => {
-    const onHashChange = () => setViewState(readHashView());
+    const onHashChange = () => { const next = readHashView(); setViewState(next); onViewChange?.(next); };
     window.addEventListener('hashchange', onHashChange);
     const timer = window.setInterval(() => setNow(Date.now()), 5000);
     return () => { window.removeEventListener('hashchange', onHashChange); window.clearInterval(timer); };
-  }, []);
+  }, [onViewChange]);
   useEffect(() => {
     // Every unexpected error is kept in the log (once per message); none of them stops the page.
     const onError = (event: ErrorEvent) => store.logError('Error en la página: ' + (event.message || 'desconocido') + '.');
@@ -84,8 +85,8 @@ function TabulationShell() {
     if (tournament?.id) navigator.storage?.persist?.().catch(() => undefined);
   }, [tournament?.id]);
   useEffect(() => {
-    document.title = (tournament ? tournament.name + ' · ' : '') + 'Tabulación · Debate Control';
-  }, [tournament?.name]);
+    if (!embedded) document.title = (tournament ? tournament.name + ' · ' : '') + 'Tabulación · Debate Control';
+  }, [tournament?.name, embedded]);
   useEffect(() => {
     if (!projection) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setProjection(false); };
@@ -96,8 +97,9 @@ function TabulationShell() {
   const setView = useCallback((id: ViewId) => {
     window.location.hash = id;
     setViewState(id);
+    onViewChange?.(id);
     setNotice(null);
-  }, []);
+  }, [onViewChange]);
   const notify = useCallback((message: string, kind: NoticeKind = 'success') => setNotice({ message, kind }), []);
   const update = useCallback<ViewProps['update']>((mutator, meta) => {
     const applied = store.update(mutator, meta);
@@ -113,7 +115,7 @@ function TabulationShell() {
     store.logError('Fallo de la pantalla: ' + error.message, { stack: (info.componentStack ?? '').slice(0, 2000) });
   }, [store]);
   const outcomes = useMemo(() => (tournament ? computeTournamentOutcomes(tournament) : new Map()), [tournament]);
-  const activeView: ViewId = tournament ? view : 'inicio';
+  const activeView: ViewId = view;
   // A new screen starts at its top, not at the scroll position of the previous one.
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -144,8 +146,8 @@ function TabulationShell() {
 
   const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store } : null;
 
-  return <div className={'app-shell tab-shell' + (projection ? ' tab-projection' : '')}>
-    <aside className="sidebar">
+  return <div className={'tab-shell' + (projection ? ' tab-projection' : '') + (embedded ? ' tab-embedded' : ' app-shell')}>
+    {!embedded && <aside className="sidebar">
       <div className="brand"><span className="brand-mark">T</span><span>Debate <b>Tabulación</b></span></div>
       <div className="sidebar-section">TABULACIÓN LOCAL</div>
       <nav>{VIEWS.map((item) => {
@@ -161,10 +163,10 @@ function TabulationShell() {
         <span className="tab-operator">Operador: {state.operator || 'sin nombre'}</span>
         <a className="sidebar-logout" href="/"><ExternalLink size={16} /> Panel de organización</a>
       </div>
-    </aside>
+    </aside>}
     <main className="main-area">
       <header className="topbar">
-        <div><span className="eyebrow">TABULACIÓN LOCAL · SIN CONEXIÓN AL SERVIDOR</span><h1>{tournament?.name ?? 'Tabulación de debate académico'}</h1></div>
+        <div><span className="eyebrow">TABULACIÓN · ESPACIO DE COMPETICIÓN</span><h1>{tournament?.name ?? 'Tabulación de debate académico'}</h1></div>
         {tournament && <div className="top-actions tab-no-project">
           <span className="live-status"><i className={state.status === 'conflict' || state.status === 'error' || state.readOnly ? 'disconnected' : ''} /> {saveLabel}</span>
           <button type="button" className="button secondary" onClick={exportCopy}><Download size={16} /> Exportar copia</button>
@@ -199,6 +201,11 @@ function TabulationShell() {
         {props && activeView === 'actas' && <BallotsView {...props} />}
         {props && activeView === 'clasificacion' && <StandingsView {...props} projection={projection} onProject={() => setProjection(true)} />}
         {props && activeView === 'registro' && <LogView {...props} />}
+        {!props && activeView !== 'inicio' && <section className="panel tab-empty-workspace">
+          <div className="panel-title"><div><h3>{VIEWS.find((item) => item.id === activeView)?.label ?? 'Tabulación'}</h3><p>Esta sección estará disponible cuando crees o importes un torneo.</p></div></div>
+          <p className="muted">Ve a Inicio para crear un torneo nuevo o importar una copia de seguridad. La navegación permanece disponible para que puedas acceder directamente a cada apartado.</p>
+          <button type="button" className="button primary" onClick={() => setView('inicio')}>Ir a Inicio</button>
+        </section>}
       </ErrorBoundary>
       <footer className="footer tab-no-project"><span>Debate Control · Tabulación local · {BUILD_INFO}</span><span>Los datos se guardan solo en este navegador. Exporta copias con regularidad.</span></footer>
     </main>

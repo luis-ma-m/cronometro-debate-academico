@@ -44,6 +44,9 @@ export interface PanelOutbox {
   panelTournamentName: string | null;
   roundName: string;
   debates: PanelOutboxDebate[];
+  /** Participant snapshots travel with the round so the panel can create missing records. */
+  teams?: Team[];
+  judges?: Judge[];
 }
 
 function readJson<T>(storage: SimpleStorage, key: string, format: string): T | null {
@@ -137,9 +140,13 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   const venues = new Map(tournament.venues.map((venue) => [venue.id, venue.name]));
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
   const debates: PanelOutboxDebate[] = [];
+  const usedTeamIds = new Set<string>();
+  const usedJudgeIds = new Set<string>();
   let fallen = 0;
   for (const debate of round.debates) {
     const [a, b] = debate.teamIds;
+    for (const id of debate.teamIds) if (id) usedTeamIds.add(id);
+    for (const id of debate.judgeIds) if (id) usedJudgeIds.add(id);
     if (debate.teamIds.some((id) => isFallenAt(teams.get(id), round.number))) { fallen++; continue; }
     const venueName = venues.get(debate.venueId) ?? '';
     if (!venueName) { issues.push('Hay debates sin sala: asigna una sala a cada debate antes de enviarlo.'); continue; }
@@ -170,6 +177,14 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       panelTournamentName: tournament.panelLink?.tournamentName ?? null,
       roundName: round.name,
       debates,
+      teams: tournament.teams.filter((team) => usedTeamIds.has(team.id)).map((team) => ({
+        id: team.id, name: team.name, institution: team.institution, active: team.active,
+        incompatibleJudgeIds: [...team.incompatibleJudgeIds],
+      })),
+      judges: tournament.judges.filter((judge) => usedJudgeIds.has(judge.id)).map((judge) => ({
+        id: judge.id, name: judge.name, institution: judge.institution, active: judge.active,
+        incompatibleJudgeIds: [...judge.incompatibleJudgeIds],
+      })),
     },
     issues,
     warnings,
@@ -200,7 +215,7 @@ function panelAcceptedJudges(tournament: TabTournament, debate: TabDebate, venue
   return { judgeIds, chairId: judgeIds.includes(debate.chairId) ? debate.chairId : pickChair(judgeIds, judges) };
 }
 
-export interface ApplyOutboxResult { rooms: Room[] | null; issues: string[]; summary: string[]; changed: number }
+export interface ApplyOutboxResult { rooms: Room[] | null; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; issues: string[]; summary: string[]; changed: number }
 
 const sameSet = (left: string[], right: string[]) => left.length === right.length && [...left].sort().join('|') === [...right].sort().join('|');
 
@@ -214,24 +229,31 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const now = options.now ?? Date.now();
   const issues: string[] = [];
   const round = panel.rounds.find((item) => item.id === panelRoundId);
-  if (!round) return { rooms: null, issues: ['Selecciona una ronda del panel.'], summary: [], changed: 0 };
+  if (!round) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, issues: ['Selecciona una ronda del panel.'], summary: [], changed: 0 };
   const physicalRooms = new Map(panel.physicalRooms.map((physical) => [physical.id, physical]));
+  // Tabulation is authoritative for the participants actually used in this imported round.
+  // Preserve existing panel records; create only those that are missing, retaining stable IDs.
   const teams = new Map(panel.teams.map((team) => [team.id, team]));
-  const judges = new Set(panel.judges.map((judge) => judge.id));
+  for (const incoming of outbox.teams ?? []) if (!teams.has(incoming.id)) teams.set(incoming.id, { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] });
+  const judgesById = new Map(panel.judges.map((judge) => [judge.id, judge]));
+  for (const incoming of outbox.judges ?? []) if (!judgesById.has(incoming.id)) judgesById.set(incoming.id, { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] });
+  const judges = new Set(judgesById.keys());
   const seenRooms = new Set<string>();
   for (const debate of outbox.debates) {
     if (!physicalRooms.has(debate.physicalRoomId)) issues.push('La sala «' + debate.venueName + '» no existe en el panel.');
     if (seenRooms.has(debate.physicalRoomId)) issues.push('La sala «' + debate.venueName + '» aparece en dos debates.');
     seenRooms.add(debate.physicalRoomId);
-    if (!teams.has(debate.teamFavorId) || !teams.has(debate.teamContraId)) issues.push(debate.venueName + ': algún equipo no existe en el panel.');
-    if (debate.judgeIds.some((id) => !judges.has(id))) issues.push(debate.venueName + ': algún juez no existe en el panel.');
+    if (!teams.has(debate.teamFavorId) || !teams.has(debate.teamContraId)) issues.push(debate.venueName + ': faltan datos de algún equipo en la copia enviada desde tabulación.');
+    if (debate.judgeIds.some((id) => !judges.has(id))) issues.push(debate.venueName + ': faltan datos de algún juez en la copia enviada desde tabulación.');
   }
-  if (issues.length) return { rooms: null, issues: [...new Set(issues)], summary: [], changed: 0 };
+  if (issues.length) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, issues: [...new Set(issues)], summary: [], changed: 0 };
 
   const minimumJudges = panel.minimumJudgesPerRoom ?? 1;
   const scored = new Set((panel.scoring?.scorecards ?? []).map((card) => card.roomId));
   const targets = new Map(outbox.debates.map((debate) => [debate.physicalRoomId, debate]));
-  let changed = 0;
+  const addedTeams = teams.size - panel.teams.length;
+  const addedJudges = judgesById.size - panel.judges.length;
+  let changed = addedTeams + addedJudges;
   const rooms: Room[] = panel.rooms.map((room) => {
     if (room.roundId !== panelRoundId) return room;
     const target = targets.get(room.physicalRoomId);
@@ -258,10 +280,13 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     }, minimumJudges));
     changed++;
   }
-  issues.push(...validateAssignments({ ...panel, rooms: rooms.filter((room) => room.roundId === panelRoundId) }));
-  if (issues.length) return { rooms: null, issues: [...new Set(issues)], summary: [], changed: 0 };
+  const mergedTeams = [...teams.values()];
+  const mergedJudges = [...judgesById.values()];
+  const institutions = [...new Set([...(panel.institutions ?? []), ...mergedTeams.map((team) => team.institution), ...mergedJudges.map((judge) => judge.institution)].map((value) => value.trim()).filter(Boolean))];
+  issues.push(...validateAssignments({ ...panel, teams: mergedTeams, judges: mergedJudges, rooms: rooms.filter((room) => room.roundId === panelRoundId) }));
+  if (issues.length) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, issues: [...new Set(issues)], summary: [], changed: 0 };
   const name = (id: string) => teams.get(id)?.name ?? id;
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
     + debate.judgeIds.length + (debate.judgeIds.length === 1 ? ' juez' : ' jueces') + (debate.sidesProvisional ? ' · postura provisional' : ''));
-  return { rooms, issues: [], summary, changed };
+  return { rooms, teams: mergedTeams, judges: mergedJudges, institutions, addedTeams, addedJudges, issues: [], summary, changed };
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import TabulationApp, { type TabulationViewId } from './tabulation/TabulationApp';
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Settings, ShieldCheck, Shuffle, SlidersHorizontal, Trophy, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
 import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
@@ -18,7 +19,8 @@ import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from 
 const SESSION_KEY = 'ledu-admin-session';
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
 const DEMO_PASSWORD = 'gestor123';
-type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
+type ManagerView = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
+type View = ManagerView | 'tabulation';
 
 type ScoreInputDraft = { teamScores: Record<string, string>; speakerScores: Record<number, string> };
 
@@ -92,7 +94,8 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [serverError, setServerError] = useState('');
-  const [view, setView] = useState<View>('overview');
+  const [view, setView] = useState<View>(() => window.location.pathname === '/tabulacion' ? 'tabulation' : 'overview');
+  const [tabulationView, setTabulationView] = useState<TabulationViewId>(() => { const value = window.location.hash.replace(/^#/, '').split('/')[0]; return ['inicio','reglas','participantes','rondas','actas','clasificacion','registro'].includes(value) ? value as TabulationViewId : 'inicio'; });
   const [selectedRound, setSelectedRound] = useState('');
   const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
   const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([]);
@@ -557,7 +560,9 @@ export default function App() {
   const pendingTimerSync = Boolean(roomId && readPendingTimer(roomId)?.actions.length);
   if (roomId) return <RoomScreen snapshot={snapshot} now={now} serverOffsetMs={serverOffsetMs} error={serverError} onAction={timerAction} onRetry={() => void reloadRoom()} controllerEnabled={!apiConfigured || Boolean(controllerToken)} soundEnabled={soundEnabled} onToggleSound={() => setSoundEnabled((enabled) => { const next = !enabled; localStorage.setItem('debate-control-timer-sound', String(next)); if (next) playTone(); return next; })} connected={connected} syncPending={pendingTimerSync} />
 
-  if (!session) {
+  // Tabulation is local-first and does not expose the protected management API.
+  // Keep it accessible without an admin session; only the management workspace requires login.
+  if (!session && view !== 'tabulation') {
     return <div className="login-shell">
       <aside className="login-hero"><div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div><p className="eyebrow">OPERACIONES DEL TORNEO</p><h1>Un torneo.<br />Todas las salas.<br /><em>Una sola visión.</em></h1><p className="hero-copy">Organiza equipos, coordina al panel de jueces y sigue el estado de cada debate desde un único lugar.</p><div className="hero-tags"><span><ShieldCheck size={15} /> Gestión privada</span><span><Activity size={15} /> Actualización automática</span></div></aside>
       <main className="login-side"><form className="login-card" onSubmit={submitLogin}><span className="eyebrow">PANEL DE ORGANIZACIÓN</span><h2>Acceso al torneo</h2><p>Introduce la contraseña para gestionar rondas, equipos, jueces y salas.</p><label htmlFor="password">Contraseña</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Introduce la contraseña" required /><button className="button primary full" type="submit">Entrar al panel <ArrowRight size={17} /></button>{loginError && <p className="error">{loginError}</p>}<p className="security-note"><ShieldCheck size={15} /> {apiConfigured ? 'Autenticación validada por el backend.' : 'Modo de demostración: contraseña ' + DEMO_PASSWORD}.</p><p className="subtle">Los cronómetros de sala se abren por enlace y no requieren iniciar sesión.</p></form></main>
@@ -1219,8 +1224,9 @@ export default function App() {
       setServerError('No hay espacio en el almacenamiento del navegador para enviar los datos a la tabulación.');
       return;
     }
-    window.open('/tabulacion#inicio', '_blank', 'noopener');
-    setTabulationNotice('Equipos, oradores, jueces y salas enviados a la tabulación local de este navegador. Si no se ha abierto, entra en /tabulacion.');
+    setView('tabulation');
+    window.history.replaceState(null, '', '/tabulacion' + window.location.hash);
+    setTabulationNotice('Equipos, oradores, jueces y salas enviados a Tabulación.');
   };
   const loadFromTabulation = () => {
     const round = data.rounds.find((item) => item.id === activeRound);
@@ -1233,9 +1239,10 @@ export default function App() {
     const otherTournament = outbox.panelTournamentName && outbox.panelTournamentName !== data.tournamentName
       ? '\n\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».' : '';
     if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament
+      + (result.addedTeams || result.addedJudges ? '\n\nSe añadirán al panel ' + result.addedTeams + (result.addedTeams === 1 ? ' equipo y ' : ' equipos y ') + result.addedJudges + (result.addedJudges === 1 ? ' juez.' : ' jueces.') : '')
       + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
     const rooms = result.rooms;
-    updateData((current) => ({ ...current, rooms }));
+    updateData((current) => ({ ...current, teams: result.teams, judges: result.judges, institutions: result.institutions, rooms }));
     setServerError('');
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
   };
@@ -1246,17 +1253,25 @@ export default function App() {
     ? incompatibilityIncidents.filter((incident) => data.rooms.some((room) => room.id === incident.roomId && room.roundId === activeTournamentRoundId))
     : [];
 
-  return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div><div className="sidebar-section">TORNEO</div><nav>
-      <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => setView('overview')} />
-      <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => setView('rooms')} />
-      <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
-      <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
-      <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
-      <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
-      <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
-      <a className="nav-button" href="/tabulacion" target="_blank" rel="noopener"><ClipboardList size={18} /><span>Tabulación local</span><ExternalLink size={15} /></a>
-    </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
+  return <div className="app-shell unified-shell">
+    <UnifiedSidebar
+      view={view}
+      tabulationView={tabulationView}
+      setView={(next) => {
+        setView(next);
+        window.history.replaceState(null, '', next === 'tabulation' ? '/tabulacion' + (window.location.hash || '#inicio') : '/');
+      }}
+      setTabulationView={(id) => {
+        setTabulationView(id);
+        if (view !== 'tabulation') setView('tabulation');
+        // TabulationShell owns the rendered view and listens to hashchange.
+        // Updating history with replaceState does not emit that event.
+        window.location.hash = id;
+      }}
+      apiConfigured={apiConfigured}
+      logout={logout}
+    />
+    <div className="manager-workspace" hidden={view === 'tabulation'}>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
       {preparingRoomId && <div className="notice warning-notice"><RefreshCw size={17} /><span>Guardando los cambios y preparando el enlace de la sala…</span></div>}
@@ -1412,6 +1427,11 @@ export default function App() {
 
       <footer className="footer"><span>Debate Control · Herramienta de organización</span><span>{connected ? 'Conectado' : 'Conexión no confirmada'} · {lastSyncedAt ? 'Última sincronización: ' + new Date(lastSyncedAt).toLocaleTimeString('es-ES') : 'Sin sincronización confirmada'} · {apiConfigured ? 'Neon PostgreSQL' : 'Demo local'}</span></footer>
     </main>
+    </div>
+    <div className="tabulation-workspace" hidden={view !== 'tabulation'}>
+      <div className="tab-workspace-heading"><span className="eyebrow">ESPACIO DE COMPETICIÓN</span><span className="workspace-tag">TABULACIÓN</span></div>
+      <TabulationApp embedded onViewChange={(id) => setTabulationView(id)} />
+    </div>
   </div>;
 }
 
@@ -1669,6 +1689,33 @@ function ScoringView({
       })}
     </section>
   </>;
+}
+
+function UnifiedSidebar({ view, tabulationView, setView, setTabulationView, apiConfigured, logout }: { view: View; tabulationView: TabulationViewId; setView: (next: View) => void; setTabulationView: (id: TabulationViewId) => void; apiConfigured: boolean; logout: () => void }) {
+  return <aside className="sidebar unified-sidebar">
+    <div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div>
+    <div className="sidebar-section">GESTIÓN</div>
+    <nav>
+      <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => setView('overview')} />
+      <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => setView('rooms')} />
+      <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
+      <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
+      <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
+      <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
+      <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
+    </nav>
+    <div className="sidebar-section unified-section">TABULACIÓN</div>
+    <nav>
+      <NavButton icon={<ClipboardList size={18} />} label="Inicio" selected={view === 'tabulation' && tabulationView === 'inicio'} onClick={() => { setView('tabulation'); setTabulationView('inicio'); }} />
+      <NavButton icon={<SlidersHorizontal size={18} />} label="Reglas" selected={view === 'tabulation' && tabulationView === 'reglas'} onClick={() => { setView('tabulation'); setTabulationView('reglas'); }} />
+      <NavButton icon={<Users size={18} />} label="Participantes" selected={view === 'tabulation' && tabulationView === 'participantes'} onClick={() => { setView('tabulation'); setTabulationView('participantes'); }} />
+      <NavButton icon={<Shuffle size={18} />} label="Rondas" selected={view === 'tabulation' && tabulationView === 'rondas'} onClick={() => { setView('tabulation'); setTabulationView('rondas'); }} />
+      <NavButton icon={<ClipboardList size={18} />} label="Actas" selected={view === 'tabulation' && tabulationView === 'actas'} onClick={() => { setView('tabulation'); setTabulationView('actas'); }} />
+      <NavButton icon={<Trophy size={18} />} label="Clasificación" selected={view === 'tabulation' && tabulationView === 'clasificacion'} onClick={() => { setView('tabulation'); setTabulationView('clasificacion'); }} />
+      <NavButton icon={<ScrollText size={18} />} label="Registro" selected={view === 'tabulation' && tabulationView === 'registro'} onClick={() => { setView('tabulation'); setTabulationView('registro'); }} />
+    </nav>
+    <div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div>
+  </aside>;
 }
 
 function NavButton({ icon, label, selected, onClick }: { icon: React.ReactNode; label: string; selected: boolean; onClick: () => void }) {

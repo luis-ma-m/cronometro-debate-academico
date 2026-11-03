@@ -93,6 +93,36 @@ describe('tabulation → panel', () => {
     expect(applyOutboxToPanel({ ...source, rooms: applied.rooms! }, 'r2', outbox!, { makeId, now })).toMatchObject({ issues: [], changed: 0 });
   });
 
+  it('creates missing teams and judges from the tabulation round snapshot', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.teams = [
+      { id: 'tab-team-x', name: 'Equipo importado X', institution: 'Universidad X', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] },
+      { id: 'tab-team-y', name: 'Equipo importado Y', institution: 'Universidad Y', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] },
+    ];
+    tab.judges = [
+      { id: 'tab-judge-x', name: 'Jueza importada X', institution: 'Universidad Z', active: true, rating: 4, canChair: true, incompatibleJudgeIds: [], unavailableRoundIds: [] },
+    ];
+    tab.rounds[0].debates = [{
+      ...tab.rounds[0].debates[0],
+      teamIds: ['tab-team-x', 'tab-team-y'],
+      favorTeamId: 'tab-team-x',
+      judgeIds: ['tab-judge-x'],
+      chairId: 'tab-judge-x',
+    }];
+    const outbox = buildOutbox(tab, 'r1', now).outbox!;
+    expect(outbox.teams?.map((team) => team.id)).toEqual(['tab-team-x', 'tab-team-y']);
+    expect(outbox.judges?.map((judge) => judge.id)).toEqual(['tab-judge-x']);
+    const applied = applyOutboxToPanel(source, 'r2', outbox, { makeId, now });
+    expect(applied.issues).toEqual([]);
+    expect(applied.teams.find((team) => team.id === 'tab-team-x')).toMatchObject({ name: 'Equipo importado X', institution: 'Universidad X' });
+    expect(applied.judges.find((judge) => judge.id === 'tab-judge-x')).toMatchObject({ name: 'Jueza importada X', institution: 'Universidad Z' });
+    expect(applied.institutions).toContain('Universidad Z');
+    expect(applied.rooms!.find((room) => room.roundId === 'r2')).toMatchObject({
+      teamFavorId: 'tab-team-x', teamContraId: 'tab-team-y', judgeIds: ['tab-judge-x'],
+    });
+  });
+
   it('reuses and empties the existing assignments of the round', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
