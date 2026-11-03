@@ -355,15 +355,26 @@ export function getBrowserCanonicalTournamentRepository() {
  * Migrate old whole-object snapshots on first read. Legacy bytes are deliberately
  * retained for rollback/export; migration never infers identity from names.
  */
+interface LegacySharedDocument { manager?: unknown; tabulation?: Record<string, string> }
+
+function readLegacySharedDocument(storage: Storage): LegacySharedDocument | null {
+  try {
+    const parsed: unknown = JSON.parse(storage.getItem(LEGACY_SHARED_KEY) ?? 'null');
+    if (!object(parsed)) return null;
+    const tabulation = object(parsed.tabulation)
+      ? Object.fromEntries(Object.entries(parsed.tabulation).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+      : undefined;
+    return { manager: parsed.manager, tabulation };
+  } catch { return null; }
+}
+
 export function migrateLegacyTournamentStorage(storage: Storage): void {
   const canonicalRaw = storage.getItem(CANONICAL_TOURNAMENT_KEY);
   const existingDocument = canonicalRaw === null ? null : parseDocument(canonicalRaw);
   if (canonicalRaw !== null && !existingDocument) return;
   if (existingDocument?.legacyMigrationComplete) return;
   const repository = createCanonicalTournamentRepository(storage);
-  let legacyShared: { manager?: unknown; tabulation?: Record<string, string> } | null = null;
-  try { legacyShared = JSON.parse(storage.getItem(LEGACY_SHARED_KEY) ?? 'null') as typeof legacyShared; }
-  catch { /* Invalid legacy bytes are left untouched for manual recovery. */ }
+  const legacyShared = readLegacySharedDocument(storage);
   if (!repository.readManager()) {
     let legacyManager: unknown = null;
     try {
