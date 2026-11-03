@@ -116,7 +116,7 @@ export async function publishTabulationRound(rawOperation: unknown) {
     }
     const managerRoundId = existingRound ? str(existingRound.id) : randomUUID();
     const existingAssignmentsResult = existingRound
-      ? await client.query("SELECT id, physical_room_id FROM room_assignments WHERE round_id = $1 FOR UPDATE", [managerRoundId])
+      ? await client.query("SELECT id, physical_room_id, timer_status, started_at, last_resumed_at FROM room_assignments WHERE round_id = $1 FOR UPDATE", [managerRoundId])
       : { rows: [] as Array<Record<string, unknown>> };
     const existingAssignmentByRoom = new Map<string, string>();
     for (const row of existingAssignmentsResult.rows) {
@@ -136,13 +136,19 @@ export async function publishTabulationRound(rawOperation: unknown) {
     }
     if (existingRound) {
       const actas = await client.query(
-        `SELECT 1 FROM tabulation_acta_heads h
-           JOIN room_assignments ra ON ra.id = h.assignment_id
-          WHERE ra.round_id = $1 LIMIT 1`,
+        `SELECT 1
+           FROM room_assignments ra
+          WHERE ra.round_id = $1
+            AND (EXISTS (SELECT 1 FROM scorecards sc WHERE sc.assignment_id = ra.id)
+              OR EXISTS (SELECT 1 FROM tabulation_acta_heads h WHERE h.assignment_id = ra.id))
+          LIMIT 1`,
         [managerRoundId],
       );
       if (actas.rows.length) {
         throw new ApiError("ROUND_HAS_ACTAS", "La ronda ya contiene actas oficiales. No se puede sustituir sin un flujo explícito de reapertura y conservación de resultados.", 409);
+      }
+      if (existingAssignmentsResult.rows.some((row) => str(row.timer_status) !== "idle" || row.started_at || row.last_resumed_at)) {
+        throw new ApiError("ROUND_TIMER_ALREADY_USED", "La ronda planificada ya ha utilizado algún cronómetro. No se sustituirá para evitar alterar una sesión en curso o su historial.", 409);
       }
     }
 
@@ -205,7 +211,9 @@ export async function publishTabulationRound(rawOperation: unknown) {
         await client.query(
           `UPDATE room_assignments
               SET format_id = $2, team_favor_id = $3, team_contra_id = $4,
-                  remaining_seconds = $5, notes = $6
+                  remaining_seconds = $5, notes = $6, timer_status = 'idle',
+                  phase_index = 0, started_at = NULL, last_resumed_at = NULL,
+                  timer_revision = COALESCE(timer_revision, 0) + 1, timer_updated_at = now()
             WHERE id = $1 AND round_id = $7`,
           [assignmentId, defaultFormatId, debate.teamFavorId, debate.teamContraId, firstPhaseDuration,
             debate.sidesProvisional ? "Posturas provisionales: revisar antes de activar la ronda." : "", managerRoundId],
