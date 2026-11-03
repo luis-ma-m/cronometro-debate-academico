@@ -825,7 +825,15 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
     await client.query("DELETE FROM sync_operations");
     await client.query("DELETE FROM tabulation_settings_operations");
     await client.query("DELETE FROM tabulation_settings_versions");
-    await client.query("UPDATE acta_short_links SET revoked_at=COALESCE(revoked_at,now()),updated_at=now() WHERE tournament_id=$1", [oldTournamentId]);
+    await client.query(
+      `WITH revoked AS (
+         UPDATE acta_short_links SET revoked_at=COALESCE(revoked_at,now()),updated_at=now()
+          WHERE tournament_id=$1 AND revoked_at IS NULL RETURNING id
+       )
+       INSERT INTO acta_short_link_events(link_id,event_type,actor,details)
+       SELECT id,'revoked','manager-session',$2::jsonb FROM revoked`,
+      [oldTournamentId, JSON.stringify({ reason: "tournament_replaced", operationId })],
+    );
     await client.query("DELETE FROM scorecard_category_scores");
     await client.query("DELETE FROM scorecard_team_scores");
     await client.query("DELETE FROM scorecard_judges");
