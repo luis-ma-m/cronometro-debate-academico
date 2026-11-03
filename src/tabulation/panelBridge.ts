@@ -215,45 +215,68 @@ function panelAcceptedJudges(tournament: TabTournament, debate: TabDebate, venue
   return { judgeIds, chairId: judgeIds.includes(debate.chairId) ? debate.chairId : pickChair(judgeIds, judges) };
 }
 
-export interface ApplyOutboxResult { rooms: Room[] | null; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; issues: string[]; summary: string[]; changed: number }
+export interface ApplyOutboxResult { rooms: Room[] | null; physicalRooms: Tournament['physicalRooms']; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; addedPhysicalRooms: number; overwrittenRooms: number; issues: string[]; summary: string[]; changed: number }
 
 const sameSet = (left: string[], right: string[]) => left.length === right.length && [...left].sort().join('|') === [...right].sort().join('|');
+const normalizeVenueName = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es');
+const venueSlug = (value: string) => normalizeVenueName(value).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'sala';
 
 /**
- * All-or-nothing: returns the panel rooms with the selected round re-assigned from the outbox, or only issues.
- * Existing assignments are reused per physical room, missing ones are created like "Asignar sala existente",
- * rooms of that round not used by the tabulation are emptied (never deleted), and rooms whose timer has started
- * or that already have a scorecard can only stay as they are.
+ * Imports a tabulation round atomically. Physical rooms are resolved by stable ID first and
+ * normalized name second; missing rooms are created. Existing round assignments are replaced
+ * only when idle and without scorecards. The caller must confirm when overwrittenRooms > 0.
  */
 export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outbox: PanelOutbox, options: { makeId: (prefix: string) => string; now?: number }): ApplyOutboxResult {
   const now = options.now ?? Date.now();
   const issues: string[] = [];
   const round = panel.rounds.find((item) => item.id === panelRoundId);
-  if (!round) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, issues: ['Selecciona una ronda del panel.'], summary: [], changed: 0 };
-  const physicalRooms = new Map(panel.physicalRooms.map((physical) => [physical.id, physical]));
-  // Tabulation is authoritative for the participants actually used in this imported round.
-  // Preserve existing panel records; create only those that are missing, retaining stable IDs.
+  const empty = { physicalRooms: panel.physicalRooms, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, addedPhysicalRooms: 0, overwrittenRooms: 0, issues: [] as string[], summary: [] as string[], changed: 0 };
+  if (!round) return { ...empty, rooms: null, issues: ['Selecciona una ronda del panel.'] };
+
+  const physicalRooms = [...panel.physicalRooms];
+  const byId = new Map(physicalRooms.map((physical) => [physical.id, physical]));
+  const byName = new Map(physicalRooms.map((physical) => [normalizeVenueName(physical.name), physical]));
+  const resolved = new Map<string, Tournament['physicalRooms'][number]>();
+  let addedPhysicalRooms = 0;
+  for (const debate of outbox.debates) {
+    let physical = byId.get(debate.physicalRoomId) ?? byName.get(normalizeVenueName(debate.venueName));
+    if (!physical) {
+      const baseSlug = venueSlug(debate.venueName);
+      let slug = baseSlug;
+      let suffix = 2;
+      while (physicalRooms.some((item) => item.slug === slug)) slug = baseSlug + '-' + suffix++;
+      physical = { id: options.makeId('physical-room'), slug, name: debate.venueName.trim(), active: true, createdAt: now, updatedAt: now };
+      physicalRooms.push(physical);
+      byId.set(physical.id, physical);
+      byName.set(normalizeVenueName(physical.name), physical);
+      addedPhysicalRooms++;
+    }
+    resolved.set(debate.physicalRoomId, physical);
+  }
+
   const teams = new Map(panel.teams.map((team) => [team.id, team]));
   for (const incoming of outbox.teams ?? []) if (!teams.has(incoming.id)) teams.set(incoming.id, { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] });
   const judgesById = new Map(panel.judges.map((judge) => [judge.id, judge]));
   for (const incoming of outbox.judges ?? []) if (!judgesById.has(incoming.id)) judgesById.set(incoming.id, { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] });
   const judges = new Set(judgesById.keys());
   const seenRooms = new Set<string>();
+  const targets = new Map<string, PanelOutboxDebate>();
   for (const debate of outbox.debates) {
-    if (!physicalRooms.has(debate.physicalRoomId)) issues.push('La sala «' + debate.venueName + '» no existe en el panel.');
-    if (seenRooms.has(debate.physicalRoomId)) issues.push('La sala «' + debate.venueName + '» aparece en dos debates.');
-    seenRooms.add(debate.physicalRoomId);
+    const physical = resolved.get(debate.physicalRoomId)!;
+    if (seenRooms.has(physical.id)) issues.push('La sala «' + debate.venueName + '» aparece en dos debates.');
+    seenRooms.add(physical.id);
+    targets.set(physical.id, debate);
     if (!teams.has(debate.teamFavorId) || !teams.has(debate.teamContraId)) issues.push(debate.venueName + ': faltan datos de algún equipo en la copia enviada desde tabulación.');
     if (debate.judgeIds.some((id) => !judges.has(id))) issues.push(debate.venueName + ': faltan datos de algún juez en la copia enviada desde tabulación.');
   }
-  if (issues.length) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, issues: [...new Set(issues)], summary: [], changed: 0 };
+  if (issues.length) return { ...empty, rooms: null, issues: [...new Set(issues)] };
 
   const minimumJudges = panel.minimumJudgesPerRoom ?? 1;
   const scored = new Set((panel.scoring?.scorecards ?? []).map((card) => card.roomId));
-  const targets = new Map(outbox.debates.map((debate) => [debate.physicalRoomId, debate]));
   const addedTeams = teams.size - panel.teams.length;
   const addedJudges = judgesById.size - panel.judges.length;
-  let changed = addedTeams + addedJudges;
+  let changed = addedTeams + addedJudges + addedPhysicalRooms;
+  let overwrittenRooms = 0;
   const rooms: Room[] = panel.rooms.map((room) => {
     if (room.roundId !== panelRoundId) return room;
     const target = targets.get(room.physicalRoomId);
@@ -265,13 +288,14 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
       issues.push(room.name + ' tiene el cronómetro iniciado o finalizado, o un acta: su asignación no se puede cambiar.');
       return room;
     }
+    if (room.teamFavorId || room.teamContraId || room.judgeIds.length) overwrittenRooms++;
     changed++;
     return withRoomStatus({ ...room, teamFavorId, teamContraId, judgeIds: [...judgeIds], updatedAt: now }, minimumJudges);
   });
   const format = panel.formats.find((item) => item.id === round.defaultFormatId) ?? panel.formats[0];
-  for (const debate of outbox.debates) {
-    if (rooms.some((room) => room.roundId === panelRoundId && room.physicalRoomId === debate.physicalRoomId)) continue;
-    const physical = physicalRooms.get(debate.physicalRoomId)!;
+  for (const [physicalId, debate] of targets) {
+    if (rooms.some((room) => room.roundId === panelRoundId && room.physicalRoomId === physicalId)) continue;
+    const physical = physicalRooms.find((item) => item.id === physicalId)!;
     const phases = (format?.phases?.length ? format.phases : resolvePhases(panel.formatPhases, panel.rooms)).map((phase) => ({ ...phase }));
     rooms.push(withRoomStatus({
       id: options.makeId('assignment'), name: physical.name, roundId: panelRoundId, physicalRoomId: physical.id, formatId: '',
@@ -283,10 +307,10 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const mergedTeams = [...teams.values()];
   const mergedJudges = [...judgesById.values()];
   const institutions = [...new Set([...(panel.institutions ?? []), ...mergedTeams.map((team) => team.institution), ...mergedJudges.map((judge) => judge.institution)].map((value) => value.trim()).filter(Boolean))];
-  issues.push(...validateAssignments({ ...panel, teams: mergedTeams, judges: mergedJudges, rooms: rooms.filter((room) => room.roundId === panelRoundId) }));
-  if (issues.length) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, issues: [...new Set(issues)], summary: [], changed: 0 };
+  issues.push(...validateAssignments({ ...panel, physicalRooms, teams: mergedTeams, judges: mergedJudges, rooms: rooms.filter((room) => room.roundId === panelRoundId) }));
+  if (issues.length) return { ...empty, rooms: null, issues: [...new Set(issues)] };
   const name = (id: string) => teams.get(id)?.name ?? id;
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
     + debate.judgeIds.length + (debate.judgeIds.length === 1 ? ' juez' : ' jueces') + (debate.sidesProvisional ? ' · postura provisional' : ''));
-  return { rooms, teams: mergedTeams, judges: mergedJudges, institutions, addedTeams, addedJudges, issues: [], summary, changed };
+  return { rooms, physicalRooms, teams: mergedTeams, judges: mergedJudges, institutions, addedTeams, addedJudges, addedPhysicalRooms, overwrittenRooms, issues: [], summary, changed };
 }
