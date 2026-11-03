@@ -514,37 +514,46 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     };
   }, [managerSession?.token, refreshRemoteParticipants]);
   const authoritativePublication = useRef<{ timerId: string; inFlight: boolean; expectedRevision: number } | null>(null);
-  const hydrateAuthoritativeSnapshot = useCallback(async () => {
+  const hydrateAuthoritativeSnapshot = useCallback(async (): Promise<'hydrated' | 'publish-local' | 'none'> => {
     const token = managerSession?.token;
     const local = store.getState().tournament;
-    if (!apiConfigured || !token || !local || local.sample) return false;
+    if (!apiConfigured || !token || !local || local.sample) return 'none';
     try {
       const remote = await getAuthoritativeTabulationSnapshot(token, local.id);
-      if (!remote) return false;
+      if (!remote) return 'publish-local';
       if (remote.tabTournamentId !== local.id || remote.snapshot.id !== local.id
         || remote.revision < 1 || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256)) {
         throw new Error('La publicación remota de Tabulación no supera la comprobación de identidad e integridad.');
       }
-      if (remote.revision <= (authoritativePublication.current?.timerId === local.id ? authoritativePublication.current.expectedRevision : 0)) return true;
-      if (store.getState().status === 'dirty' || store.getState().status === 'conflict') {
-        notify('Existe una revisión de Tabulación más reciente en Neon, pero hay cambios locales pendientes. No se ha sobrescrito ninguna versión.', 'warning');
-        return false;
+      const cursor = authoritativePublication.current;
+      const knownRevision = cursor?.timerId === local.id ? cursor.expectedRevision : 0;
+      if (remote.revision <= knownRevision) return 'publish-local';
+      // A newer server copy wins only if it is at least as recent as the local
+      // saved copy. Otherwise this browser contains unpublished offline work.
+      if (remote.updatedAt >= local.updatedAt) {
+        if (store.getState().status === 'dirty' || store.getState().status === 'conflict') {
+          notify('Neon contiene una revisión más reciente, pero hay cambios locales pendientes. No se ha sobrescrito ninguna versión.', 'warning');
+          return 'none';
+        }
+        store.backup('Antes de recuperar la revisión oficial ' + remote.revision);
+        if (store.getState().tournament?.id === local.id) {
+          store.update(() => ({ ...remote.snapshot, revision: Math.max(remote.snapshot.revision, remote.revision) }), {
+            type: 'sync.remote', message: 'Snapshot autoritativo recuperado desde Neon',
+            details: { revision: remote.revision, sha256: remote.snapshotSha256 },
+          });
+          if (!store.flush()) throw new Error('No se ha podido guardar la revisión recuperada en el navegador.');
+        }
+        authoritativePublication.current = { timerId: local.id, inFlight: false, expectedRevision: remote.revision };
+        setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
+        return 'hydrated';
       }
-      store.backup('Antes de recuperar la revisión oficial ' + remote.revision);
-      const currentId = store.getState().tournament?.id;
-      if (currentId === local.id) {
-        store.update(() => ({ ...remote.snapshot, revision: Math.max(remote.snapshot.revision, remote.revision) }), {
-          type: 'sync.remote', message: 'Snapshot autoritativo recuperado desde Neon',
-          details: { revision: remote.revision, sha256: remote.snapshotSha256 },
-        });
-        if (!store.flush()) throw new Error('No se ha podido guardar la revisión recuperada en el navegador.');
-      }
+      // Local data is newer; it may be an offline edit and can be published
+      // against the remote revision with optimistic concurrency.
       authoritativePublication.current = { timerId: local.id, inFlight: false, expectedRevision: remote.revision };
-      setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
-      return true;
+      return 'publish-local';
     } catch (error) {
       store.logError(error instanceof Error ? error.message : 'No se pudo recuperar el snapshot oficial de Tabulación.');
-      return false;
+      return 'none';
     }
   }, [managerSession?.token, store, notify]);
   const publishAuthoritativeSnapshot = useCallback(async (candidate: import('./types').TabTournament) => {
@@ -557,10 +566,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     const operationId = makeTabId('tabpub');
     try {
       const result = await publishTabulationSnapshot(token, {
-        tabTournamentId: candidate.id,
-        expectedRevision: stateRevision,
-        operationId,
-        snapshot: candidate,
+        tabTournamentId: candidate.id, expectedRevision: stateRevision, operationId, snapshot: candidate,
       });
       if (result.tabTournamentId !== candidate.id || result.snapshot.id !== candidate.id
         || result.revision !== stateRevision + 1 || !/^[a-f0-9]{64}$/.test(result.snapshotSha256)) {
@@ -584,8 +590,8 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     if (!apiConfigured || !token) return;
     let disposed = false;
     const run = async () => {
-      const recovered = await hydrateAuthoritativeSnapshot();
-      if (disposed || recovered) return;
+      const recovery = await hydrateAuthoritativeSnapshot();
+      if (disposed || recovery === 'hydrated' || recovery === 'none') return;
       const cursor = authoritativePublication.current;
       if (cursor?.timerId === tournament.id && cursor.expectedRevision >= tournament.revision) return;
       await publishAuthoritativeSnapshot(tournament);
@@ -593,7 +599,6 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     void run();
     return () => { disposed = true; };
   }, [tournament?.id, tournament?.revision, state.status, state.readOnly, managerSession?.token, hydrateAuthoritativeSnapshot, publishAuthoritativeSnapshot]);
-
   const update = useCallback<ViewProps['update']>((mutator, meta) => {
     const before = store.getState().tournament;
     const applied = store.update(mutator, meta);
