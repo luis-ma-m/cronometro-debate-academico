@@ -30,9 +30,10 @@ La integración visual no equivale a una sincronización total. En esta rama:
 
 ## Validación y despliegue
 
-- Los cambios se han sometido a GitHub Actions mediante PR #88. No declarar tests aprobados hasta que los jobs terminen en success.
+- Los cambios se han sometido a GitHub Actions mediante PR #88. Los jobs de `verify` y `e2e` continúan en cola; todavía no hay resultado de test que permita declarar CI aprobada.
+- Se han consumido 2 de los 3 deployments autorizados. Ambos han terminado en `BUILD_FAILED / Resource provisioning failed`, también con máquina de build turbo. Vercel no ha proporcionado eventos de build; el fallo ocurre antes de que podamos atribuirlo a TypeScript, Vite o al código de la aplicación.
+- Se reserva el tercer y último deployment. No se utilizará hasta que CI avance o exista una corrección concreta que merezca validar.
 - No se ha realizado ninguna migración ni escritura de prueba en Neon Production.
-- El límite de Vercel para esta iteración es de tres deployments. Se reserva el primer intento para la Preview del shell integrado una vez que CI esté disponible; los dos restantes solo se usarán para corregir y validar fallos observados.
 - Mantener PR #88 en Draft hasta completar CI, Preview, pruebas multi-cliente y comprobación de los cronómetros.
 
 ## Criterio de cierre
