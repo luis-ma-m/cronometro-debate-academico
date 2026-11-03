@@ -104,9 +104,11 @@ function upsertSource(
 }
 
 function listSource(document: CanonicalDocument, scope: string, kind: EntityKind, source: 'manager' | 'tabulation') {
-  return Object.values(document.entities).filter((entity) =>
-    entity.kind === kind && entity[source === 'manager' ? 'managerData' : 'tabulationData'] !== undefined
-    && entityKey(scope, kind, entity.canonicalId) in document.entities);
+  return Object.entries(document.entities)
+    .filter(([key, entity]) => key === entityKey(scope, kind, entity.canonicalId)
+      && entity.kind === kind
+      && entity[source === 'manager' ? 'managerData' : 'tabulationData'] !== undefined)
+    .map(([, entity]) => entity);
 }
 
 function mapTabCanonical(kind: EntityKind, sourceId: string, tournament: TabTournament): string {
@@ -185,7 +187,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     const scope = tabScope(tournament);
     updateDocument(storage, (document) => {
       const { teams = [], speakers = [], judges = [], venues = [], ...state } = tournament;
-      document.tabulationStates[tournament.id] = clone(state as unknown as JsonRecord);
+      document.tabulationStates[tournament.id] = { ...clone(state as unknown as JsonRecord), __canonicalScope: scope };
       const entries: Array<[EntityKind, Array<JsonRecord>]> = [
         ['team', teams as unknown as JsonRecord[]],
         ['speaker', speakers as unknown as JsonRecord[]],
@@ -207,7 +209,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     const entities = (kind: EntityKind) => listSource(document, scope, kind, 'tabulation')
       .map((entity) => ({ ...(entity.tabulationData ?? {}), ...entity.shared, id: entity.tabulationSourceId ?? entity.canonicalId }));
     return {
-      ...clone(state),
+      ...Object.fromEntries(Object.entries(state).filter(([key]) => key !== '__canonicalScope')),
       teams: entities('team'),
       speakers: entities('speaker'),
       judges: entities('judge'),
