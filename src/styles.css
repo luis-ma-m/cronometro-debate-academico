@@ -885,7 +885,22 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .acta-send-button{min-height:52px;border-radius:12px}
 
 /* Shared application sidebar and separate functional workspaces. */
-.unified-shell .sidebar{overflow-y:auto}
+.unified-shell .sidebar{
+  overflow-y:auto;
+  overflow-x:hidden;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(148,163,184,.38) transparent;
+}
+.unified-shell .sidebar::-webkit-scrollbar{width:6px}
+.unified-shell .sidebar::-webkit-scrollbar-track{background:transparent}
+.unified-shell .sidebar::-webkit-scrollbar-thumb{
+  background:rgba(148,163,184,.32);
+  border-radius:999px;
+  border:1px solid transparent;
+  background-clip:padding-box;
+}
+.unified-shell .sidebar:hover::-webkit-scrollbar-thumb{background:rgba(148,163,184,.58);background-clip:padding-box}
+.unified-shell .sidebar::-webkit-scrollbar-thumb:hover{background:rgba(203,213,225,.72);background-clip:padding-box}
 .unified-shell .unified-section{margin-top:26px;padding-top:20px;border-top:1px solid #293648}
 .unified-shell .main-area{min-width:0}
 .unified-shell .workspace-heading{display:flex;align-items:center;justify-content:space-between;padding:22px 0 14px;border-bottom:1px solid #e1e6ee}
