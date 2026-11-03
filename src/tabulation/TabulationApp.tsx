@@ -6,7 +6,7 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
-import { apiConfigured, getTournament, saveTournament } from '../api';
+import { apiConfigured, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
 import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
@@ -68,6 +68,11 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   const participantSyncTimer = useRef<number | null>(null);
   const participantSyncInFlight = useRef(false);
   const participantSyncBlocked = useRef(false);
+  const tabSettingsRevision = useRef<number | null>(null);
+  const tabSettingsHydrated = useRef(false);
+  const tabSettingsSyncInFlight = useRef(false);
+  const tabSettingsSyncBlocked = useRef(false);
+  const tabSettingsSyncTimer = useRef<number | null>(null);
   const remoteParticipantRefreshInFlight = useRef(false);
   const tournament = state.tournament;
   const activeTournament = useMemo(() => {
@@ -296,6 +301,77 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       participantSyncInFlight.current = false;
     }
   }, [managerSession?.token, store, notify]);
+  const syncTabulationSettings = useCallback(async () => {
+    const token = managerSession?.token;
+    const local = store.getState().tournament;
+    const remoteId = local?.panelLink?.remoteId;
+    if (!apiConfigured || !token || !remoteId || !tabSettingsHydrated.current
+      || tabSettingsRevision.current === null || tabSettingsSyncInFlight.current || tabSettingsSyncBlocked.current) return;
+    tabSettingsSyncInFlight.current = true;
+    const settings = local.settings;
+    try {
+      const saved = await saveTabulationSettings(token, tabSettingsRevision.current, settings, makeTabId('settings-op'));
+      if (saved.tournamentId !== remoteId) throw new Error('Las reglas confirmadas pertenecen a otro torneo.');
+      tabSettingsRevision.current = saved.revision;
+      setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
+      store.log({ type: 'sync.ack', message: 'Reglas de Tabulación confirmadas en Neon', details: { revision: saved.revision } });
+      const latest = store.getState().tournament;
+      if (latest && JSON.stringify(latest.settings) !== JSON.stringify(settings)) {
+        if (tabSettingsSyncTimer.current !== null) window.clearTimeout(tabSettingsSyncTimer.current);
+        tabSettingsSyncTimer.current = window.setTimeout(() => {
+          tabSettingsSyncTimer.current = null;
+          void syncTabulationSettings();
+        }, 250);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se han podido sincronizar las reglas con Neon.';
+      if (message.startsWith('Las reglas han cambiado') || message.includes('REVISION_CONFLICT')) tabSettingsSyncBlocked.current = true;
+      store.logError(message);
+      notify(message + ' No se ha sobrescrito la versión remota.', 'error');
+    } finally {
+      tabSettingsSyncInFlight.current = false;
+    }
+  }, [managerSession?.token, store, notify]);
+  useEffect(() => {
+    const token = managerSession?.token;
+    const remoteId = activeTournament?.tournamentId;
+    if (!apiConfigured || !token || !remoteId) {
+      tabSettingsHydrated.current = false;
+      tabSettingsRevision.current = null;
+      return;
+    }
+    let disposed = false;
+    const hydrate = async () => {
+      try {
+        const remote = await getTabulationSettings(token);
+        if (disposed) return;
+        if (remote.tournamentId !== remoteId) throw new Error('Las reglas remotas pertenecen a otro torneo.');
+        const local = store.getState().tournament;
+        if (!local) return;
+        tabSettingsRevision.current = remote.revision;
+        if (JSON.stringify(local.settings) !== JSON.stringify(remote.settings)) {
+          if (store.getState().status === 'dirty') {
+            tabSettingsSyncBlocked.current = true;
+            notify('Hay reglas locales pendientes y una versión remota distinta. No he sobrescrito ninguna; exporta una copia y resuelve el conflicto.', 'error');
+            return;
+          }
+          store.backup('Antes de recuperar las reglas oficiales de Neon');
+          store.update((current) => ({ ...current, settings: remote.settings }), {
+            type: 'sync.remote', message: 'Reglas oficiales recuperadas desde Neon', details: { revision: remote.revision },
+          });
+        }
+        tabSettingsSyncBlocked.current = false;
+        tabSettingsHydrated.current = true;
+      } catch (error) {
+        if (!disposed) {
+          store.logError(error instanceof Error ? error.message : 'No se pudieron recuperar las reglas de Neon.');
+          notify('No se han podido recuperar las reglas oficiales. No edites reglas hasta restablecer la conexión.', 'error');
+        }
+      }
+    };
+    void hydrate();
+    return () => { disposed = true; };
+  }, [managerSession?.token, activeTournament?.tournamentId, store, notify]);
   const refreshRemoteParticipants = useCallback(async () => {
     const token = managerSession?.token;
     if (!apiConfigured || !token || remoteParticipantRefreshInFlight.current || participantSyncInFlight.current) return;
@@ -371,6 +447,14 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
         before.teams !== after.teams || before.speakers !== after.speakers
         || before.judges !== after.judges || before.venues !== after.venues
       ));
+      const tabSettingsChanged = Boolean(before && after && before.settings !== after.settings);
+      if (tabSettingsChanged && after?.panelLink?.remoteId && tabSettingsHydrated.current && !tabSettingsSyncBlocked.current) {
+        if (tabSettingsSyncTimer.current !== null) window.clearTimeout(tabSettingsSyncTimer.current);
+        tabSettingsSyncTimer.current = window.setTimeout(() => {
+          tabSettingsSyncTimer.current = null;
+          void syncTabulationSettings();
+        }, 700);
+      }
       if (participantsChanged && after?.panelLink?.remoteId) {
         participantSyncBlocked.current = false;
         try { window.localStorage.setItem('ledu-tabulation-participant-sync-pending:' + after.panelLink.remoteId, String(Date.now())); } catch { /* IndexedDB remains the local data store. */ }
@@ -380,7 +464,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       }
     }
     return applied;
-  }, [store, notify, syncParticipantDomain]);
+  }, [store, notify, syncParticipantDomain, syncTabulationSettings]);
   useEffect(() => {
     const remoteId = store.getState().tournament?.panelLink?.remoteId;
     if (!remoteId || !window.localStorage.getItem('ledu-tabulation-participant-sync-pending:' + remoteId)) return;
