@@ -399,76 +399,19 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     return state.readOnly;
   };
 
-  const create = async (sample: boolean) => {
+  const create = (sample: boolean) => {
     if (readOnlyNotice()) return;
-    if (sample) {
-      store.create(createSampleTournament(presetId));
-      setName('');
-      notify('Torneo de ejemplo creado para probar la herramienta.');
-      onNavigate('rondas');
-      return;
-    }
-    const session = readManagerSession(window.localStorage);
-    if (!session?.token) {
-      notify('Para crear un torneo sincronizado, inicia sesión primero en Gestión. No se ha sustituido ningún dato.', 'error');
-      return;
-    }
-    let manager;
-    try {
-      manager = await getTournament(session.token);
-    } catch (error) {
-      notify(error instanceof Error ? error.message : 'No se pudo comprobar el torneo activo de Gestión.', 'error');
-      return;
-    }
-    const nextName = name.trim() || 'Nuevo torneo';
-    const confirmed = window.confirm(
-      'Vas a sustituir el torneo activo «' + manager.tournamentName + '» por «' + nextName + '». ' +
-      'Se guardará un archivo recuperable del torneo anterior. Sus rondas, salas, asignaciones, cronómetros y actas dejarán de estar activos. ¿Continuar?',
-    );
-    if (!confirmed) return;
-
-    if (!store.backup('Antes de sustituir el torneo activo')) {
-      notify('No se ha podido crear una copia local de seguridad. No se ha iniciado la sustitución.', 'error');
-      return;
-    }
-    const draft = createTabTournament(nextName, presetId);
-    store.create(draft);
+    const created = sample
+      ? createSampleTournament(presetId)
+      : createTabTournament(name, presetId);
+    store.create(created);
     if (!store.flush()) {
-      notify('No se ha podido guardar el borrador local. La sustitución remota no se ha iniciado.', 'error');
+      notify('No se ha confirmado el guardado local del torneo. Resuelve el aviso antes de continuar.', 'error');
       return;
     }
-    try {
-      const result = await replaceActiveTournament(
-        session.token,
-        manager.revision,
-        nextName,
-        presetSettings(presetId),
-        makeTabId('replace'),
-      );
-      store.update((current) => current.id !== draft.id ? current : ({
-        ...current,
-        panelLink: {
-          tournamentName: result.tournament.tournamentName,
-          linkedAt: Date.now(),
-          remoteId: result.tournament.remoteId,
-          remoteRevision: result.tournament.revision,
-          remoteUpdatedAt: result.tournament.updatedAt,
-          identityMode: 'local-canonical',
-          idMap: { teams: {}, speakers: {}, judges: {}, venues: {} },
-        },
-      }), { type: 'tournament.link', message: 'Nuevo torneo vinculado a la identidad canónica de Gestión', details: { remoteId: result.tournament.remoteId, archiveId: result.archiveId } });
-      writePanelSyncBase(window.localStorage, draft.id, buildPanelHandoff(result.tournament));
-      if (!store.flush()) {
-        notify('Gestión ha creado el nuevo torneo y archivado el anterior, pero no se ha podido confirmar el vínculo local. Conserva esta pestaña abierta y recupera el borrador desde las copias locales.', 'error');
-        return;
-      }
-      setName('');
-      notify('Nuevo torneo creado y vinculado a Gestión. El anterior queda archivado como ' + result.archiveId + '.');
-      onNavigate('reglas');
-    } catch (error) {
-      notify((error instanceof Error ? error.message : 'No se pudo sustituir el torneo en Gestión.') +
-        ' El borrador local y la copia previa se conservan; el torneo remoto anterior no se ha modificado si la operación falló.', 'error');
-    }
+    setName('');
+    notify(sample ? 'Torneo de ejemplo creado.' : 'Torneo creado en Tabulación. Gestión no ha sustituido ni modificado ningún torneo.');
+    onNavigate('reglas');
   };
 
   const createAduma = (sample: boolean) => {
