@@ -7,7 +7,7 @@ export const CANONICAL_TOURNAMENT_NAMESPACE = 'canonical-tournament';
 const LEGACY_SHARED_KEY = 'ledu-shared-tournament-v1';
 const LEGACY_MANAGER_KEY = 'ledu-tournament-demo-v1';
 const TAB_INDEX_KEY = 'ledu-tabulacion-index-v1';
-const TAB_PREFIX = 'ledu-tabulacion-v1:';
+const TAB_PREFIX = 'ledu-tabulacion-v1:';\nlet mirrorChain: Promise<void> = Promise.resolve();
 
 type EntityKind = 'team' | 'speaker' | 'judge' | 'venue';
 type JsonRecord = Record<string, unknown>;
@@ -111,6 +111,24 @@ function listSource(document: CanonicalDocument, scope: string, kind: EntityKind
     .map(([, entity]) => entity);
 }
 
+function pruneSourceEntities(document: CanonicalDocument, scope: string, source: 'manager' | 'tabulation', seen: Set<string>): void {
+  for (const [key, entity] of Object.entries(document.entities)) {
+    if (!key.startsWith(scope + '|')) continue;
+    const sourceKey = source === 'manager' ? 'managerData' : 'tabulationData';
+    if (!entity[sourceKey] || seen.has(key)) continue;
+    const next = { ...entity };
+    if (source === 'manager') {
+      delete next.managerData;
+      delete next.managerSourceId;
+    } else {
+      delete next.tabulationData;
+      delete next.tabulationSourceId;
+    }
+    if (!next.managerData && !next.tabulationData) delete document.entities[key];
+    else document.entities[key] = next;
+  }
+}
+
 function mapTabCanonical(kind: EntityKind, sourceId: string, tournament: TabTournament): string {
   const key = kind === 'venue' ? 'venues' : kind === 'team' ? 'teams' : kind === 'speaker' ? 'speakers' : 'judges';
   const mapping = tournament.panelLink?.idMap?.[key] as Record<string, string> | undefined;
@@ -136,12 +154,16 @@ function updateDocument(storage: CanonicalStorage, mutate: (document: CanonicalD
   // IndexedDB is a durable mirror of the canonical document. The synchronous local
   // transaction remains the browser runtime's read boundary for legacy sync stores.
   try {
-    const repository = createIndexedDbApplicationRecordRepository();
-    void repository.get<CanonicalDocument>(CANONICAL_TOURNAMENT_NAMESPACE, 'active')
-      .then((existing) => repository.put(CANONICAL_TOURNAMENT_NAMESPACE, 'active', next, {
-        expectedRevision: existing?.revision ?? null, now: next.updatedAt,
-      }))
-      .catch(() => undefined);
+    mirrorChain = mirrorChain.then(async () => {
+      const repository = createIndexedDbApplicationRecordRepository();
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const existing = await repository.get<CanonicalDocument>(CANONICAL_TOURNAMENT_NAMESPACE, 'active');
+        const saved = await repository.put(CANONICAL_TOURNAMENT_NAMESPACE, 'active', next, {
+          expectedRevision: existing?.revision ?? null, now: next.updatedAt,
+        });
+        if (saved) break;
+      }
+    }).catch(() => undefined);
   } catch { /* IndexedDB unavailable: local-first runtime remains usable. */ }
   return next;
 }
@@ -161,10 +183,14 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
         ['judge', judges as unknown as JsonRecord[]],
         ['venue', physicalRooms as unknown as JsonRecord[]],
       ];
+      const seen = new Set<string>();
       for (const [kind, values] of entries) for (const data of values) {
         if (typeof data.id !== 'string') continue;
+        const key = entityKey(scope, kind, data.id);
+        seen.add(key);
         upsertSource(document, scope, kind, data.id, 'manager', data.id, data);
       }
+      pruneSourceEntities(document, scope, 'manager', seen);
     }, now);
   }
 
@@ -194,10 +220,15 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
         ['judge', judges as unknown as JsonRecord[]],
         ['venue', venues as unknown as JsonRecord[]],
       ];
+      const seen = new Set<string>();
       for (const [kind, values] of entries) for (const data of values) {
         if (typeof data.id !== 'string') continue;
-        upsertSource(document, scope, kind, mapTabCanonical(kind, data.id, tournament), 'tabulation', data.id, data);
+        const canonicalId = mapTabCanonical(kind, data.id, tournament);
+        const key = entityKey(scope, kind, canonicalId);
+        seen.add(key);
+        upsertSource(document, scope, kind, canonicalId, 'tabulation', data.id, data);
       }
+      pruneSourceEntities(document, scope, 'tabulation', seen);
     }, now);
   }
 
@@ -247,7 +278,7 @@ export function getBrowserCanonicalTournamentRepository() {
  */
 export function migrateLegacyTournamentStorage(storage: Storage): void {
   const repository = createCanonicalTournamentRepository(storage);
-  if (!storage.getItem(CANONICAL_TOURNAMENT_KEY)) {
+  if (!repository.readManager()) {
     let legacyManager: unknown = null;
     try {
       const shared = JSON.parse(storage.getItem(LEGACY_SHARED_KEY) ?? 'null') as { manager?: unknown } | null;
