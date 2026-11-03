@@ -441,6 +441,7 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
           {draft && <button type="button" className={'tab-draft-tab' + (showDraft ? ' selected' : '')} onClick={() => setSelectedId(DRAFT_TAB)}>{draft.round.name} · borrador</button>}
         </div>
         {showDraft && draft ? <DraftPanel tournament={tournament} draft={draft} look={look} acknowledged={acknowledged} onAcknowledge={setAcknowledged}
+          onNavigate={onNavigate} managerSessionToken={managerSessionToken}
           onEdit={editDraft} onUndo={undo} onConfirm={confirm} onDiscard={() => discard(draft)} onRegenerate={() => regenerate(draft)} />
           : round && <RoundPanel tournament={tournament} round={round} outcomes={outcomes} look={look}
             isLast={round.number === Math.max(...tournament.rounds.map((item) => item.number)) && !draft}
@@ -488,6 +489,8 @@ function DraftPanel({ tournament, draft, look, acknowledged, onAcknowledge, onEd
   onConfirm: () => void;
   onDiscard: () => void;
   onRegenerate: () => void;
+  onNavigate: (view: string) => void;
+  managerSessionToken?: string;
 }) {
   const problems = useMemo(() => draftProblems(tournament, draft), [tournament, draft]);
   const changes = useMemo(() => diffRounds(tournament, draft.generated, draft.round), [tournament, draft]);
