@@ -6,7 +6,11 @@ import type { TabulationPublishedRoundRow } from '../api';
 describe('canonical Tabulation round hydration', () => {
   it('restores manager assignments and official acta data using canonical identity maps', () => {
     const tournament = createTabTournament('Torneo de prueba', 'ledu-groups', 100, 12);
-    const local = { ...tournament, panelLink: {
+    const unpublishedRound = {
+      id: 'local-draft', number: 2, name: 'Borrador local', kind: 'qualifying' as const,
+      sideMode: 'balanced' as const, panelSize: 3, seed: 99, silent: false, debates: [], createdAt: 150,
+    };
+    const local = { ...tournament, rounds: [unpublishedRound], panelLink: {
       tournamentName: 'Torneo de prueba', linkedAt: 100, remoteId: '11111111-1111-4111-8111-111111111111',
       idMap: {
         teams: { teamLocalA: 'teamRemoteA', teamLocalB: 'teamRemoteB' },
@@ -37,7 +41,8 @@ describe('canonical Tabulation round hydration', () => {
       } } },
     };
     const result = mergePublishedTabulationRounds(local, [row], 300);
-    expect(result.rounds).toHaveLength(1);
+    expect(result.rounds).toHaveLength(2);
+    expect(result.rounds.find((round) => round.id === 'local-draft')).toMatchObject({ seed: 99, name: 'Borrador local' });
     expect(result.rounds[0]).toMatchObject({
       id: 'roundLocal', managerRoundId: 'roundRemote', number: 1,
       debates: [{
