@@ -31,6 +31,7 @@ import {
   type SheetName,
   type SheetRow,
 } from "../server/core.js";
+import { recordSyncOperation, getSyncOperations, transitionSyncOperation } from "../server/sync-operation-journal.js";
 
 type RequestLike = {
   method?: string;
@@ -355,6 +356,17 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "getTournament":
       await requireSession(payload.token);
       return tournamentFromData(await loadSheetData());
+    case "recordSyncOperation":
+      await requireSession(payload.token);
+      return recordSyncOperation(payload.operation, true);
+    case "getSyncOperations":
+      await requireSession(payload.token);
+      return getSyncOperations(str(payload.tournamentId), true, num(payload.after));
+    case "ackSyncOperation":
+      await requireSession(payload.token);
+      return transitionSyncOperation(str(payload.operationId), str(payload.payloadHash),
+        payload.status === "conflict" ? "conflict" : payload.status === "rejected" ? "rejected" : "committed",
+        payload.result, payload.error && typeof payload.error === "object" ? payload.error as { code: string; message: string } : undefined, true);
     case "createActaShortLink": await requireSession(payload.token); return createActaShortLink(payload);
     case "listActaShortLinks": await requireSession(payload.token); return listActaShortLinks(payload);
     case "updateActaShortLinkExpiry": await requireSession(payload.token); return updateActaShortLinkExpiry(payload);
