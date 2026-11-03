@@ -430,7 +430,7 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       return listAuthoritativeTabulationSnapshots();
     case "publishTabulationSnapshot":
       await requireSession(payload.token);
-      return publishAuthoritativeTabulationSnapshot(payload, str(payload.token));
+      return publishAuthoritativeTabulationSnapshot(payload, "authenticated-manager");
     case "getAuthoritativeTabulationSnapshot":
       await requireSession(payload.token);
       return getAuthoritativeTabulationSnapshot(str(payload.tabTournamentId));
