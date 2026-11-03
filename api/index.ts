@@ -425,6 +425,12 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "listActaShortLinks": await requireSession(payload.token); return listActaShortLinks(payload);
     case "updateActaShortLinkExpiry": await requireSession(payload.token); return updateActaShortLinkExpiry(payload);
     case "revokeActaShortLinks": await requireSession(payload.token); return revokeActaShortLinks(payload);
+    case "publishTabulationSnapshot":
+      await requireSession(payload.token);
+      return publishAuthoritativeTabulationSnapshot(payload, str(payload.token));
+    case "getAuthoritativeTabulationSnapshot":
+      await requireSession(payload.token);
+      return getAuthoritativeTabulationSnapshot(str(payload.tabTournamentId));
     case "getTabulationSettings":
       await requireSession(payload.token);
       return getTabulationSettings();
@@ -485,6 +491,125 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     default:
       throw new ApiError("UNKNOWN_ACTION", "Acción no reconocida.");
   }
+}
+
+
+type AuthoritativeTabulationDocument = {
+  tabTournamentId: string;
+  tournamentName: string;
+  schemaVersion: number;
+  revision: number;
+  snapshot: Record<string, unknown>;
+  snapshotSha256: string;
+  updatedAt: number;
+};
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  const object = value as Record<string, unknown>;
+  return "{" + Object.keys(object).sort().map((key) => JSON.stringify(key) + ":" + canonicalJson(object[key])).join(",") + "}";
+}
+
+function validateAuthoritativeTabulationSnapshot(payload: Record<string, unknown>): {
+  tabTournamentId: string; expectedRevision: number; operationId: string; snapshot: Record<string, unknown>;
+} {
+  const tabTournamentId = str(payload.tabTournamentId).trim();
+  const operationId = str(payload.operationId).trim();
+  const expectedRevision = num(payload.expectedRevision);
+  const snapshot = payload.snapshot;
+  if (!/^[a-zA-Z0-9_-]{1,200}$/.test(tabTournamentId)) throw new ApiError("INVALID_PAYLOAD", "El identificador de Tabulación no es válido.");
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(operationId)) throw new ApiError("INVALID_PAYLOAD", "El operationId de publicación no es válido.");
+  if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new ApiError("INVALID_PAYLOAD", "La revisión base no es válida.");
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new ApiError("INVALID_PAYLOAD", "El snapshot completo de Tabulación debe ser un objeto.");
+  const value = snapshot as Record<string, unknown>;
+  if (value.id !== tabTournamentId || typeof value.name !== "string" || !value.name.trim()
+      || !Number.isSafeInteger(value.schemaVersion) || typeof value.settings !== "object"
+      || !Array.isArray(value.teams) || !Array.isArray(value.speakers) || !Array.isArray(value.judges)
+      || !Array.isArray(value.venues) || !Array.isArray(value.groups) || !Array.isArray(value.rounds)
+      || !Array.isArray(value.breakSeeds) || !Array.isArray(value.manualOrder) || !Array.isArray(value.judgeConflicts)) {
+    throw new ApiError("INVALID_PAYLOAD", "El snapshot no contiene el agregado completo y válido de Tabulación.");
+  }
+  const bytes = Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+  if (bytes > 4 * 1024 * 1024) throw new ApiError("PAYLOAD_TOO_LARGE", "El snapshot supera el límite de 4 MB.", 413);
+  return { tabTournamentId, expectedRevision, operationId, snapshot: value };
+}
+
+async function getAuthoritativeTabulationSnapshot(tabTournamentId: string): Promise<AuthoritativeTabulationDocument | null> {
+  if (!/^[a-zA-Z0-9_-]{1,200}$/.test(tabTournamentId)) throw new ApiError("INVALID_PAYLOAD", "La identidad de Tabulación no es válida.");
+  const result = await getPool().query(
+    `SELECT tab_tournament_id, tournament_name, schema_version, revision, snapshot,
+            snapshot_sha256, floor(extract(epoch FROM updated_at) * 1000)::bigint AS updated_at
+       FROM tabulation_tournaments WHERE tab_tournament_id = $1`,
+    [tabTournamentId],
+  );
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  const snapshot = row.snapshot as Record<string, unknown>;
+  const digest = sha256(canonicalJson(snapshot));
+  if (digest !== str(row.snapshot_sha256)) throw new ApiError("SNAPSHOT_CORRUPT", "El snapshot guardado no supera la comprobación de integridad.", 500);
+  return { tabTournamentId: str(row.tab_tournament_id), tournamentName: str(row.tournament_name),
+    schemaVersion: num(row.schema_version), revision: num(row.revision), snapshot, snapshotSha256: digest, updatedAt: num(row.updated_at) };
+}
+
+async function publishAuthoritativeTabulationSnapshot(payload: Record<string, unknown>, actor: string) {
+  const input = validateAuthoritativeTabulationSnapshot(payload);
+  const digest = sha256(canonicalJson(input.snapshot));
+  const tournamentName = str(input.snapshot.name).trim();
+  const schemaVersion = num(input.snapshot.schemaVersion);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const previous = await client.query(
+      "SELECT tab_tournament_id, base_revision, committed_revision, snapshot_sha256 FROM tabulation_publication_operations WHERE operation_id = $1 FOR UPDATE",
+      [input.operationId],
+    );
+    if (previous.rows[0]) {
+      const prior = previous.rows[0] as Record<string, unknown>;
+      if (str(prior.tab_tournament_id) !== input.tabTournamentId
+          || num(prior.base_revision) !== input.expectedRevision || str(prior.snapshot_sha256) !== digest) {
+        throw new ApiError("IDEMPOTENCY_MISMATCH", "El operationId ya se utilizó con otra identidad, revisión o snapshot.", 409);
+      }
+      const existing = await client.query(
+        `SELECT tab_tournament_id, tournament_name, schema_version, revision, snapshot, snapshot_sha256,
+                floor(extract(epoch FROM updated_at) * 1000)::bigint AS updated_at
+           FROM tabulation_tournaments WHERE tab_tournament_id = $1`,
+        [input.tabTournamentId],
+      );
+      const row = existing.rows[0] as Record<string, unknown> | undefined;
+      if (!row) throw new ApiError("IDEMPOTENCY_INCOMPLETE", "La publicación anterior no tiene snapshot recuperable.", 409);
+      await client.query("COMMIT");
+      return { tabTournamentId: input.tabTournamentId, tournamentName: str(row.tournament_name), schemaVersion: num(row.schema_version),
+        revision: num(row.revision), snapshot: row.snapshot, snapshotSha256: str(row.snapshot_sha256), updatedAt: num(row.updated_at), created: false };
+    }
+    const current = await client.query("SELECT revision FROM tabulation_tournaments WHERE tab_tournament_id = $1 FOR UPDATE", [input.tabTournamentId]);
+    const currentRevision = current.rows[0] ? num(current.rows[0].revision) : 0;
+    if (currentRevision !== input.expectedRevision) {
+      throw new ApiError("REVISION_CONFLICT", "Tabulación ya tiene una publicación más reciente. Recarga el snapshot antes de volver a publicar.", 409);
+    }
+    const nextRevision = currentRevision + 1;
+    const saved = await client.query(
+      `INSERT INTO tabulation_tournaments(tab_tournament_id, tournament_name, schema_version, revision, snapshot, snapshot_sha256, published_by)
+       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)
+       ON CONFLICT (tab_tournament_id) DO UPDATE SET
+         tournament_name = EXCLUDED.tournament_name, schema_version = EXCLUDED.schema_version,
+         revision = EXCLUDED.revision, snapshot = EXCLUDED.snapshot,
+         snapshot_sha256 = EXCLUDED.snapshot_sha256, published_by = EXCLUDED.published_by, updated_at = now()
+       RETURNING floor(extract(epoch FROM updated_at) * 1000)::bigint AS updated_at`,
+      [input.tabTournamentId, tournamentName, schemaVersion, nextRevision, JSON.stringify(input.snapshot), digest, actor],
+    );
+    await client.query(
+      "INSERT INTO tabulation_publication_operations(operation_id, tab_tournament_id, base_revision, committed_revision, snapshot_sha256) VALUES ($1,$2,$3,$4,$5)",
+      [input.operationId, input.tabTournamentId, currentRevision, nextRevision, digest],
+    );
+    await client.query("COMMIT");
+    return { tabTournamentId: input.tabTournamentId, tournamentName, schemaVersion, revision: nextRevision,
+      snapshot: input.snapshot, snapshotSha256: digest, updatedAt: num(saved.rows[0]?.updated_at), created: currentRevision === 0 };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("TABULATION_PUBLISH_FAILED", "No se ha podido guardar el snapshot autoritativo de Tabulación.", 503);
+  } finally { client.release(); }
 }
 
 type PersistedTabulationSettings = {
