@@ -147,7 +147,7 @@ describe('canonical tournament repository', () => {
         id: 'room-manager', assignmentId: 'assignment-manager', name: 'Sala 1', roundId: 'round-manager',
         physicalRoomId: 'venue-manager', formatId: 'format-1', teamFavorId: 'team-manager',
         teamContraId: 'team-opponent', judgeIds: ['judge-manager'], status: 'ready', phases: [],
-        timer: {}, notes: '', updatedAt: 2,
+        timer: { status: 'idle', phaseIndex: 0, remainingSeconds: 0, startedAt: null, lastResumedAt: null, revision: 0, updatedAt: 0 }, notes: '', updatedAt: 2,
       }],
     }));
     repository.writeTabulation(tabulation({
@@ -155,7 +155,7 @@ describe('canonical tournament repository', () => {
         id: 'round-tab', number: 1, name: 'Ronda local', kind: 'qualifying', sideMode: 'balanced',
         panelSize: 1, seed: 1, silent: false, createdAt: 1, managerRoundId: 'round-manager',
         debates: [{
-          id: 'debate-tab', venueId: 'venue-tab', teamIds: ['team-tab', 'other-team'], judgeIds: ['judge-tab'],
+          id: 'debate-tab', venueId: 'venue-tab', teamIds: ['team-tab', 'other-team'] as [string, string], judgeIds: ['judge-tab'],
           chairId: 'judge-tab', managerAssignmentId: 'assignment-manager',
         }],
       }],
