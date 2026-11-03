@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS sync_operations (
   entity_id varchar(128) NOT NULL CHECK (length(btrim(entity_id)) BETWEEN 1 AND 128),
   operation_type varchar(32) NOT NULL CHECK (operation_type IN ('publish-round','replace-acta','manager-snapshot','tabulation-state')),
   base_revision bigint NOT NULL CHECK (base_revision >= 0),
-  payload jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object' AND pg_column_size(payload) <= 1048576),
+  payload jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object' AND octet_length(payload::text) <= 1048576),
   payload_hash char(64) NOT NULL CHECK (payload_hash ~ '^[a-f0-9]{64}$'),
   status varchar(16) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','committed','conflict','rejected')),
   result jsonb,
