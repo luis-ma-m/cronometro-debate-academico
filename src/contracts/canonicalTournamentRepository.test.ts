@@ -138,4 +138,37 @@ describe('canonical tournament repository', () => {
     expect(repository.readTabulation<TabTournament>('tab-1')?.teams[0].id).toBe('team-tab');
     expect(local.getItem('ledu-shared-tournament-v1')).not.toBeNull();
   });
+  it('stores rounds and published assignments once when their explicit IDs are linked', () => {
+    const local = storage();
+    const repository = createCanonicalTournamentRepository(local);
+    repository.writeManager(manager({
+      rounds: [{ id: 'round-manager', number: 1, name: 'Ronda oficial', active: true, defaultFormatId: 'format-1' }],
+      rooms: [{
+        id: 'room-manager', assignmentId: 'assignment-manager', name: 'Sala 1', roundId: 'round-manager',
+        physicalRoomId: 'venue-manager', formatId: 'format-1', teamFavorId: 'team-manager',
+        teamContraId: 'team-opponent', judgeIds: ['judge-manager'], status: 'ready', phases: [],
+        timer: {}, notes: '', updatedAt: 2,
+      }],
+    }));
+    repository.writeTabulation(tabulation({
+      rounds: [{
+        id: 'round-tab', number: 1, name: 'Ronda local', kind: 'qualifying', sideMode: 'balanced',
+        panelSize: 1, seed: 1, silent: false, createdAt: 1, managerRoundId: 'round-manager',
+        debates: [{
+          id: 'debate-tab', venueId: 'venue-tab', teamIds: ['team-tab', 'other-team'], judgeIds: ['judge-tab'],
+          chairId: 'judge-tab', managerAssignmentId: 'assignment-manager',
+        }],
+      }],
+    }));
+    const raw = JSON.parse(local.getItem(CANONICAL_TOURNAMENT_KEY)!);
+    expect(Object.keys(raw.entities).filter((key) => key.includes('|round|round-manager'))).toHaveLength(1);
+    expect(Object.keys(raw.entities).filter((key) => key.includes('|assignment|assignment-manager'))).toHaveLength(1);
+    expect(repository.readManager<Tournament>()?.rooms[0]).toMatchObject({
+      id: 'room-manager', assignmentId: 'assignment-manager',
+    });
+    expect(repository.readTabulation<TabTournament>('tab-1')?.rounds[0]).toMatchObject({
+      id: 'round-tab', name: 'Ronda oficial', managerRoundId: 'round-manager',
+      debates: [{ id: 'debate-tab', managerAssignmentId: 'assignment-manager' }],
+    });
+  });
 });
