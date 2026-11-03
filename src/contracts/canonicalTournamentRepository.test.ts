@@ -108,4 +108,14 @@ describe('canonical tournament repository', () => {
     expect(local.getItem(CANONICAL_TOURNAMENT_KEY)).toBe(malformed);
     expect(local.getItem('ledu-tournament-demo-v1')).not.toBeNull();
   });
+  it('keeps a tombstone so a deleted legacy tournament cannot reappear', () => {
+    const legacy = JSON.stringify(tabulation());
+    const local = storage({ 'ledu-tabulacion-v1:tab-1': legacy });
+    const repository = createCanonicalTournamentRepository(local);
+    repository.writeTabulation(tabulation());
+    repository.deleteTabulation('tab-1');
+    expect(repository.readTabulation('tab-1')).toBeNull();
+    expect(repository.isTabulationDeleted('tab-1')).toBe(true);
+    expect(local.getItem('ledu-tabulacion-v1:tab-1')).toBe(legacy);
+  });
 });
