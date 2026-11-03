@@ -320,6 +320,7 @@ export default function App() {
       const saved = await saveTournament(session.token, current.revision, imported);
       writeCanonicalManager(saved);
       setData(saved);
+      setSelectedRound(importedRounds[0]?.id ?? '');
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
       setConnected(true);
