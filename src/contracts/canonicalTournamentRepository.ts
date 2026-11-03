@@ -27,6 +27,7 @@ interface CanonicalDocument {
   schemaVersion: 2;
   revision: number;
   updatedAt: number;
+  legacyMigrationComplete: boolean;
   managerScope: string;
   managerState: JsonRecord | null;
   tabulationStates: Record<string, JsonRecord>;
@@ -41,7 +42,7 @@ export interface CanonicalStorage {
 }
 
 const emptyDocument = (): CanonicalDocument => ({
-  schemaVersion: 2, revision: 0, updatedAt: 0, managerScope: 'manager:local',
+  schemaVersion: 2, revision: 0, updatedAt: 0, legacyMigrationComplete: false, managerScope: 'manager:local',
   managerState: null, tabulationStates: {}, deletedTabulationIds: {}, tabulationIndex: { activeId: null, tournaments: [] }, entities: {},
 });
 const object = (value: unknown): value is JsonRecord => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -58,6 +59,7 @@ function parseDocument(raw: string | null): CanonicalDocument | null {
       || !Array.isArray(value.tabulationIndex.tournaments)) return null;
     return {
       schemaVersion: 2, revision: value.revision!, updatedAt: value.updatedAt!,
+      legacyMigrationComplete: value.legacyMigrationComplete === true,
       managerScope: typeof value.managerScope === 'string' ? value.managerScope : 'manager:local',
       managerState: object(value.managerState) ? value.managerState : null,
       tabulationStates: value.tabulationStates as Record<string, JsonRecord>,
@@ -296,6 +298,10 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     return readDocument().deletedTabulationIds[id] === true;
   }
 
+  function markLegacyMigrationComplete(): void {
+    updateDocument(storage, (document) => { document.legacyMigrationComplete = true; }, now);
+  }
+
   function deleteTabulation(id: string): void {
     updateDocument(storage, (document) => {
       delete document.tabulationStates[id];
@@ -306,7 +312,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     }, now);
   }
 
-  return { readManager, writeManager, readTabulation, writeTabulation, readIndex, writeIndex, deleteTabulation, isTabulationDeleted };
+  return { readManager, writeManager, readTabulation, writeTabulation, readIndex, writeIndex, deleteTabulation, isTabulationDeleted, markLegacyMigrationComplete };
 }
 
 export function getBrowserCanonicalTournamentRepository() {
@@ -319,7 +325,9 @@ export function getBrowserCanonicalTournamentRepository() {
  */
 export function migrateLegacyTournamentStorage(storage: Storage): void {
   const canonicalRaw = storage.getItem(CANONICAL_TOURNAMENT_KEY);
-  if (canonicalRaw !== null && !parseDocument(canonicalRaw)) return;
+  const existingDocument = canonicalRaw === null ? null : parseDocument(canonicalRaw);
+  if (canonicalRaw !== null && !existingDocument) return;
+  if (existingDocument?.legacyMigrationComplete) return;
   const repository = createCanonicalTournamentRepository(storage);
   let legacyShared: { manager?: unknown; tabulation?: Record<string, string> } | null = null;
   try { legacyShared = JSON.parse(storage.getItem(LEGACY_SHARED_KEY) ?? 'null') as typeof legacyShared; }
@@ -372,6 +380,7 @@ export function migrateLegacyTournamentStorage(storage: Storage): void {
     const ordered = [...migratedEntries].sort((a, b) => b.updatedAt - a.updatedAt);
     repository.writeIndex({ activeId: ordered[0].id, tournaments: ordered });
   }
+  repository.markLegacyMigrationComplete();
 }
 
 export function createCanonicalTabulationStorage(legacy: Storage): Storage {
