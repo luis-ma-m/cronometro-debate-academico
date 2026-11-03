@@ -502,6 +502,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           idMap: { teams: {}, speakers: {}, judges: {}, venues: {} },
         },
       }), { type: 'tournament.link', message: 'Nuevo torneo vinculado a la identidad canónica de Gestión', details: { remoteId: result.tournament.remoteId, archiveId: result.archiveId } });
+      writePanelSyncBase(window.localStorage, draft.id, buildPanelHandoff(result.tournament));
       if (!store.flush()) {
         notify('Gestión ha creado el nuevo torneo y archivado el anterior, pero no se ha podido confirmar el vínculo local. Conserva esta pestaña abierta y recupera el borrador desde las copias locales.', 'error');
         return;
