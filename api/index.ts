@@ -425,6 +425,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "listActaShortLinks": await requireSession(payload.token); return listActaShortLinks(payload);
     case "updateActaShortLinkExpiry": await requireSession(payload.token); return updateActaShortLinkExpiry(payload);
     case "revokeActaShortLinks": await requireSession(payload.token); return revokeActaShortLinks(payload);
+    case "recordTabulationSnapshotImport":
+      await requireSession(payload.token);
+      return recordTabulationSnapshotImport(payload);
     case "listAuthoritativeTabulationSnapshots":
       await requireSession(payload.token);
       return listAuthoritativeTabulationSnapshots();
@@ -555,6 +558,54 @@ async function getAuthoritativeTabulationSnapshot(tabTournamentId: string): Prom
     schemaVersion: num(row.schema_version), revision: num(row.revision), snapshot, snapshotSha256: digest, updatedAt: num(row.updated_at) };
 }
 
+
+async function recordTabulationSnapshotImport(payload: Record<string, unknown>) {
+  const managerTournamentId = str(payload.managerTournamentId).trim();
+  const tabTournamentId = str(payload.tabTournamentId).trim();
+  const revision = num(payload.revision);
+  const snapshotSha256 = str(payload.snapshotSha256).trim();
+  if (!/^[a-zA-Z0-9_-]{1,200}$/.test(managerTournamentId)
+      || !/^[a-zA-Z0-9_-]{1,200}$/.test(tabTournamentId)
+      || !Number.isSafeInteger(revision) || revision < 1
+      || !/^[a-f0-9]{64}$/.test(snapshotSha256)) {
+    throw new ApiError("INVALID_PAYLOAD", "Los datos de procedencia de la importación no son válidos.");
+  }
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const published = await client.query(
+      "SELECT revision, snapshot_sha256 FROM tabulation_tournaments WHERE tab_tournament_id = $1 FOR SHARE",
+      [tabTournamentId],
+    );
+    const row = published.rows[0] as Record<string, unknown> | undefined;
+    if (!row || num(row.revision) !== revision || str(row.snapshot_sha256) !== snapshotSha256) {
+      throw new ApiError("REVISION_CONFLICT", "La publicación de Tabulación cambió antes de registrar su importación.", 409);
+    }
+    const saved = await client.query(
+      `INSERT INTO tabulation_manager_imports(manager_tournament_id, tab_tournament_id, imported_revision, snapshot_sha256, imported_by)
+       VALUES ($1,$2,$3,$4,'authenticated-manager')
+       ON CONFLICT (manager_tournament_id) DO UPDATE SET
+         tab_tournament_id = EXCLUDED.tab_tournament_id,
+         imported_revision = EXCLUDED.imported_revision,
+         snapshot_sha256 = EXCLUDED.snapshot_sha256,
+         imported_by = EXCLUDED.imported_by,
+         imported_at = now()
+       WHERE tabulation_manager_imports.imported_revision <= EXCLUDED.imported_revision
+       RETURNING manager_tournament_id, tab_tournament_id, imported_revision, snapshot_sha256,
+                 floor(extract(epoch FROM imported_at) * 1000)::bigint AS imported_at`,
+      [managerTournamentId, tabTournamentId, revision, snapshotSha256],
+    );
+    if (!saved.rows[0]) throw new ApiError("STALE_IMPORT", "Gestión ya tiene registrada una revisión más reciente de Tabulación.", 409);
+    await client.query("COMMIT");
+    const result = saved.rows[0] as Record<string, unknown>;
+    return { managerTournamentId: str(result.manager_tournament_id), tabTournamentId: str(result.tab_tournament_id),
+      revision: num(result.imported_revision), snapshotSha256: str(result.snapshot_sha256), importedAt: num(result.imported_at) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("TABULATION_IMPORT_RECORD_FAILED", "No se ha podido registrar la revisión importada en Gestión.", 503);
+  } finally { client.release(); }
+}
 
 async function listAuthoritativeTabulationSnapshots(): Promise<Array<Pick<AuthoritativeTabulationDocument, "tabTournamentId" | "tournamentName" | "schemaVersion" | "revision" | "snapshotSha256" | "updatedAt">>> {
   const result = await getPool().query(
