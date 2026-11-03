@@ -1,4 +1,5 @@
-import { ApiError, previewTabulationActa, publishTabulationRound, saveTabulationActa } from '../api';
+import { ApiError, ackSyncOperation, previewTabulationActa, publishTabulationRound, recordSyncOperation, saveTabulationActa } from '../api';
+import { hashSyncPayload } from './syncOutbox';
 import { appendPanelPublishAcknowledgement } from './panelBridge';
 import { enqueuePanelPublishAck } from '../contracts/applicationDeliveryAdapters';
 import type { PendingSyncOperation } from './syncOutbox';
@@ -37,6 +38,52 @@ function classify(error: unknown): SyncDispatchResult {
     'ELIMINATION_RESULT_MISMATCH', 'SCHEMA_TOO_NEW',
   ].includes(code)) return { status: 'failed', error: { code: code || 'INVALID_OPERATION', message } };
   return { status: 'retry', error: { code: code || 'NETWORK_ERROR', message }, retryAfterMs };
+}
+
+
+async function executeJournaled(
+  token: string,
+  operation: PendingSyncOperation,
+  run: () => Promise<unknown>,
+): Promise<SyncDispatchResult> {
+  const envelope = {
+    protocolVersion: 1 as const,
+    operationId: operation.operationId,
+    tournamentId: operation.tournamentId,
+    entityType: operation.entityType,
+    entityId: operation.entityId,
+    operation: operation.operation,
+    baseRevision: operation.baseRevision,
+    payload: operation.payload as Record<string, unknown>,
+    payloadHash: operation.payloadHash,
+  };
+  const journal = await recordSyncOperation(token, envelope);
+  if (journal.status === 'committed') {
+    return { status: 'acknowledged', response: journal.result };
+  }
+  if (journal.status === 'conflict') {
+    return { status: 'conflict', error: { code: journal.errorCode || 'REVISION_CONFLICT', message: journal.errorMessage || 'La operación requiere reconciliación.' } };
+  }
+  if (journal.status === 'rejected') {
+    return { status: 'failed', error: { code: journal.errorCode || 'OPERATION_REJECTED', message: journal.errorMessage || 'La operación fue rechazada.' } };
+  }
+  try {
+    const response = await run();
+    // The domain transaction commits first; the journal ACK follows. If the ACK
+    // request times out, retrying the same operationId replays the domain result.
+    await ackSyncOperation(token, operation.operationId, operation.payloadHash, 'committed', response);
+    return { status: 'acknowledged', response };
+  } catch (error) {
+    const classified = classify(error);
+    if (classified.status === 'conflict') {
+      await ackSyncOperation(token, operation.operationId, operation.payloadHash, 'conflict', undefined, classified.error).catch(() => undefined);
+    } else if (classified.status === 'failed') {
+      await ackSyncOperation(token, operation.operationId, operation.payloadHash, 'rejected', undefined, classified.error).catch(() => undefined);
+    }
+    // Network failures remain pending in Neon: a later retry can determine
+    // whether the domain transaction committed or needs to run again.
+    throw error;
+  }
 }
 
 async function dispatchRound(token: string, operation: PendingSyncOperation): Promise<SyncDispatchResult> {
@@ -119,10 +166,10 @@ export function createTabulationSyncDispatcher(options: {
   return async (operation) => {
     try {
       if (operation.operation === 'publish-round' && operation.entityType === 'round') {
-        return await dispatchRound(options.token, operation);
+        return await executeJournaled(options.token, operation, async () => { const result = await dispatchRound(options.token, operation); if (result.status !== 'acknowledged') throw Object.assign(new Error(result.error.message), { code: result.error.code, status: result.status === 'conflict' ? 409 : 422 }); return result.response; });
       }
       if (operation.operation === 'replace-acta' && operation.entityType === 'acta') {
-        return await dispatchActa(options.token, operation);
+        return await executeJournaled(options.token, operation, async () => { const result = await dispatchActa(options.token, operation); if (result.status !== 'acknowledged') throw Object.assign(new Error(result.error.message), { code: result.error.code, status: result.status === 'conflict' ? 409 : 422 }); return result.response; });
       }
       return { status: 'failed', error: { code: 'OPERATION_NOT_ALLOWED', message: 'La operación no está autorizada para sincronización desde Tabulación.' } };
     } catch (error) {
