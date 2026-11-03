@@ -154,7 +154,8 @@ export function mergePublishedTabulationRounds(
   // Keep it intact rather than deleting it during a remote refresh.
   for (const round of tournament.rounds) if (!publishedIds.has(round.id)) rounds.push(round);
   rounds.sort((a, b) => a.number - b.number);
-  const metadata = rows(relevant[0].teamMetadata);
+  const latestMetadataRow = [...relevant].sort((a, b) => b.roundNumber - a.roundNumber)[0];
+  const metadata = rows(latestMetadataRow?.teamMetadata);
   const metadataById = new Map(metadata.filter((item) => typeof item.teamId === 'string').map((item) => [String(item.teamId), item]));
   const teams = tournament.teams.map((item) => {
     const remoteId = localMap.teams[item.id];
