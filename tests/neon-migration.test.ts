@@ -268,3 +268,21 @@ describe("Neon migration artifacts", () => {
   });
 
 });
+
+  it("stores complete authoritative Tabulation snapshots independently and non-destructively", async () => {
+    const sql = await readFile(resolve("db/migrations/0025_tabulation_authoritative_snapshots.sql"), "utf8");
+    for (const token of [
+      "CREATE TABLE IF NOT EXISTS tabulation_tournaments",
+      "tab_tournament_id text PRIMARY KEY",
+      "revision bigint NOT NULL",
+      "snapshot jsonb NOT NULL",
+      "snapshot_sha256",
+      "CREATE TABLE IF NOT EXISTS tabulation_publication_operations",
+      "operation_id varchar(128) PRIMARY KEY",
+      "committed_revision bigint NOT NULL",
+    ]) expect(sql).toContain(token);
+    expect(sql).not.toMatch(/\\bDROP\\s+TABLE\\b/i);
+    expect(sql).not.toMatch(/\\bTRUNCATE\\b/i);
+    expect(sql).not.toMatch(/\\bDELETE\\s+FROM\\b/i);
+    expect(sql).not.toMatch(/\\bUPDATE\\s+[^;]+/i);
+  });
