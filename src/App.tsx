@@ -183,8 +183,11 @@ export default function App() {
       try {
         const requestStartedAt = Date.now();
         const remoteFresh = await getTournament(session.token);
-        writeCanonicalManager(remoteFresh);
-        const fresh = readCanonicalManager<Tournament>() ?? remoteFresh;
+        let fresh = remoteFresh;
+        try {
+          writeCanonicalManager(remoteFresh);
+          fresh = readCanonicalManager<Tournament>() ?? remoteFresh;
+        } catch { /* A local cache failure must never block the authenticated server read. */ }
         const responseReceivedAt = Date.now();
         if (typeof fresh.serverTime === 'number') setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
         setData((current) => {
@@ -501,8 +504,10 @@ export default function App() {
       if (apiConfigured) {
         if (!session) throw new Error('Inicia sesión antes de guardar.');
         saved = await saveTournament(session.token, sourceData.revision, payload);
-        writeCanonicalManager(saved);
-        saved = readCanonicalManager<Tournament>() ?? saved;
+        try {
+          writeCanonicalManager(saved);
+          saved = readCanonicalManager<Tournament>() ?? saved;
+        } catch { /* The successful server save remains authoritative if local caching fails. */ }
       } else {
         saved = { ...payload, revision: payload.revision + 1, updatedAt: Date.now() };
         writeDemo(saved);
