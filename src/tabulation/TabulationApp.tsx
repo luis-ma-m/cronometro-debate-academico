@@ -599,6 +599,20 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     void run();
     return () => { disposed = true; };
   }, [tournament?.id, tournament?.revision, state.status, state.readOnly, managerSession?.token, hydrateAuthoritativeSnapshot, publishAuthoritativeSnapshot]);
+  useEffect(() => {
+    if (!apiConfigured || !managerSession?.token || !tournament || tournament.sample || state.readOnly) return;
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void hydrateAuthoritativeSnapshot();
+    };
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+    };
+  }, [managerSession?.token, tournament?.id, tournament?.sample, state.readOnly, hydrateAuthoritativeSnapshot]);
   const update = useCallback<ViewProps['update']>((mutator, meta) => {
     const before = store.getState().tournament;
     const applied = store.update(mutator, meta);
