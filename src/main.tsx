@@ -18,9 +18,10 @@ function loadFailed(what: string) {
   };
 }
 
-// The local tabulation and the judges' acta page are separate, frontend-only apps: no login, no API polling.
+// Judges keep their public acta route; the manager and tabulation now share one application shell.
 const JudgeActaApp = lazy(() => import('./tabulation/JudgeActaApp').catch(() => loadFailed('el acta')));
 const isTabulation = /^\/tabulacion(\/|$)/.test(window.location.pathname);
+if (isTabulation) window.history.replaceState(null, '', '/#tabulation');
 const isJudgeActa = /^\/acta(\/|$)/.test(window.location.pathname);
 
 const root = document.getElementById('root');
