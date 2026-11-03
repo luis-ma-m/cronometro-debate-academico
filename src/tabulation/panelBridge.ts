@@ -246,7 +246,7 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     if (!teams.has(debate.teamFavorId) || !teams.has(debate.teamContraId)) issues.push(debate.venueName + ': faltan datos de algún equipo en la copia enviada desde tabulación.');
     if (debate.judgeIds.some((id) => !judges.has(id))) issues.push(debate.venueName + ': faltan datos de algún juez en la copia enviada desde tabulación.');
   }
-  if (issues.length) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], issues: [...new Set(issues)], summary: [], changed: 0 };
+  if (issues.length) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, issues: [...new Set(issues)], summary: [], changed: 0 };
 
   const minimumJudges = panel.minimumJudgesPerRoom ?? 1;
   const scored = new Set((panel.scoring?.scorecards ?? []).map((card) => card.roomId));
