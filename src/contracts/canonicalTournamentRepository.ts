@@ -261,7 +261,11 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
         ['speaker', speakers as unknown as JsonRecord[]],
         ['judge', judges as unknown as JsonRecord[]],
         ['venue', venues as unknown as JsonRecord[]],
-        ['round', rounds.map(({ debates: _debates, ...round }) => round) as unknown as JsonRecord[]],
+        ['round', rounds.map((round) => {
+          const record = { ...round } as unknown as JsonRecord;
+          delete record.debates;
+          return record;
+        })],
       ];
       const seen = new Set<string>();
       for (const [kind, values] of entries) for (const data of values) {
