@@ -24,7 +24,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: preview ? 'npm run build && npx vite preview --port ' + PORT + ' --strictPort' : 'npx vite --port ' + PORT + ' --strictPort',
+    command: preview ? 'VITE_E2E_PREVIEW=1 npm run build && npx vite preview --port ' + PORT + ' --strictPort' : 'VITE_E2E_PREVIEW=1 npx vite --port ' + PORT + ' --strictPort',
     url: 'http://localhost:' + PORT + '/tabulacion',
     reuseExistingServer: !process.env.CI && !preview,
     timeout: 180_000,

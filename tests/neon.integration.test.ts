@@ -19,12 +19,16 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     await client.query(`SET search_path TO "${schema}"`);
     const migrationDirectory = resolve("db/migrations");
     const migrationFiles = (await readdir(migrationDirectory))
-      .filter((file) => /^\\d{4}_[a-z0-9_]+\\.sql$/.test(file))
+      .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file))
       .sort();
     for (const file of migrationFiles) {
       await client.query(await readFile(resolve(migrationDirectory, file), "utf8"));
+      // Match the production migration runner: seed the singleton settings row
+      // immediately after 0001 so later identity migrations can backfill the registry.
+      if (file.startsWith("0001_")) {
+        await client.query("INSERT INTO tournament_settings(id) VALUES(1) ON CONFLICT (id) DO NOTHING");
+      }
     }
-    await client.query("INSERT INTO tournament_settings(id) VALUES(1)");
     await client.query("INSERT INTO teams(id,name) VALUES('t1','Equipo 1'),('t2','Equipo 2'),('t3','Equipo 3'),('t4','Equipo 4')");
     await client.query("INSERT INTO judges(id,name) VALUES('j1','Juez 1'),('j2','Juez 2')");
     await client.query("INSERT INTO physical_rooms(id,slug,name) VALUES('p1','sala-1','Sala 1'),('p2','sala-2','Sala 2')");

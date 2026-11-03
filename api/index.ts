@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
+import { createTabulationParticipantUpdate } from "../server/tabulation-participant-write.js";
 import { checkDatabase, databaseConfigured, getPool } from "../server/db.js";
 import { readTabulationActaHistory, readTabulationActaVersion } from "../server/tabulation-acta-history.js";
 import { previewTabulationActa, saveTabulationActa } from "../server/tabulation-acta-write.js";
@@ -480,6 +481,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "replaceActiveTournament":
       await requireSession(payload.token);
       return replaceActiveTournament(payload);
+    case "saveTabulationParticipants":
+      await requireSession(payload.token);
+      return saveTabulationParticipants(payload);
     case "saveTournament":
       await requireSession(payload.token);
       return saveTournament(payload);
@@ -1138,7 +1142,19 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
   }
 }
 
-async function saveTournament(payload: Record<string, unknown>): Promise<Tournament> {
+async function saveTabulationParticipants(payload: Record<string, unknown>): Promise<Tournament> {
+  const expectedRevision = num(payload.expectedRevision);
+  const current = tournamentFromData(await loadSheetData(true));
+  const update = createTabulationParticipantUpdate(current, expectedRevision, payload.snapshot);
+  // This bypass is private to this server action; the candidate was derived
+  // from a validated participant snapshot, not accepted as a client aggregate.
+  return saveTournament({ ...payload, expectedRevision, tournament: update.tournament }, { allowTabulationMasterWrite: true });
+}
+
+async function saveTournament(
+  payload: Record<string, unknown>,
+  options: { allowTabulationMasterWrite?: boolean } = {},
+): Promise<Tournament> {
   return withLock("database-transaction", async () => {
     const expectedRevision = num(payload.expectedRevision);
     const idempotencyScope = "saveTournament:" + expectedRevision;
@@ -1152,7 +1168,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     }
     validateTournamentInput(payload.tournament);
     const tournament = payload.tournament as Tournament;
-    if (current.remoteId) {
+    if (current.remoteId && !options.allowTabulationMasterWrite) {
       try {
         const imported = await getPool().query(
           "SELECT tab_tournament_id, imported_revision FROM tabulation_manager_imports WHERE manager_tournament_id = $1",

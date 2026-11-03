@@ -33,29 +33,24 @@ describe('Tabulation participant persistence adapter', () => {
   });
 
   it('persists the Tabulation participant projection to Neon using the fetched revision', async () => {
-    const save = async (_token: string, revision: number, tournament: Tournament) => ({
-      ...tournament, revision: revision + 1, updatedAt: 200,
-    });
-    const saveSpy = vi.fn(save);
+    const saveSpy = vi.fn(async (_token: string, revision: number, _snapshot: ParticipantSnapshot) => ({
+      ...applyTabulationParticipantSnapshot(current, snapshot), revision: revision + 1, updatedAt: 200,
+    }));
     const result = await persistTabulationParticipantSnapshot('manager-token', snapshot, 7, {
       getTournament: async () => current,
-      saveTournament: saveSpy,
+      saveTabulationParticipants: saveSpy,
     });
     expect(result.changed).toBe(true);
     expect(result.tournament.revision).toBe(8);
     expect(saveSpy).toHaveBeenCalledOnce();
-    expect(saveSpy).toHaveBeenCalledWith('manager-token', 7, expect.objectContaining({
-      teams: [expect.objectContaining({ id: 'team-canonical' })],
-      rounds: current.rounds,
-      rooms: current.rooms,
-    }));
+    expect(saveSpy).toHaveBeenCalledWith('manager-token', 7, snapshot);
   });
 
   it('does not overwrite a newer remote participant revision', async () => {
-    const save = vi.fn(async (_token: string, _revision: number, tournament: Tournament) => tournament);
+    const save = vi.fn(async (_token: string, _revision: number, _snapshot: ParticipantSnapshot) => current);
     await expect(persistTabulationParticipantSnapshot('manager-token', snapshot, 6, {
       getTournament: async () => current,
-      saveTournament: save,
+      saveTabulationParticipants: save,
     })).rejects.toThrow('Conflicto de sincronización');
     expect(save).not.toHaveBeenCalled();
   });
@@ -74,10 +69,10 @@ describe('Tabulation participant persistence adapter', () => {
 
   it('does not write to Neon when the participant projection is already current', async () => {
     const currentSnapshot = { ...snapshot, teams: [], speakers: [], judges: [], physicalRooms: [] };
-    const save = vi.fn(async (_token: string, _revision: number, tournament: Tournament) => tournament);
+    const save = vi.fn(async (_token: string, _revision: number, _snapshot: ParticipantSnapshot) => current);
     const result = await persistTabulationParticipantSnapshot('manager-token', currentSnapshot, 7, {
       getTournament: async () => current,
-      saveTournament: save,
+      saveTabulationParticipants: save,
     });
     expect(result.changed).toBe(false);
     expect(save).not.toHaveBeenCalled();

@@ -20,8 +20,12 @@ function loadFailed(what: string) {
 
 // Judges keep their public acta route; the manager and tabulation now share one application shell.
 const JudgeActaApp = lazy(() => import('./tabulation/JudgeActaApp').catch(() => loadFailed('el acta')));
+const TabulationStandaloneApp = lazy(() => import('./tabulation/TabulationApp').catch(() => loadFailed('la tabulación')));
 const isTabulation = /^\/tabulacion(\/|$)/.test(window.location.pathname);
-if (isTabulation) {
+// Legacy standalone route exists only in E2E builds to test Tabulation's offline module independently.
+// Production always redirects it into the single application shell.
+const isE2EStandaloneTabulation = import.meta.env.VITE_E2E_PREVIEW === '1' && isTabulation;
+if (isTabulation && !isE2EStandaloneTabulation) {
   const legacySection = window.location.hash.replace(/^#/, '').split('/')[0];
   const supportedSections = ['inicio', 'reglas', 'participantes', 'rondas', 'actas', 'clasificacion', 'registro'];
   const destination = supportedSections.includes(legacySection) ? '/#' + legacySection : '/#tabulation';
@@ -36,6 +40,8 @@ createRoot(root).render(
   <React.StrictMode>
     {isJudgeActa
       ? <Suspense fallback={<div className="tab-loading">Cargando el acta…</div>}><JudgeActaApp /></Suspense>
-      : <App />}
+      : isE2EStandaloneTabulation
+        ? <Suspense fallback={<div className="tab-loading">Cargando Tabulación…</div>}><TabulationStandaloneApp /></Suspense>
+        : <App />}
   </React.StrictMode>,
 );

@@ -1,6 +1,7 @@
 import type { PublicRoom, Tournament } from './domain';
 import type { ScoreCategory, RoundScorecard } from './scoring';
 import type { TimerAction } from './timer';
+import type { ParticipantSnapshot } from './contracts/participantSnapshot';
 
 const EXPLICIT_API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? '';
 const API_URL = EXPLICIT_API_URL || (import.meta.env.PROD ? '/api' : '');
@@ -69,6 +70,8 @@ export const logout = (token: string) => apiCall<{ loggedOut: boolean }>('logout
 export const getTournament = (token: string, signal?: AbortSignal) => apiCall<Tournament>('getTournament', { token }, signal);
 export const saveTournament = (token: string, expectedRevision: number, tournament: Tournament) =>
   apiCall<Tournament>('saveTournament', { token, expectedRevision, tournament });
+export const saveTabulationParticipants = (token: string, expectedRevision: number, snapshot: ParticipantSnapshot) =>
+  apiCall<Tournament>('saveTabulationParticipants', { token, expectedRevision, snapshot });
 export const replaceActiveTournament = (
   token: string,
   expectedRevision: number,

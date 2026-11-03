@@ -56,7 +56,7 @@ export async function persistTabulationParticipantSnapshot(
   expectedRevision: number | undefined,
   dependencies: {
     getTournament: (token: string) => Promise<Tournament>;
-    saveTournament: (token: string, expectedRevision: number, tournament: Tournament) => Promise<Tournament>;
+    saveTabulationParticipants: (token: string, expectedRevision: number, snapshot: ParticipantSnapshot) => Promise<Tournament>;
   },
 ): Promise<{ tournament: Tournament; changed: boolean }> {
   const remote = await dependencies.getTournament(token);
@@ -68,7 +68,7 @@ export async function persistTabulationParticipantSnapshot(
   if (typeof expectedRevision === 'number' && remote.revision !== expectedRevision) {
     throw new Error('Conflicto de sincronización: Neon ha cambiado desde la última versión confirmada. No se han sobrescrito los cambios remotos.');
   }
-  const saved = await dependencies.saveTournament(token, remote.revision, candidate);
+  const saved = await dependencies.saveTabulationParticipants(token, remote.revision, snapshot);
   return { tournament: saved, changed: true };
 }
 

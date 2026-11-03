@@ -6,7 +6,7 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId, type PanelEntityIdMap } from './types';
-import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament, publishTabulationSnapshot, getAuthoritativeTabulationSnapshot } from '../api';
+import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTabulationParticipants, publishTabulationSnapshot, getAuthoritativeTabulationSnapshot } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
 import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
@@ -330,7 +330,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
         }, idMap);
         const result = await persistTabulationParticipantSnapshot(token, snapshot, local.panelLink?.remoteRevision, {
           getTournament,
-          saveTournament,
+          saveTabulationParticipants,
         });
         const saved = result.tournament;
         window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
