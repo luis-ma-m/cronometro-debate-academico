@@ -345,6 +345,44 @@ function parseRequestBody(body: unknown): { action?: string; payload?: Record<st
   return body as { action?: string; payload?: Record<string, unknown> };
 }
 
+/**
+ * Resolve ambiguous network timeouts using the committed Neon ACK. This endpoint
+ * never replays a write and never exposes operations outside the authenticated
+ * manager's requested tournament/assignment scope.
+ */
+async function getTabulationSyncOperationStatus(payload: Record<string, unknown>) {
+  const operationId = str(payload.operationId);
+  const entityId = str(payload.entityId);
+  const tournamentId = str(payload.tournamentId);
+  const entityType = str(payload.entityType);
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(operationId)
+    || !/^[a-zA-Z0-9_-]{1,128}$/.test(entityId)
+    || !/^[0-9a-fA-F-]{36}$/.test(tournamentId)
+    || !["round", "acta"].includes(entityType)) {
+    throw new ApiError("INVALID_PAYLOAD", "La identidad de la operación de sincronización no es válida.");
+  }
+  const client = await getPool().connect();
+  try {
+    const identity = await client.query("SELECT tournament_id::text AS id FROM tournament_identity WHERE id=1");
+    if (str(identity.rows[0]?.id) !== tournamentId) {
+      throw new ApiError("TOURNAMENT_MISMATCH", "La operación pertenece a otro torneo.", 409);
+    }
+    const found = await client.query("SELECT scope, response FROM idempotency_keys WHERE operation_key=$1", [operationId]);
+    if (!found.rows.length) return { found: false };
+    const scope = str(found.rows[0].scope);
+    const validScope = entityType === "round"
+      ? scope === ["tabulation-publish-round", tournamentId, entityId, str(payload.payloadHash)].join(":")
+      : scope.startsWith("tabulation-save-acta:" + entityId + ":");
+    if (!validScope) throw new ApiError("IDEMPOTENCY_MISMATCH", "El operationId pertenece a otra operación.", 409);
+    if (found.rows[0].response === null || found.rows[0].response === undefined) {
+      throw new ApiError("IDEMPOTENCY_INCOMPLETE", "La operación no tiene confirmación recuperable.", 409);
+    }
+    return { found: true, response: found.rows[0].response };
+  } finally {
+    client.release();
+  }
+}
+
 async function dispatch(action: string, payload: Record<string, unknown>, req: RequestLike): Promise<unknown> {
   switch (action) {
     case "login":
@@ -384,6 +422,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
         confirmReplace: payload.confirmReplace === true,
         expectedSettingsRevision: num(payload.expectedSettingsRevision),
       });
+    case "getTabulationSyncOperationStatus":
+      await requireSession(payload.token);
+      return getTabulationSyncOperationStatus(payload);
     case "publishTabulationRound":
       await requireSession(payload.token);
       return publishTabulationRoundOperation(payload.operation);
