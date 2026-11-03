@@ -33,16 +33,16 @@ function readHashView(): ViewId {
 }
 
 /** Even a failure of the shell itself (not only of one screen) leaves the data safe and offers the emergency copy. */
-export default function TabulationApp() {
+export default function TabulationApp({ embedded = false }: { embedded?: boolean }) {
   const onError = (error: Error) => {
     try {
       getBrowserTabStore().logError('Fallo de la aplicación: ' + error.message);
     } catch { /* The crash screen still offers the emergency copy. */ }
   };
-  return <ErrorBoundary resetKey="app" onError={onError} page><TabulationShell /></ErrorBoundary>;
+  return <ErrorBoundary resetKey="app" onError={onError} page={!embedded}><TabulationShell embedded={embedded} /></ErrorBoundary>;
 }
 
-function TabulationShell() {
+function TabulationShell({ embedded }: { embedded: boolean }) {
   const store = getBrowserTabStore();
   const state = useTabStore(store);
   const [view, setViewState] = useState<ViewId>(readHashView);
@@ -84,8 +84,8 @@ function TabulationShell() {
     if (tournament?.id) navigator.storage?.persist?.().catch(() => undefined);
   }, [tournament?.id]);
   useEffect(() => {
-    document.title = (tournament ? tournament.name + ' · ' : '') + 'Tabulación · Debate Control';
-  }, [tournament?.name]);
+    if (!embedded) document.title = (tournament ? tournament.name + ' · ' : '') + 'Tabulación · Debate Control';
+  }, [tournament?.name, embedded]);
   useEffect(() => {
     if (!projection) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setProjection(false); };
@@ -144,8 +144,8 @@ function TabulationShell() {
 
   const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store } : null;
 
-  return <div className={'app-shell tab-shell' + (projection ? ' tab-projection' : '')}>
-    <aside className="sidebar">
+  return <div className={'tab-shell' + (projection ? ' tab-projection' : '') + (embedded ? ' tab-embedded' : ' app-shell')}>
+    {!embedded && <aside className="sidebar">
       <div className="brand"><span className="brand-mark">T</span><span>Debate <b>Tabulación</b></span></div>
       <div className="sidebar-section">TABULACIÓN LOCAL</div>
       <nav>{VIEWS.map((item) => {
@@ -161,10 +161,10 @@ function TabulationShell() {
         <span className="tab-operator">Operador: {state.operator || 'sin nombre'}</span>
         <a className="sidebar-logout" href="/"><ExternalLink size={16} /> Panel de organización</a>
       </div>
-    </aside>
+    </aside>}
     <main className="main-area">
       <header className="topbar">
-        <div><span className="eyebrow">TABULACIÓN LOCAL · SIN CONEXIÓN AL SERVIDOR</span><h1>{tournament?.name ?? 'Tabulación de debate académico'}</h1></div>
+        <div><span className="eyebrow">TABULACIÓN · ESPACIO DE COMPETICIÓN</span><h1>{tournament?.name ?? 'Tabulación de debate académico'}</h1></div>
         {tournament && <div className="top-actions tab-no-project">
           <span className="live-status"><i className={state.status === 'conflict' || state.status === 'error' || state.readOnly ? 'disconnected' : ''} /> {saveLabel}</span>
           <button type="button" className="button secondary" onClick={exportCopy}><Download size={16} /> Exportar copia</button>

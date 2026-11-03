@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import TabulationApp from './tabulation/TabulationApp';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
@@ -18,7 +19,8 @@ import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from 
 const SESSION_KEY = 'ledu-admin-session';
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
 const DEMO_PASSWORD = 'gestor123';
-type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
+type ManagerView = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
+type View = ManagerView | 'tabulation';
 
 type ScoreInputDraft = { teamScores: Record<string, string>; speakerScores: Record<number, string> };
 
@@ -92,7 +94,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [serverError, setServerError] = useState('');
-  const [view, setView] = useState<View>('overview');
+  const [view, setView] = useState<View>(() => window.location.pathname === '/tabulacion' ? 'tabulation' : 'overview');
   const [selectedRound, setSelectedRound] = useState('');
   const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
   const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([]);
@@ -1219,8 +1221,9 @@ export default function App() {
       setServerError('No hay espacio en el almacenamiento del navegador para enviar los datos a la tabulación.');
       return;
     }
-    window.open('/tabulacion#inicio', '_blank', 'noopener');
-    setTabulationNotice('Equipos, oradores, jueces y salas enviados a la tabulación local de este navegador. Si no se ha abierto, entra en /tabulacion.');
+    setView('tabulation');
+    window.history.replaceState(null, '', '/tabulacion' + window.location.hash);
+    setTabulationNotice('Equipos, oradores, jueces y salas enviados a Tabulación.');
   };
   const loadFromTabulation = () => {
     const round = data.rounds.find((item) => item.id === activeRound);
@@ -1246,17 +1249,18 @@ export default function App() {
     ? incompatibilityIncidents.filter((incident) => data.rooms.some((room) => room.id === incident.roomId && room.roundId === activeTournamentRoundId))
     : [];
 
-  return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div><div className="sidebar-section">TORNEO</div><nav>
-      <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => setView('overview')} />
-      <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => setView('rooms')} />
-      <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
-      <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
-      <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
-      <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
-      <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
-      <a className="nav-button" href="/tabulacion" target="_blank" rel="noopener"><ClipboardList size={18} /><span>Tabulación local</span><ExternalLink size={15} /></a>
-    </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
+  if (view === 'tabulation') {
+    return <div className="app-shell unified-shell">
+      <UnifiedSidebar view={view} setView={(next) => { setView(next); window.history.replaceState(null, '', next === 'tabulation' ? '/tabulacion' + window.location.hash : '/'); }} apiConfigured={apiConfigured} logout={logout} />
+      <main className="main-area unified-main">
+        <div className="workspace-heading"><div><span className="eyebrow">ESPACIO DE COMPETICIÓN</span><h1>{data.tournamentName}</h1></div><span className="workspace-tag tab-tag">TABULACIÓN</span></div>
+        <TabulationApp embedded />
+      </main>
+    </div>;
+  }
+
+  return <div className="app-shell unified-shell">
+    <UnifiedSidebar view={view} setView={(next) => { setView(next); window.history.replaceState(null, '', '/'); }} apiConfigured={apiConfigured} logout={logout} />
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
       {preparingRoomId && <div className="notice warning-notice"><RefreshCw size={17} /><span>Guardando los cambios y preparando el enlace de la sala…</span></div>}
@@ -1669,6 +1673,27 @@ function ScoringView({
       })}
     </section>
   </>;
+}
+
+function UnifiedSidebar({ view, setView, apiConfigured, logout }: { view: View; setView: (next: View) => void; apiConfigured: boolean; logout: () => void }) {
+  return <aside className="sidebar unified-sidebar">
+    <div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div>
+    <div className="sidebar-section">GESTIÓN</div>
+    <nav>
+      <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => setView('overview')} />
+      <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => setView('rooms')} />
+      <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
+      <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
+      <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
+      <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
+      <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
+    </nav>
+    <div className="sidebar-section unified-section">TABULACIÓN</div>
+    <nav>
+      <NavButton icon={<ClipboardList size={18} />} label="Inicio" selected={view === 'tabulation'} onClick={() => setView('tabulation')} />
+    </nav>
+    <div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div>
+  </aside>;
 }
 
 function NavButton({ icon, label, selected, onClick }: { icon: React.ReactNode; label: string; selected: boolean; onClick: () => void }) {
