@@ -364,9 +364,12 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       return getSyncOperations(str(payload.tournamentId), true, num(payload.after));
     case "ackSyncOperation":
       await requireSession(payload.token);
+      if (payload.status !== "committed" && payload.status !== "conflict" && payload.status !== "rejected") {
+        throw new ApiError("INVALID_PAYLOAD", "El estado final del ACK no es válido.");
+      }
       return transitionSyncOperation(str(payload.operationId), str(payload.payloadHash),
-        payload.status === "conflict" ? "conflict" : payload.status === "rejected" ? "rejected" : "committed",
-        payload.result, payload.error && typeof payload.error === "object" ? payload.error as { code: string; message: string } : undefined, true);
+        payload.status, payload.result,
+        payload.error && typeof payload.error === "object" ? payload.error as { code: string; message: string } : undefined, true);
     case "createActaShortLink": await requireSession(payload.token); return createActaShortLink(payload);
     case "listActaShortLinks": await requireSession(payload.token); return listActaShortLinks(payload);
     case "updateActaShortLinkExpiry": await requireSession(payload.token); return updateActaShortLinkExpiry(payload);
