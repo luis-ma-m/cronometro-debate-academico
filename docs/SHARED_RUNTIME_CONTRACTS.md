@@ -126,3 +126,20 @@ Implementación: `src/contracts/applicationDeliveryQueue.ts`; persistencia Index
 **Integración funcional:** `sendToTabulation` encola snapshots de participantes; `RoundsView` encola propuestas de ronda; `HomeView` reclama, valida y confirma handoffs solo después de persistirlos localmente; Gestión reclama propuestas, exige revisión humana y las transfiere a su outbox de publicación; `syncDispatcher` guarda ACKs transaccionales en la cola y Tabulación los aplica y confirma tras persistir los mappings. Las claves heredadas siguen como fallback y se limpian solo tras ACK durable. Los IDs de handoff/propuesta son deterministas para el mismo payload.
 
 **Límites y validación pendiente:** los tests actuales ejercitan la cola en memoria; falta prueba real de IndexedDB con dos pestañas, recarga, bloqueo y recuperación. El build de Vercel del HEAD previo detectó errores de TypeScript en las firmas genéricas de la cola y el narrowing del mapa de IDs; corregidos en esta revisión, pendientes de CI. No se debe retirar el bridge heredado hasta validar la ruta completa.
+
+
+## Repositorio común del torneo activo (primer corte estructural)
+
+Implementación: `src/contracts/sharedTournamentRepository.ts`.
+
+- Añade un documento compartido versionado (`ledu-shared-tournament-v1`) para el único torneo activo del navegador.
+- El documento contiene proyecciones de dominio separadas: `manager` para el modelo de Gestión y `tabulation` para los registros de torneo/índice de Tabulación. No se fuerza una conversión destructiva entre `Tournament` y `TabTournament`; siguen siendo modelos especializados mientras se completa el mapeo canónico de entidades.
+- Gestión en modo demostración lee y escribe su proyección compartida, manteniendo `ledu-tournament-demo-v1` como espejo de compatibilidad y recuperación.
+- El store de Tabulación hidrata únicamente claves v1 ausentes y refleja las escrituras del índice y del torneo en el mismo documento compartido. Las claves locales existentes tienen prioridad y no se sobrescriben durante la hidratación.
+- La actualización de una proyección conserva la otra. Se incrementa una revisión del documento y se mantiene una copia versionada en IndexedDB mediante el repositorio de persistencia común.
+- Gestión escucha cambios del documento compartido en otras pestañas y refresca su proyección solo cuando no hay cambios locales pendientes. Tabulación conserva su bloqueo de escritor y su mecanismo de conflicto por revisión.
+- Los datos heredados no se eliminan; las copias de seguridad y el registro append-only de Tabulación continúan en sus claves actuales.
+
+**Alcance real y límites:** este es el primer corte de repositorio compartido de runtime en el mismo navegador/origen, no todavía una base de datos relacional única ni sincronización multi-dispositivo. Las proyecciones de Gestión y Tabulación siguen siendo distintas y no se traducen automáticamente todos los equipos, jueces, actas, cruces o clasificaciones. El handoff validado sigue siendo el mecanismo de intercambio de dominio entre ellas. El espejo IndexedDB es best-effort en esta fase; el funcionamiento local-first no depende de que esté disponible. No se ha tocado Neon ni se han ejecutado migraciones.
+
+**Pruebas:** `sharedTournamentRepository.test.ts` verifica que ambas proyecciones conviven, que la hidratación no pisa claves locales existentes, que un documento corrupto se conserva y que la eliminación de una proyección no afecta a las demás.
