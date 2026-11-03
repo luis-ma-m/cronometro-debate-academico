@@ -880,11 +880,11 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
       SalasFisicas: [],
       Formatos: data.rows.Formatos,
     };
-    await writePostgresTables(data, replacements, [{
-      eventKey: "tournament-replaced:" + operationId,
-      eventType: "tournament.replaced",
-      details: { oldTournamentId, newTournamentId, generation: nextGeneration, archiveId, snapshotHash },
-    }], client);
+    await writePostgresTables(data, replacements, undefined, client);
+    await client.query(
+      "INSERT INTO audit_events(event_key,event_type,details) VALUES($1,'tournament.replaced',$2::jsonb)",
+      ["tournament-replaced:" + operationId, JSON.stringify({ oldTournamentId, newTournamentId, generation: nextGeneration, archiveId, snapshotHash })],
+    );
 
     const tournament = tournamentFromData(await loadPostgresSheetData(client));
     const response = { tournament, archiveId };
