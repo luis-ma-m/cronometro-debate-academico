@@ -165,11 +165,19 @@ export function createTabulationSyncDispatcher(options: {
 }): (operation: PendingSyncOperation) => Promise<SyncDispatchResult> {
   return async (operation) => {
     try {
-      if (operation.operation === 'publish-round' && operation.entityType === 'round') {
-        return await executeJournaled(options.token, operation, async () => { const result = await dispatchRound(options.token, operation); if (result.status !== 'acknowledged') throw Object.assign(new Error(result.error.message), { code: result.error.code, status: result.status === 'conflict' ? 409 : 422 }); return result.response; });
-      }
-      if (operation.operation === 'replace-acta' && operation.entityType === 'acta') {
-        return await executeJournaled(options.token, operation, async () => { const result = await dispatchActa(options.token, operation); if (result.status !== 'acknowledged') throw Object.assign(new Error(result.error.message), { code: result.error.code, status: result.status === 'conflict' ? 409 : 422 }); return result.response; });
+      if ((operation.operation === 'publish-round' && operation.entityType === 'round')
+        || (operation.operation === 'replace-acta' && operation.entityType === 'acta')) {
+        return await executeJournaled(options.token, operation, async () => {
+          const result = operation.operation === 'publish-round'
+            ? await dispatchRound(options.token, operation)
+            : await dispatchActa(options.token, operation);
+          if (result.status !== 'acknowledged') {
+            const failure = result as Extract<SyncDispatchResult, { status: 'conflict' | 'failed' | 'retry' | 'pause' }>;
+            const status = failure.status === 'conflict' ? 409 : failure.status === 'failed' ? 422 : 503;
+            throw Object.assign(new Error(failure.error.message), { code: failure.error.code, status });
+          }
+          return result.response;
+        });
       }
       return { status: 'failed', error: { code: 'OPERATION_NOT_ALLOWED', message: 'La operación no está autorizada para sincronización desde Tabulación.' } };
     } catch (error) {
@@ -179,7 +187,6 @@ export function createTabulationSyncDispatcher(options: {
     }
   };
 }
-
 export function notifyTabulationSyncAcknowledged(operation: PendingSyncOperation, response?: unknown): void {
   if (operation.operation !== 'replace-acta' || operation.entityType !== 'acta') return;
   const key = ACTA_PENDING_PREFIX + operation.entityId;
