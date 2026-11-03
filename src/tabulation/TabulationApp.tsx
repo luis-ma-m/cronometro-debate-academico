@@ -71,6 +71,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   const participantSyncBlocked = useRef(false);
   const tabSettingsRevision = useRef<number | null>(null);
   const tabSettingsHydrated = useRef(false);
+  const tabSettingsPending = useRef(false);
   const tabSettingsSyncInFlight = useRef(false);
   const tabSettingsSyncBlocked = useRef(false);
   const tabSettingsSyncTimer = useRef<number | null>(null);
@@ -345,10 +346,12 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       const saved = await saveTabulationSettings(token, tabSettingsRevision.current, settings, makeTabId('settings-op'));
       if (saved.tournamentId !== remoteId) throw new Error('Las reglas confirmadas pertenecen a otro torneo.');
       tabSettingsRevision.current = saved.revision;
+      tabSettingsPending.current = false;
       setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
       store.log({ type: 'sync.ack', message: 'Reglas de Tabulación confirmadas en Neon', details: { revision: saved.revision } });
       const latest = store.getState().tournament;
       if (latest && JSON.stringify(latest.settings) !== JSON.stringify(settings)) {
+        tabSettingsPending.current = true;
         if (tabSettingsSyncTimer.current !== null) window.clearTimeout(tabSettingsSyncTimer.current);
         tabSettingsSyncTimer.current = window.setTimeout(() => {
           tabSettingsSyncTimer.current = null;
@@ -357,6 +360,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se han podido sincronizar las reglas con Neon.';
+      tabSettingsPending.current = true;
       if (message.startsWith('Las reglas han cambiado') || message.includes('REVISION_CONFLICT')) tabSettingsSyncBlocked.current = true;
       store.logError(message);
       notify(message + ' No se ha sobrescrito la versión remota.', 'error');
@@ -404,6 +408,19 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     void hydrate();
     return () => { disposed = true; };
   }, [managerSession?.token, activeTournament?.tournamentId, store, notify]);
+  useEffect(() => {
+    const retry = () => {
+      if (tabSettingsPending.current && tabSettingsHydrated.current && !tabSettingsSyncBlocked.current) {
+        void syncTabulationSettings();
+      }
+    };
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+    };
+  }, [syncTabulationSettings]);
   const refreshRemoteParticipants = useCallback(async () => {
     const token = managerSession?.token;
     if (!apiConfigured || !token || remoteParticipantRefreshInFlight.current || participantSyncInFlight.current) return;
@@ -490,6 +507,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       ));
       const tabSettingsChanged = Boolean(before && after && before.settings !== after.settings);
       if (tabSettingsChanged && after?.panelLink?.remoteId && tabSettingsHydrated.current && !tabSettingsSyncBlocked.current) {
+        tabSettingsPending.current = true;
         if (tabSettingsSyncTimer.current !== null) window.clearTimeout(tabSettingsSyncTimer.current);
         tabSettingsSyncTimer.current = window.setTimeout(() => {
           tabSettingsSyncTimer.current = null;
