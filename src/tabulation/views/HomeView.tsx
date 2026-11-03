@@ -79,6 +79,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const [operator, setOperator] = useState(state.operator);
   const [handoffVersion, setHandoffVersion] = useState(0);
   const [queuedHandoff, setQueuedHandoff] = useState<Awaited<ReturnType<typeof claimPanelHandoff>>>(null);
+  const [manualHandoff, setManualHandoff] = useState<PanelHandoff | null>(null);
   const tabulationDeliveryConsumer = useRef<string | null>(null);
   const [showLinkReview, setShowLinkReview] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
@@ -87,7 +88,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
   const [diagnosis, setDiagnosis] = useState<{ integrity: IntegrityReport; log: LogVerification & { issues: string[] } } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const managerBootstrapAttempt = useRef('');
-  const handoff = useMemo(() => queuedHandoff?.payload ?? readHandoff(window.localStorage), [queuedHandoff?.deliveryId, handoffVersion, state.tournaments]);
+  const handoff = useMemo(() => queuedHandoff?.payload ?? manualHandoff ?? readHandoff(window.localStorage), [queuedHandoff?.deliveryId, manualHandoff, handoffVersion, state.tournaments]);
   const backups = useMemo(() => store.listBackups(), [store, tournament?.id, tournament?.revision, backupVersion]);
   useEffect(() => {
     if (state.readOnly || queuedHandoff) return;
@@ -127,6 +128,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     if (!queuedHandoff || (legacy?.createdAt === queuedHandoff.payload.createdAt
       && legacy?.tournamentId === queuedHandoff.payload.tournamentId)) clearHandoff(window.localStorage);
     setQueuedHandoff(null);
+    setManualHandoff(null);
     setHandoffVersion((value) => value + 1);
     return true;
   };
@@ -151,6 +153,18 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           return;
         }
         const snapshot = buildPanelHandoff(manager);
+        // Never silently replace an existing local tournament with a newly imported
+        // copy: expose the manager snapshot so the operator can explicitly review
+        // and establish the identity mapping for the existing tournament.
+        if (tournament) {
+          setManualHandoff(snapshot);
+          setSyncStatus(tournament.panelLink?.remoteId
+            ? 'El torneo abierto está vinculado a otra identidad. Revisa el vínculo antes de continuar.'
+            : tournament.panelLink
+              ? 'El torneo conserva un vínculo antiguo sin identidad verificable. Crea una copia vinculada nueva desde Gestión.'
+              : 'Torneo local detectado sin vínculo. Revisa las correspondencias para vincularlo al torneo activo de Gestión.');
+          return;
+        }
         const created = tournamentFromHandoff(snapshot, 'ledu-groups');
         store.create(created);
         if (!store.flush()) {
