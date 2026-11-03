@@ -98,4 +98,14 @@ describe('canonical tournament repository', () => {
     expect(local.getItem('ledu-tournament-demo-v1')).toBe(JSON.stringify(legacyManager));
     expect(local.getItem('ledu-tabulacion-v1:tab-1')).toBe(JSON.stringify(legacyTab));
   });
+  it('never overwrites a malformed canonical document during legacy migration', () => {
+    const malformed = '{broken';
+    const local = storage({
+      [CANONICAL_TOURNAMENT_KEY]: malformed,
+      'ledu-tournament-demo-v1': JSON.stringify(manager()),
+    });
+    expect(() => migrateLegacyTournamentStorage(local)).not.toThrow();
+    expect(local.getItem(CANONICAL_TOURNAMENT_KEY)).toBe(malformed);
+    expect(local.getItem('ledu-tournament-demo-v1')).not.toBeNull();
+  });
 });
