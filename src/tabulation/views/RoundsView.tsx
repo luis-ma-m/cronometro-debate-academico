@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { enqueuePanelOutbox } from '../../contracts/applicationDeliveryAdapters';
+import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from '../syncOutbox';
 import { Check, ClipboardList, Copy, Dices, Download, FileText, Gavel, MessageCircle, MonitorPlay, MoreHorizontal, Projector, RotateCcw, Search, Send, Shuffle, Sparkles, Star, Trash2, Trophy, Undo2, X } from 'lucide-react';
 import { allocateJudgesForRound, judgesConflict, teamConflicts, type RoundProblem } from '../adjudication';
 import { computeBreak, tournamentChampion } from '../bracket';
@@ -191,38 +192,44 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
       }
       savedTournament = store.getState().tournament;
     }
-    let deliveryQueued = false;
-    let deliveryIssue = '';
+    let publicationQueued = false;
+    let publicationIssue = '';
     if (savedTournament?.panelLink?.remoteId) {
       const proposal = buildOutbox(savedTournament, pending.round.id);
-      if (proposal.outbox) {
-        try {
-          await enqueuePanelOutbox(proposal.outbox);
-          deliveryQueued = true;
-        } catch (error) {
-          deliveryIssue = errorText(error);
-        }
-        // Keep the old mailbox as a compatibility fallback, but never treat it as an ACK.
-        if (!deliveryQueued) {
-          try {
-            writeOutbox(window.localStorage, proposal.outbox);
-            deliveryIssue = 'La cola durable no está disponible; se ha usado el buzón compatible.';
-          } catch (error) {
-            deliveryIssue = errorText(error);
-          }
-        }
+      if (!proposal.outbox) {
+        publicationIssue = proposal.issues.join(' ');
+      } else if (!managerSessionToken) {
+        publicationIssue = 'No hay una sesión autenticada de Gestión para publicar la ronda.';
       } else {
-        deliveryIssue = proposal.issues.join(' ');
+        try {
+          // Confirmation is the publication intent: enqueue the canonical server operation
+          // directly. The Tabulation sync worker publishes it to Neon and the manager then
+          // reads the round and room assignments from the canonical repository.
+          const syncOutbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
+          const queued = await syncOutbox.enqueue({
+            tournamentId: savedTournament.panelLink.remoteId,
+            entityType: 'round',
+            entityId: pending.round.id,
+            operation: 'publish-round',
+            baseRevision: savedTournament.panelLink.remoteRevision ?? 0,
+            payload: proposal.outbox,
+          });
+          publicationQueued = queued.operation.status === 'pending' || queued.operation.status === 'sending';
+        } catch (error) {
+          publicationIssue = errorText(error);
+          // Retain the prior hand-off as a recovery path, but do not report it as published.
+          try { await enqueuePanelOutbox(proposal.outbox); } catch { /* The explicit warning below is authoritative. */ }
+        }
       }
     } else {
-      deliveryIssue = 'El torneo todavía no está vinculado a Gestión; la ronda permanece guardada localmente.';
+      publicationIssue = 'El torneo todavía no está vinculado a Gestión; la ronda permanece guardada localmente.';
     }
     exportZip(pending.round.id, true);
     setScreenId(pending.round.id);
-    if (deliveryQueued) {
-      notify('Ronda confirmada, guardada y enviada automáticamente a la bandeja de Gestión. Allí sigue pendiente de revisión y publicación oficial.', 'success');
+    if (publicationQueued) {
+      notify('Ronda confirmada y guardada. Publicación automática en curso: al confirmarse en Neon aparecerá en «Rondas y salas» sin pasos manuales.', 'success');
     } else {
-      notify('Ronda confirmada y guardada localmente. No se ha podido enviar automáticamente a Gestión. ' + deliveryIssue, 'warning');
+      notify('Ronda confirmada y guardada localmente, pero no se ha podido iniciar su publicación automática. ' + publicationIssue, 'warning');
     }
   };
 
