@@ -20,6 +20,7 @@ jobs:
       - run: npm run typecheck:api
       - run: npm run build
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
         with:
           name: production-build
           path: dist/
