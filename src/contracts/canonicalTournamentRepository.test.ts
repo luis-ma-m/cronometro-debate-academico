@@ -172,4 +172,19 @@ describe('canonical tournament repository', () => {
       debates: [{ id: 'debate-tab', managerAssignmentId: 'assignment-manager' }],
     });
   });
+  it('shares demo entities only after an explicit local panel link and ID map', () => {
+    const local = storage();
+    const repository = createCanonicalTournamentRepository(local);
+    repository.writeManager(manager({ remoteId: undefined }));
+    repository.writeTabulation(tabulation({
+      panelLink: {
+        tournamentName: 'Liga', linkedAt: 1,
+        idMap: { teams: { 'team-tab': 'team-manager' }, speakers: { 'speaker-tab': 'speaker-manager' }, judges: { 'judge-tab': 'judge-manager' }, venues: {} },
+      },
+    }));
+    expect(repository.readTabulation<TabTournament>('tab-1')?.teams[0]).toMatchObject({
+      id: 'team-tab', name: 'Equipo actualizado', institution: 'UMA',
+    });
+    expect(Object.keys(JSON.parse(local.getItem(CANONICAL_TOURNAMENT_KEY)!)).filter((key) => key.includes('|team|team-manager'))).toHaveLength(1);
+  });
 });
