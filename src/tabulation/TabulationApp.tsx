@@ -44,16 +44,16 @@ function readHashView(): ViewId {
 }
 
 /** Even a failure of the shell itself (not only of one screen) leaves the data safe and offers the emergency copy. */
-export default function TabulationApp() {
+export default function TabulationApp({ embedded = false }: { embedded?: boolean } = {}) {
   const onError = (error: Error) => {
     try {
       getBrowserTabStore().logError('Fallo de la aplicación: ' + error.message);
     } catch { /* The crash screen still offers the emergency copy. */ }
   };
-  return <ErrorBoundary resetKey="app" onError={onError} page><TabulationShell /></ErrorBoundary>;
+  return <ErrorBoundary resetKey="app" onError={onError} page><TabulationShell embedded={embedded} /></ErrorBoundary>;
 }
 
-function TabulationShell() {
+function TabulationShell({ embedded }: { embedded: boolean }) {
   const store = getBrowserTabStore();
   const state = useTabStore(store);
   const [view, setViewState] = useState<ViewId>(readHashView);
@@ -374,8 +374,8 @@ function TabulationShell() {
 
   const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store, managerSessionToken: applicationBootstrap.session?.token } : null;
 
-  return <div className={'app-shell tab-shell' + (projection ? ' tab-projection' : '')}>
-    <aside className="sidebar">
+  return <div className={'app-shell tab-shell' + (projection ? ' tab-projection' : '') + (embedded ? ' tab-embedded' : '')}>
+    {!embedded && <aside className="sidebar">
       <div className="brand"><span className="brand-mark">T</span><span>Debate <b>Tabulación</b></span></div>
       <div className="sidebar-section">TABULACIÓN LOCAL</div>
       <nav>{VIEWS.map((item) => {
@@ -399,8 +399,14 @@ function TabulationShell() {
         <span className="tab-operator">Operador: {state.operator || 'sin nombre'}</span>
         <a className="sidebar-logout" href="/"><ExternalLink size={16} /> Panel de organización</a>
       </div>
-    </aside>
+    </aside>}
     <main className="main-area">
+      {embedded && <nav className="tab-embedded-nav" aria-label="Secciones de tabulación">{VIEWS.map((item) => {
+        const Icon = item.icon;
+        return <button key={item.id} type="button" className={'nav-button ' + (activeView === item.id ? 'selected' : '')} disabled={!tournament && item.id !== 'inicio'} onClick={() => setView(item.id)}>
+          <Icon size={17} /><span>{item.label}</span>
+        </button>;
+      })}</nav>}
       <header className="topbar">
         <div><span className="eyebrow">TABULACIÓN LOCAL · SIN CONEXIÓN AL SERVIDOR</span><h1>{tournament?.name ?? 'Tabulación de debate académico'}</h1></div>
         {tournament && <div className="top-actions tab-no-project">
