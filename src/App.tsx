@@ -168,13 +168,13 @@ export default function App() {
   // mode, refresh the manager projection when safe; never replace an unsaved draft.
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key === CANONICAL_TOURNAMENT_KEY && demoMode && !hasUnsavedRef.current) {
-        setData(readDemo());
+      if (event.key === CANONICAL_TOURNAMENT_KEY && !hasUnsavedRef.current) {
+        setData(readCanonicalManager<Tournament>() ?? readDemo());
       }
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [demoMode]);
+  }, []);
 
   const reloadAdmin = useCallback(async () => {
     if (demoMode) return;
