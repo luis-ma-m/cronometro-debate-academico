@@ -23,6 +23,7 @@
 - El inventario `LEGACY_HANDOFF_INVENTORY.md` sigue siendo la guía para retirar stores, claves, handoffs y componentes antiguos. No eliminarlos hasta verificar todos los consumidores y disponer de rollback.
 - No se han ejecutado migraciones ni escrituras de prueba contra Neon Production en esta iteración.
 - La reconstrucción multi-dispositivo debe probarse con dos sesiones reales y una base Neon de Preview/aislada; el build por sí solo no demuestra coherencia funcional.
+- Dos correcciones posteriores al deployment READY hacen que la reconstrucción use el mapa de identidades del navegador receptor (los IDs locales del navegador emisor nunca se reutilizan) y que el refresco remoto conserve rondas/drafts aún no publicados. Estas correcciones están en el HEAD actual, pero no se han incluido en un deployment porque se agotó el presupuesto de tres.
 
 ## Validación y despliegue
 - GitHub Actions sigue con jobs `verify` y `e2e` en cola, sin pasos iniciados; el bloqueo está en la ejecución de Actions y no hay resultados que podamos declarar aprobados.
