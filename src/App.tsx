@@ -164,8 +164,8 @@ export default function App() {
     participants: managerParticipants,
   }), [session, activeTournament, managerParticipants]);
 
-  // A second browser tab may update the shared local tournament document. In demo
-  // mode, refresh the manager projection when safe; never replace an unsaved draft.
+  // A second browser tab may update canonical tournament entities. Refresh only
+  // when this shell has no unsaved manager edits.
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
       if (event.key === CANONICAL_TOURNAMENT_KEY && !hasUnsavedRef.current) {
