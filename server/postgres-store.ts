@@ -602,6 +602,19 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
   try {
     await client.query("BEGIN");
     await client.query("SET CONSTRAINTS ALL DEFERRED");
+    // Re-check the snapshot cursor after acquiring the database row lock.
+    // A competing writer that committed after loadSnapshot is rejected before
+    // touching any domain table; persistConfig retains its final revision CAS.
+    if (replacements.Config) {
+      const locked = await client.query("SELECT revision FROM tournament_settings WHERE id=1 FOR UPDATE");
+      if (locked.rowCount !== 1) {
+        throw new ApiError("DATABASE_NOT_INITIALIZED", "No existe la configuración canónica del torneo.", 503);
+      }
+      const expectedRevision = num(getConfig(data.rows.Config, "revision")) || 1;
+      if (num(locked.rows[0]?.revision) !== expectedRevision) {
+        throw new ApiError("REVISION_CONFLICT", "El torneo cambió en otro dispositivo antes de iniciar la escritura. Actualiza y vuelve a revisar los cambios.", 409);
+      }
+    }
     if (replacements.Config) await persistConfig(client, data.rows.Config, replacements.Config);
     // Parent rows must exist before rounds and assignments reference them.
     if (replacements.Formatos) await persistFormats(client, replacements.Formatos);

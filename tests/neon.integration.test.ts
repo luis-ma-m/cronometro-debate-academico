@@ -187,10 +187,10 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     expect(Number(reset.rows[0].request_count)).toBe(1);
   });
 
-});
   it("serializes concurrent whole-tournament snapshots with row locking and revision CAS", async () => {
     const second = new Client(connectionString!);
     await second.connect();
+    await second.query(`SET search_path TO "${schema}"`);
     try {
       const firstRead = await client!.query("SELECT revision FROM tournament_settings WHERE id=1");
       const staleRevision = Number(firstRead.rows[0].revision);
@@ -205,8 +205,11 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
       await second.query("BEGIN");
       // The second connection can start, but its row lock must wait until the first writer commits.
       const lockPromise = second.query("SELECT revision FROM tournament_settings WHERE id=1 FOR UPDATE");
-      await new Promise((resolve) => setTimeout(resolve, 40));
-      expect(await Promise.race([lockPromise.then(() => "acquired"), Promise.resolve("waiting")])).toBe("waiting");
+      const lockState = await Promise.race([
+        lockPromise.then(() => "acquired"),
+        new Promise<string>((resolve) => setTimeout(() => resolve("waiting"), 40)),
+      ]);
+      expect(lockState).toBe("waiting");
 
       await client!.query("COMMIT");
       const locked = await lockPromise;
@@ -226,7 +229,7 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     }
   });
 
-  it("makes an operation idempotent across concurrent retries", async () => {
+  it("returns the persisted acknowledgement on retry and rejects idempotency-key reuse", async () => {
     const second = new Client(connectionString!);
     await second.connect();
     try {
@@ -258,3 +261,5 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
     }
   });
 
+
+});
