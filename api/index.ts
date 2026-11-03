@@ -963,6 +963,18 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
     );
     const currentIdentity = locked.rows[0] as Record<string, unknown> | undefined;
     if (!currentIdentity) throw new ApiError("DATABASE_NOT_INITIALIZED", "No existe una identidad canónica activa.", 503);
+    try {
+      const imported = await client.query(
+        "SELECT tab_tournament_id FROM tabulation_manager_imports WHERE manager_tournament_id = $1 FOR SHARE",
+        [str(currentIdentity.tournament_id)],
+      );
+      if (imported.rows[0]) {
+        throw new ApiError("TABULATION_AUTHORITATIVE", "No se puede sustituir el torneo desde Gestión: la identidad maestra pertenece a Tabulación. Realiza el cambio en Tabulación y publica una nueva revisión.", 409);
+      }
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      if ((error as { code?: string })?.code !== "42P01") throw error;
+    }
     // Re-check after acquiring the singleton lock: a concurrent retry may have
     // completed the same operation while this request was waiting.
     const lockedCached = await client.query("SELECT response FROM idempotency_keys WHERE operation_key=$1 AND scope='replaceActiveTournament' AND response IS NOT NULL", [operationKey]);
