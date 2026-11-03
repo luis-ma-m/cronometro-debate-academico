@@ -245,7 +245,7 @@ export async function publishTabulationRound(rawOperation: unknown) {
       await client.query(
         "INSERT INTO audit_events(event_key, event_type, round_id, assignment_id, details) VALUES ($1, $2, $3, $4, $5::jsonb)",
         ["tabulation-publish:" + operation.operationId + ":" + assignmentId, "tabulation_round_assignment_published",
-          operation.entityId, assignmentId, JSON.stringify({ operationId: operation.operationId, chairJudgeId: debate.chairId || null,
+          managerRoundId, assignmentId, JSON.stringify({ operationId: operation.operationId, chairJudgeId: debate.chairId || null,
             sidesProvisional: debate.sidesProvisional, venueName: debate.venueName, tournamentId: canonicalTournamentId })],
       );
     }
