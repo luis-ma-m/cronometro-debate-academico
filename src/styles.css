@@ -920,3 +920,42 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
   .unified-shell .sidebar{padding-bottom:12px}
   .unified-shell .tab-workspace-heading{padding:12px 0}
 }
+
+/* Embedded tabulation must use the space to the right of the single shared sidebar.
+   The legacy .tab-shell .main-area rule reserves its own sidebar; cancel that offset here. */
+.unified-shell .tabulation-workspace{
+  width:calc(100% - 246px);
+  margin-left:246px;
+  min-width:0;
+  padding:0 36px;
+}
+.unified-shell .tabulation-workspace .tab-embedded{
+  width:100%;
+  min-width:0;
+  min-height:calc(100vh - 70px);
+  background:#f4f6fa;
+}
+.unified-shell .tabulation-workspace .tab-embedded>.main-area{
+  width:100%;
+  max-width:none;
+  margin:0!important;
+  padding:0!important;
+  min-width:0;
+}
+.unified-shell .tabulation-workspace .tab-embedded .topbar{
+  min-height:106px;
+  padding:0;
+}
+.unified-shell .tabulation-workspace .tab-embedded .tab-no-project,
+.unified-shell .tabulation-workspace .tab-embedded .panel,
+.unified-shell .tabulation-workspace .tab-embedded .stat-card{
+  min-width:0;
+}
+.unified-shell .tab-empty-workspace{margin-top:22px}
+@media(max-width:1100px){
+  .unified-shell .tabulation-workspace{width:calc(100% - 210px);margin-left:210px;padding:0 22px}
+}
+@media(max-width:760px){
+  .unified-shell .tabulation-workspace{width:100%;margin:0;padding:0 16px}
+  .unified-shell .tabulation-workspace .tab-embedded .topbar{min-height:82px}
+}
