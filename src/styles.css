@@ -909,3 +909,37 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .room-acta-version-details > button { justify-self:start; }
 .room-acta-version-details pre { max-height:24rem; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; padding:.75rem; border:1px solid var(--border, rgba(128,128,128,.25)); border-radius:.5rem; background:var(--surface-muted, rgba(128,128,128,.06)); font-size:.75rem; line-height:1.45; }
 .room-acta-version-details .muted { font-size:.78rem; }
+
+
+/* Embedded tabulation runs inside the manager shell; only its workspace sub-navigation remains. */
+.tab-shell.tab-embedded {
+  display: block;
+  min-height: 0;
+  background: transparent;
+}
+.tab-shell.tab-embedded .sidebar,
+.tab-shell.tab-embedded > .main-area > .topbar,
+.tab-shell.tab-embedded > .main-area > .footer {
+  display: none;
+}
+.tab-shell.tab-embedded > .main-area {
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+.tab-embedded-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0 0 14px;
+  margin: 0 0 18px;
+  border-bottom: 1px solid var(--line, #e5e7eb);
+}
+.tab-embedded-nav .nav-button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 8px 12px;
+}
