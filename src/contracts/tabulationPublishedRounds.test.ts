@@ -58,7 +58,7 @@ describe('canonical Tabulation round hydration', () => {
       tabTournamentId: 'other', tabulationRoundId: 'round', tabulationDebateId: 'debate',
       managerRoundId: 'manager-round', assignmentId: 'assignment', chairJudgeId: '',
       sidesProvisional: true, roundNumber: 1, roundName: 'Ronda', roundKind: 'qualifying',
-      sideMode: 'draw', teamMetadata: [], entityIdMap: {}, physicalRoomId: '', teamFavorId: '',
+      sideMode: 'draw', teamMetadata: [], entityIdMap: { teams: {}, speakers: {}, judges: {}, venues: {} }, physicalRoomId: '', teamFavorId: '',
       teamContraId: '', judgeIds: [], currentSourceId: null, currentSourcePayload: null,
     }]);
     expect(result.rounds).toHaveLength(1);
