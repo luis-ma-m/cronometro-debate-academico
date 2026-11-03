@@ -156,7 +156,10 @@ function managerScope(tournament: Tournament): string {
 }
 
 function updateDocument(storage: CanonicalStorage, mutate: (document: CanonicalDocument) => void, now: () => number): CanonicalDocument {
-  const current = parseDocument(storage.getItem(CANONICAL_TOURNAMENT_KEY)) ?? emptyDocument();
+  const raw = storage.getItem(CANONICAL_TOURNAMENT_KEY);
+  const parsed = raw === null ? emptyDocument() : parseDocument(raw);
+  if (!parsed) throw new Error('El repositorio canónico está dañado; se conserva intacto para recuperación.');
+  const current = parsed;
   const next = clone(current);
   mutate(next);
   next.revision = current.revision + 1;
@@ -306,6 +309,8 @@ export function getBrowserCanonicalTournamentRepository() {
  * retained for rollback/export; migration never infers identity from names.
  */
 export function migrateLegacyTournamentStorage(storage: Storage): void {
+  const canonicalRaw = storage.getItem(CANONICAL_TOURNAMENT_KEY);
+  if (canonicalRaw !== null && !parseDocument(canonicalRaw)) return;
   const repository = createCanonicalTournamentRepository(storage);
   if (!repository.readManager()) {
     let legacyManager: unknown = null;
@@ -357,7 +362,11 @@ export function createCanonicalTabulationStorage(legacy: Storage): Storage {
     get length() { return legacy.length; },
     key: (index: number) => legacy.key(index),
     getItem(key: string) {
-      if (key === TAB_INDEX_KEY) return JSON.stringify(repository.readIndex());
+      if (key === TAB_INDEX_KEY) {
+        const rawCanonical = legacy.getItem(CANONICAL_TOURNAMENT_KEY);
+        if (rawCanonical !== null && !parseDocument(rawCanonical)) return legacy.getItem(key);
+        return JSON.stringify(repository.readIndex());
+      }
       if (isTournamentKey(key)) {
         const id = key.slice(TAB_PREFIX.length);
         const canonical = repository.readTabulation(id);
