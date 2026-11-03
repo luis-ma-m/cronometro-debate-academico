@@ -6,10 +6,11 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
-import { apiConfigured, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament } from '../api';
+import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
 import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
+import { mergePublishedTabulationRounds } from '../contracts/tabulationPublishedRounds';
 import { persistTabulationParticipantSnapshot } from '../contracts/tabulationParticipantSync';
 import { activeTournamentContext } from '../contracts/activeTournamentContext';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
@@ -151,6 +152,37 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       onAcknowledged: (operation, response) => {
         if (disposed) return;
         notifyTabulationSyncAcknowledged(operation, response);
+        if (operation.operation === 'publish-round' && operation.entityType === 'round'
+          && response && typeof response === 'object' && !Array.isArray(response)) {
+          const published = response as { roundId?: unknown; revision?: unknown; updatedAt?: unknown; debateAssignments?: unknown };
+          const payload = operation.payload && typeof operation.payload === 'object' && !Array.isArray(operation.payload)
+            ? operation.payload as { tabulationRoundId?: unknown } : {};
+          if (typeof published.roundId === 'string' && typeof payload.tabulationRoundId === 'string'
+            && Array.isArray(published.debateAssignments)) {
+            const assignmentByDebate = new Map<string, string>();
+            for (const item of published.debateAssignments) {
+              if (item && typeof item === 'object' && 'tabulationDebateId' in item && 'assignmentId' in item
+                && typeof item.tabulationDebateId === 'string' && typeof item.assignmentId === 'string') {
+                assignmentByDebate.set(item.tabulationDebateId, item.assignmentId);
+              }
+            }
+            store.update((current) => ({
+              ...current,
+              panelLink: current.panelLink ? {
+                ...current.panelLink,
+                ...(typeof published.revision === 'number' ? { remoteRevision: published.revision } : {}),
+                ...(typeof published.updatedAt === 'number' ? { remoteUpdatedAt: published.updatedAt } : {}),
+              } : current.panelLink,
+              rounds: current.rounds.map((round) => round.id !== payload.tabulationRoundId ? round : ({
+                ...round, managerRoundId: published.roundId as string, pushedAt: Date.now(),
+                debates: round.debates.map((debate) => ({
+                  ...debate,
+                  ...(assignmentByDebate.has(debate.id) ? { managerAssignmentId: assignmentByDebate.get(debate.id) } : {}),
+                })),
+              })),
+            }), { type: 'sync.ack', message: 'Ronda y asignaciones canónicas confirmadas por Neon', details: { operationId: operation.operationId } });
+          }
+        }
         store.log({
           type: 'sync.ack',
           message: operation.operation === 'replace-acta'
@@ -380,9 +412,11 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       const remote = await getTournament(token);
       if (!remote.remoteId) return;
       const handoff = buildPanelHandoff(remote);
+      const publishedRounds = await getTabulationPublishedRounds(token, remote.remoteId);
       const local = store.getState().tournament;
       if (!local) {
-        store.create(tournamentFromHandoff(handoff, 'ledu-groups'));
+        const created = mergePublishedTabulationRounds(tournamentFromHandoff(handoff, 'ledu-groups'), publishedRounds);
+        store.create(created);
         return;
       }
       if (local.panelLink?.remoteId !== remote.remoteId) return;
@@ -400,13 +434,20 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
         notify(merged.issues.join(' '), 'error');
         return;
       }
-      if (merged.added || merged.updated || local.panelLink?.remoteRevision !== remote.revision) {
-        store.update(() => merged.tournament, {
+      const withPublishedRounds = mergePublishedTabulationRounds(merged.tournament, publishedRounds);
+      const roundsChanged = JSON.stringify(local.rounds) !== JSON.stringify(withPublishedRounds.rounds);
+      if (merged.added || merged.updated || local.panelLink?.remoteRevision !== remote.revision || roundsChanged) {
+        store.update(() => ({
+          ...withPublishedRounds,
+          panelLink: withPublishedRounds.panelLink ? {
+            ...withPublishedRounds.panelLink, remoteRevision: remote.revision, remoteUpdatedAt: remote.updatedAt,
+          } : withPublishedRounds.panelLink,
+        }), {
           type: 'sync.remote',
-          message: 'Participantes actualizados desde Neon',
-          details: { revision: remote.revision, added: merged.added, updated: merged.updated },
+          message: roundsChanged ? 'Rondas, asignaciones y actas oficiales actualizadas desde Neon' : 'Participantes actualizados desde Neon',
+          details: { revision: remote.revision, added: merged.added, updated: merged.updated, rounds: publishedRounds.length },
         });
-        store.log({ type: 'sync.remote', message: 'Snapshot de participantes recibido desde Neon', details: { revision: remote.revision, added: merged.added, updated: merged.updated } });
+        store.log({ type: 'sync.remote', message: 'Snapshot canónico recibido desde Neon', details: { revision: remote.revision, added: merged.added, updated: merged.updated, rounds: publishedRounds.length } });
       }
     } catch (error) {
       store.logError(error instanceof Error ? error.message : 'No se pudo actualizar el snapshot remoto de participantes.');
