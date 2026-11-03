@@ -284,7 +284,7 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const mergedJudges = [...judgesById.values()];
   const institutions = [...new Set([...(panel.institutions ?? []), ...mergedTeams.map((team) => team.institution), ...mergedJudges.map((judge) => judge.institution)].map((value) => value.trim()).filter(Boolean))];
   issues.push(...validateAssignments({ ...panel, teams: mergedTeams, judges: mergedJudges, rooms: rooms.filter((room) => room.roundId === panelRoundId) }));
-  if (issues.length) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], issues: [...new Set(issues)], summary: [], changed: 0 };
+  if (issues.length) return { rooms: null, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, issues: [...new Set(issues)], summary: [], changed: 0 };
   const name = (id: string) => teams.get(id)?.name ?? id;
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
     + debate.judgeIds.length + (debate.judgeIds.length === 1 ? ' juez' : ' jueces') + (debate.sidesProvisional ? ' · postura provisional' : ''));
