@@ -118,4 +118,21 @@ describe('canonical tournament repository', () => {
     expect(repository.isTabulationDeleted('tab-1')).toBe(true);
     expect(local.getItem('ledu-tabulacion-v1:tab-1')).toBe(legacy);
   });
+  it('recovers tabulation bytes held only by the superseded shared projection', () => {
+    const legacyTab = tabulation();
+    const index = { activeId: 'tab-1', tournaments: [{ id: 'tab-1', name: 'Liga', updatedAt: 3 }] };
+    const local = storage({
+      'ledu-shared-tournament-v1': JSON.stringify({
+        manager: manager(),
+        tabulation: {
+          'ledu-tabulacion-index-v1': JSON.stringify(index),
+          'ledu-tabulacion-v1:tab-1': JSON.stringify(legacyTab),
+        },
+      }),
+    });
+    migrateLegacyTournamentStorage(local);
+    const repository = createCanonicalTournamentRepository(local);
+    expect(repository.readTabulation<TabTournament>('tab-1')?.teams[0].id).toBe('team-tab');
+    expect(local.getItem('ledu-shared-tournament-v1')).not.toBeNull();
+  });
 });
