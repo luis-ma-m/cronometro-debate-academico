@@ -33,3 +33,12 @@
 
 ## Criterio de cierre
 No declarar production-ready ni fusionar hasta validar en dos dispositivos: edición de participantes/reglas, publicación de ronda, aparición de asignaciones en Gestión y cronómetros, envío/lectura de actas oficiales, clasificación equivalente, desconexión/reconexión, conflictos y recuperación tras perder un ACK.
+
+## Confirmación directa de rondas y estabilidad de enlaces
+- «Confirmar ronda» ya no envía la ronda a la bandeja intermedia de propuestas de Gestión. Genera el payload desde el borrador confirmado y lo incorpora a la outbox durable IndexedDB que despacha la publicación autenticada a Neon.
+- La confirmación requiere torneo vinculado, sesión válida y revisión remota conocida. Si falta alguno de estos requisitos, el borrador permanece intacto y no se modifica «Rondas y salas».
+- El servidor busca la ronda planificada por número. Si existe y no está activa ni contiene actas oficiales, sustituye sus metadatos y asignaciones dentro de una única transacción; si no existe, crea una nueva únicamente cuando sea el siguiente número disponible.
+- Las asignaciones existentes se emparejan por identidad canónica de sala física y conservan su ID de room_assignments. Ese ID es el identificador que alimenta las URLs públicas/control de sala; por tanto, las URLs existentes no rotan al sustituir equipos y jueces.
+- Las fases y paneles de jueces de cada asignación reutilizada se reemplazan con el contenido confirmado. La operación se rechaza si la ronda está activa, tiene actas oficiales, el conjunto de salas no coincide o no se puede mantener la identidad física de las salas.
+- La publicación sigue usando operationId, hash de payload, revisión optimista, diario remoto y recuperación de ACK ambiguos. Un error de red deja la operación pendiente para reintento, no crea una segunda ronda.
+- No se ha desplegado ni se han hecho escrituras de prueba en Neon Production en esta iteración. La validación de build, CI y el flujo con dos sesiones sigue pendiente.
