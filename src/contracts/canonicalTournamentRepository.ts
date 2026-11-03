@@ -7,7 +7,8 @@ export const CANONICAL_TOURNAMENT_NAMESPACE = 'canonical-tournament';
 const LEGACY_SHARED_KEY = 'ledu-shared-tournament-v1';
 const LEGACY_MANAGER_KEY = 'ledu-tournament-demo-v1';
 const TAB_INDEX_KEY = 'ledu-tabulacion-index-v1';
-const TAB_PREFIX = 'ledu-tabulacion-v1:';\nlet mirrorChain: Promise<void> = Promise.resolve();
+const TAB_PREFIX = 'ledu-tabulacion-v1:';
+let mirrorChain: Promise<void> = Promise.resolve();
 
 type EntityKind = 'team' | 'speaker' | 'judge' | 'venue';
 type JsonRecord = Record<string, unknown>;
