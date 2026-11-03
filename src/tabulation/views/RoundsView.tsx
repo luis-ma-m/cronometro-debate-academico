@@ -18,10 +18,11 @@ import { roundIsComplete, type DebateOutcome } from '../results';
 import { roundPdf } from '../roundPdf';
 import { buildRoundZip } from '../roundZip';
 import { simulateRoundResults } from '../sample';
-import { eliminationRounds, qualifyingRounds, type TabDebate, type TabJudge, type TabRound, type TabRoundDraft, type TabTournament } from '../types';
+import { eliminationRounds, makeTabId, qualifyingRounds, type TabDebate, type TabJudge, type TabRound, type TabRoundDraft, type TabTournament } from '../types';
 import { copyText, downloadBytes, Empty, IssueList, lookups, Notice, STATUS_LABELS, type ViewProps } from '../ui';
 import { actaLinkMessage, buildActaLink, whatsAppNumber, whatsAppUrl } from '../whatsapp';
 import { createActaShortLink, listActaShortLinks, revokeActaShortLinks, updateActaShortLinkExpiry, type ActaShortLink } from '../../api';
+import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from '../syncOutbox';
 
 const DRAFT_TAB = '__borrador__';
 type Look = ReturnType<typeof lookups>;
@@ -151,11 +152,34 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     const current = store.getState().tournament;
     const pending = current?.draftRound;
     if (!current || !pending) return;
+    const remoteTournamentId = current.panelLink?.remoteId;
+    if (!remoteTournamentId || !managerSessionToken) {
+      notify('No se puede confirmar la ronda como oficial: vincula el torneo con Gestión e inicia sesión. El borrador se conserva sin modificar Rondas y salas.', 'error');
+      return;
+    }
     const check = draftProblems(current, pending);
     if (check.errors.length) { notify('El borrador tiene errores que impiden confirmarlo: ' + check.errors.join(' '), 'error'); return; }
     if (check.warnings.length && acknowledged !== check.warnings.join('|')) { notify('Revisa los avisos y marca «Confirmo bajo mi responsabilidad» para confirmar.', 'error'); return; }
     const preview = confirmDraft(current, pending.round.id);
     if (preview.errors.length) { notify(preview.errors.join(' '), 'error'); return; }
+
+    // Build the canonical payload from the confirmed preview. Confirmation is
+    // no longer a hand-off proposal: it enters the durable server-sync outbox.
+    const proposal = buildOutbox(preview.tournament, pending.round.id);
+    if (!proposal.outbox) {
+      notify('No se puede publicar esta ronda: ' + proposal.issues.join(' '), 'error');
+      return;
+    }
+    const baseRevision = proposal.outbox.basePanelRevision ?? current.panelLink?.remoteRevision;
+    if (!Number.isSafeInteger(baseRevision) || (baseRevision as number) < 0) {
+      notify('No se conoce la revisión actual de Gestión. Actualiza el torneo antes de confirmar la ronda.', 'error');
+      return;
+    }
+    if (!store.flush() || store.getState().status !== 'saved') {
+      notify('No se puede confirmar todavía: hay cambios locales pendientes de guardado.', 'error');
+      return;
+    }
+
     store.backup('Antes de confirmar ' + pending.round.name);
     const manual = diffRounds(current, pending.generated, pending.round);
     const ok = applyLogged((latest) => {
@@ -175,44 +199,28 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     if (!ok) { notify('No se ha podido confirmar la ronda.', 'error'); return; }
     setAcknowledged('');
     setSelectedId(pending.round.id);
-    // Only what is safely stored is exported.
+
     if (!store.flush() || store.getState().status !== 'saved') {
-      notify('La ronda se ha confirmado, pero el navegador no la ha podido guardar: todavía no se exporta. Resuelve el aviso de guardado y pulsa «Descargar ZIP».', 'error');
+      notify('La ronda está confirmada en esta sesión, pero no se ha podido guardar localmente. No se ha enviado al servidor.', 'error');
       return;
     }
-    const savedTournament = store.getState().tournament;
-    let deliveryQueued = false;
-    let deliveryIssue = '';
-    if (savedTournament?.panelLink?.remoteId) {
-      const proposal = buildOutbox(savedTournament, pending.round.id);
-      if (proposal.outbox) {
-        try {
-          await enqueuePanelOutbox(proposal.outbox);
-          deliveryQueued = true;
-        } catch (error) {
-          deliveryIssue = errorText(error);
-        }
-        // Keep the old mailbox as a compatibility fallback, but never treat it as an ACK.
-        if (!deliveryQueued) {
-          try {
-            writeOutbox(window.localStorage, proposal.outbox);
-            deliveryIssue = 'La cola durable no está disponible; se ha usado el buzón compatible.';
-          } catch (error) {
-            deliveryIssue = errorText(error);
-          }
-        }
-      } else {
-        deliveryIssue = proposal.issues.join(' ');
-      }
-    } else {
-      deliveryIssue = 'El torneo todavía no está vinculado a Gestión; la ronda permanece guardada localmente.';
-    }
-    exportZip(pending.round.id, true);
-    setScreenId(pending.round.id);
-    if (deliveryQueued) {
-      notify('Ronda confirmada, guardada y enviada automáticamente a la bandeja de Gestión. Allí sigue pendiente de revisión y publicación oficial.', 'success');
-    } else {
-      notify('Ronda confirmada y guardada localmente. No se ha podido enviar automáticamente a Gestión. ' + deliveryIssue, 'warning');
+
+    try {
+      const outbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
+      await outbox.enqueue({
+        operationId: makeTabId('publish'),
+        tournamentId: remoteTournamentId,
+        entityType: 'round',
+        entityId: pending.round.id,
+        operation: 'publish-round',
+        baseRevision: baseRevision as number,
+        payload: proposal.outbox,
+      });
+      exportZip(pending.round.id, true);
+      setScreenId(pending.round.id);
+      notify('Ronda confirmada y enviada a sincronización. Gestión actualizará Rondas y salas al confirmar Neon; se conservarán los identificadores y enlaces de las salas existentes.', proposal.warnings.length ? 'warning' : 'success');
+    } catch (error) {
+      notify('La ronda se ha confirmado localmente, pero no se ha podido añadir a la cola de sincronización. No se ha modificado Rondas y salas: ' + errorText(error), 'error');
     }
   };
 
