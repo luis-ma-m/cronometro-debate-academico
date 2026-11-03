@@ -53,7 +53,7 @@ describe('canonical tournament repository', () => {
     expect(Object.keys(raw.entities).some((key) => key.includes('|team|team-manager'))).toBe(true);
     expect(repository.readManager<Tournament>()?.teams[0]).toMatchObject({ id: 'team-manager', name: 'Equipo actualizado' });
     expect(repository.readTabulation<TabTournament>('tab-1')?.teams[0]).toMatchObject({
-      id: 'team-tab', name: 'Equipo actualizado', institution: 'UMA', swing: true, breakEligible: false,
+      id: 'team-tab', name: 'Equipo actualizado', institution: 'UMA', swing: true, breakEligible: false, incompatibleJudgeIds: ['judge-tab'],
     });
     expect(repository.readTabulation<TabTournament>('tab-1')?.speakers[0]).toMatchObject({
       id: 'speaker-tab', teamId: 'team-tab', name: 'Oradora',
@@ -61,6 +61,7 @@ describe('canonical tournament repository', () => {
     expect(repository.readTabulation<TabTournament>('tab-1')?.judges[0]).toMatchObject({
       id: 'judge-tab', name: 'Jueza', institution: 'UMA', rating: 4,
     });
+    expect(repository.readTabulation<TabTournament>('tab-1')?.teams[0].incompatibleJudgeIds).toEqual(['judge-tab']);
   });
 
   it('does not merge entities by name or by an absent mapping', () => {
