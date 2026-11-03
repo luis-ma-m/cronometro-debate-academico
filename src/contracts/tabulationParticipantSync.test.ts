@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { applyTabulationParticipantSnapshot, sameParticipantDomain } from './tabulationParticipantSync';
+import { describe, expect, it, vi } from 'vitest';
+import { applyTabulationParticipantSnapshot, persistTabulationParticipantSnapshot, sameParticipantDomain } from './tabulationParticipantSync';
 import type { Tournament } from '../domain';
 import type { ParticipantSnapshot } from './participantSnapshot';
 
@@ -30,6 +30,34 @@ describe('Tabulation participant persistence adapter', () => {
     expect(result.activeRoundId).toBe(current.activeRoundId);
     expect(result.revision).toBe(current.revision);
     expect(result.institutions).toEqual(['Institución antigua', 'Universidad A', 'Universidad B']);
+  });
+
+  it('persists the Tabulation participant projection to Neon using the fetched revision', async () => {
+    const save = async (_token: string, revision: number, tournament: Tournament) => ({
+      ...tournament, revision: revision + 1, updatedAt: 200,
+    });
+    const saveSpy = vi.fn(save);
+    const result = await persistTabulationParticipantSnapshot('manager-token', snapshot, 7, {
+      getTournament: async () => current,
+      saveTournament: saveSpy,
+    });
+    expect(result.changed).toBe(true);
+    expect(result.tournament.revision).toBe(8);
+    expect(saveSpy).toHaveBeenCalledOnce();
+    expect(saveSpy).toHaveBeenCalledWith('manager-token', 7, expect.objectContaining({
+      teams: [expect.objectContaining({ id: 'team-canonical' })],
+      rounds: current.rounds,
+      rooms: current.rooms,
+    }));
+  });
+
+  it('does not overwrite a newer remote participant revision', async () => {
+    const save = vi.fn(async (_token: string, _revision: number, tournament: Tournament) => tournament);
+    await expect(persistTabulationParticipantSnapshot('manager-token', snapshot, 6, {
+      getTournament: async () => current,
+      saveTournament: save,
+    })).rejects.toThrow('Conflicto de sincronización');
+    expect(save).not.toHaveBeenCalled();
   });
 
   it('rejects a snapshot for another tournament', () => {
