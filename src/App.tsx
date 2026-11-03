@@ -29,6 +29,7 @@ import { createIndexedDbSyncOutboxRepository, createSyncOutbox, hashSyncPayload,
 import type { PendingSyncOperation } from './tabulation/syncOutbox';
 import { createSyncOutboxWorker } from './tabulation/syncOutboxWorker';
 import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from './tabulation/syncDispatcher';
+import { getBrowserTabStore, useTabStore } from './tabulation/useTabStore';
 
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
 const DEMO_PASSWORD = 'gestor123';
@@ -97,6 +98,8 @@ function IncompatibilityPicker({ label, options, value, onChange }: { label: str
 export default function App() {
   const roomId = window.location.pathname.match(/^\/sala\/([^/]+)/)?.[1] ?? '';
   const [data, setData] = useState<Tournament>(readDemo);
+  const tabulationStore = getBrowserTabStore();
+  const tabulationState = useTabStore(tabulationStore);
   const [session, setSession] = useState(getSession);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -152,6 +155,18 @@ export default function App() {
   const [activatingRound, setActivatingRound] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => { try { return localStorage.getItem('debate-control-timer-sound') === 'true'; } catch { return false; } });
   const controllerToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('control') ?? '';
+  const tabulationSyncLabel = useMemo(() => {
+    const local = tabulationState.tournament;
+    if (!apiConfigured) return 'No disponible en modo demostración';
+    if (!local) return 'Tabulación sin torneo abierto';
+    if (!data.remoteId) return 'Gestión sin identidad remota';
+    const linkedRemoteId = local.panelLink?.remoteId;
+    if (!linkedRemoteId) return 'Torneo de Tabulación sin vincular';
+    if (linkedRemoteId !== data.remoteId) return 'Vínculo inconsistente: identidades distintas';
+    return local.panelLink?.remoteRevision === data.revision
+      ? 'Vínculo activo · revisión alineada'
+      : 'Vínculo activo · revisión pendiente de actualizar';
+  }, [tabulationState.tournament, data.remoteId, data.revision]);
   const activeTournament = useMemo(() => {
     if (!data.remoteId) return null;
     try {
@@ -1623,7 +1638,7 @@ export default function App() {
       <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => { window.location.hash = 'overview'; setView('overview'); }} />
       <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => { window.location.hash = 'rooms'; setView('rooms'); }} />
       <NavButton icon={<ClipboardList size={18} />} label="Tabulación" selected={view === 'tabulation'} onClick={() => navigateToTabulation('tabulation')} />
-    </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
+    </nav><div className="sidebar-bottom"><div className="sidebar-sync-status" role="status" aria-live="polite"><small><b>Sincronización Gestión ↔ Tabulación</b></small><small>{tabulationSyncLabel}</small></div><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
       {preparingRoomId && <div className="notice warning-notice"><RefreshCw size={17} /><span>Guardando los cambios y preparando el enlace de la sala…</span></div>}
