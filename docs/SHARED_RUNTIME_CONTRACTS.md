@@ -143,3 +143,38 @@ Implementación: `src/contracts/sharedTournamentRepository.ts`.
 **Alcance real y límites:** este es el primer corte de repositorio compartido de runtime en el mismo navegador/origen, no todavía una base de datos relacional única ni sincronización multi-dispositivo. Las proyecciones de Gestión y Tabulación siguen siendo distintas y no se traducen automáticamente todos los equipos, jueces, actas, cruces o clasificaciones. El handoff validado sigue siendo el mecanismo de intercambio de dominio entre ellas. El espejo IndexedDB es best-effort en esta fase; el funcionamiento local-first no depende de que esté disponible. No se ha tocado Neon ni se han ejecutado migraciones.
 
 **Pruebas:** `sharedTournamentRepository.test.ts` verifica que ambas proyecciones conviven, que la hidratación no pisa claves locales existentes, que un documento corrupto se conserva y que la eliminación de una proyección no afecta a las demás.
+
+
+## Sustitución de proyecciones por repositorio canónico de entidades
+
+La implementación inicial `sharedTournamentRepository.ts` (un objeto con proyección `manager` y un diccionario `tabulation`) queda retirada. La autoridad de persistencia del estado activo en el navegador pasa a `src/contracts/canonicalTournamentRepository.ts`.
+
+### Modelo
+- Un único documento versionado (`ledu-canonical-tournament-v2`) contiene un registro normalizado de entidades `team`, `speaker`, `judge` y `venue`, junto con el estado específico de cada módulo que no pertenece a esas entidades.
+- Las entidades comunes se indexan por ámbito de torneo, tipo e ID canónico. El registro guarda los IDs de origen de Gestión y Tabulación y sus atributos especializados, además de los campos compartidos.
+- Gestión es la fuente preferente para nombre, institución y estado cuando existe un registro de Gestión explícitamente asociado.
+- Las relaciones de orador→equipo e incompatibilidades de juez se almacenan usando IDs canónicos y se traducen de vuelta a los IDs locales al reconstruir cada modelo.
+- Tabulación solo comparte una entidad con Gestión mediante `panelLink.idMap` explícito. No se infieren equivalencias por nombre, institución, orden ni coincidencia aproximada. Sin mapping, ambas identidades se conservan separadas.
+- Las entidades comunes se eliminan de los estados específicos de módulo: esos estados conservan rondas, debates, resultados, papeletas, reglas, configuración y metadatos propios.
+
+### Lecturas y escrituras migradas
+- `readDemo`/ `writeDemo` usan el repositorio canónico; el snapshot demo v1 se conserva como fuente de migración/recuperación y deja de recibir dual-writes.
+- La carga remota de Gestión escribe el snapshot validado en el repositorio canónico y reconstruye el modelo leído desde él. Los guardados remotos actualizan también la copia canónica local; el servidor sigue siendo autoridad en modo autenticado.
+- El adaptador de `useTabStore` intercepta el índice y los registros de torneo para leer/escribir el repositorio canónico. Logs append-only, copias de emergencia y metadatos de operador permanecen en sus claves auxiliares.
+- La actualización de la clave canónica notifica a ambos stores mediante eventos de almacenamiento; las revisiones/conflictos y el bloqueo de escritor de Tabulación siguen activos.
+- La migración inicial importa el documento compartido anterior, el snapshot demo v1, el índice y los torneos v1. Los bytes legacy no se borran ni se sobrescriben. Los borrados se representan con tombstones para evitar que una clave legacy vuelva a resucitar un torneo.
+- IndexedDB recibe una copia durable ordenada del documento canónico. La fachada síncrona local-first sigue siendo necesaria por el contrato síncrono actual de `TabStore`; no se presenta IndexedDB como autoridad transaccional ya migrada.
+
+### Pruebas añadidas
+- Unificación por mapping explícito de equipo, orador, juez y venue.
+- Precedencia de los campos compartidos de Gestión sin perder extensiones de Tabulación.
+- Traducción de relaciones de speaker/team e incompatibilidades por IDs canónicos.
+- Rechazo de matching por nombre o por mapping ausente.
+- Eliminación de una fuente sin borrar la entidad que sigue perteneciendo al otro módulo.
+- Migración no destructiva desde claves legacy y desde el documento compartido anterior.
+- Tombstones y preservación de un documento canónico corrupto.
+
+### Límites restantes
+- El repositorio normaliza las entidades compartidas principales, pero rondas/debates/asignaciones y resultados siguen en los estados especializados. Su identidad ya tiene contratos, pero falta migrar sus lecturas y relaciones a registros canónicos equivalentes.
+- La persistencia local sigue limitada al navegador/origen. No hay sincronización multi-dispositivo nueva ni migración a Neon en este incremento.
+- La migración automática no hace matching de participantes sin un mapping explícito. Los registros sin correspondencia permanecen separados hasta que el flujo de vinculación aporte IDs verificables.
