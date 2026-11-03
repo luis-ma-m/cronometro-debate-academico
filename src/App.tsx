@@ -281,14 +281,19 @@ export default function App() {
           const teamA = teamMap.get(debate.teamIds[0]);
           const teamB = teamMap.get(debate.teamIds[1]);
           const physicalRoomId = venueMap.get(debate.venueId);
-          if (!teamA || !teamB || !physicalRoomId) {
-            throw new Error('La ronda «' + round.name + '» contiene un debate con equipos o sala inexistentes. No se ha aplicado la importación.');
+          const favorLocalId = debate.favorTeamId ?? debate.teamIds[0];
+          const contraLocalId = favorLocalId === debate.teamIds[0] ? debate.teamIds[1] : debate.teamIds[0];
+          const teamFavorId = teamMap.get(favorLocalId);
+          const teamContraId = teamMap.get(contraLocalId);
+          const mappedJudges = debate.judgeIds.map((judgeId) => judgeMap.get(judgeId));
+          if (!teamA || !teamB || !physicalRoomId || !teamFavorId || !teamContraId
+            || mappedJudges.some((value) => !value)) {
+            throw new Error('La ronda «' + round.name + '» contiene un debate con equipos, sala o jueces inexistentes. No se ha aplicado la importación.');
           }
           const room: Room = {
             id: makeId('room'), name: tab.venues.find((venue) => venue.id === debate.venueId)?.name ?? 'Sala',
-            roundId, physicalRoomId, formatId: format.id, teamFavorId: teamMap.get(debate.favorTeamId ?? debate.teamIds[0])!,
-            teamContraId: teamMap.get(debate.favorTeamId === debate.teamIds[1] ? debate.teamIds[0] : (debate.favorTeamId ? debate.teamIds[1] : debate.teamIds[1]))!,
-            judgeIds: debate.judgeIds.map((judgeId) => judgeMap.get(judgeId)).filter((value): value is string => Boolean(value)),
+            roundId, physicalRoomId, formatId: format.id, teamFavorId, teamContraId,
+            judgeIds: mappedJudges as string[],
             status: 'ready', phases, timer: createTimer(phases), notes: '', updatedAt: Date.now(),
           };
           importedRooms.push(withRoomStatus(room, current.minimumJudgesPerRoom ?? 1));
@@ -311,7 +316,7 @@ export default function App() {
         }))],
         physicalRooms,
         rooms: [...current.rooms, ...importedRooms],
-        activeRoundId: '',
+        activeRoundId: importedRounds[0]?.id ?? '',
         revision: current.revision,
         updatedAt: Date.now(),
       };
