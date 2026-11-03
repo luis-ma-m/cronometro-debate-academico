@@ -1,20 +1,37 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { ArrowRight, Check, ClipboardList, Database, Download, Flag, Gavel, Plus, RotateCcw, ShieldCheck, Sparkles, Stethoscope, Trash2, Trophy, Upload, Users } from 'lucide-react';
+import { readManagerSession } from '../../contracts/managerSession';
 import { acknowledgeApplicationDelivery, claimPanelHandoff, claimPanelPublishAck, createDeliveryConsumerId, releaseApplicationDelivery } from '../../contracts/applicationDeliveryAdapters';
 import { tournamentChampion } from '../bracket';
+import { PanelLinkReview } from '../PanelLinkReview';
 import { parseBackupFile } from '../emergency';
 import { downloadEmergencyCopy } from '../ErrorBoundary';
 import { checkIntegrity, type IntegrityReport } from '../integrity';
 import { type LogVerification } from '../log';
 import { TabDataError } from '../normalize';
-import { type PanelHandoff } from '../panelBridge';
-import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS } from '../presets';
+import { buildPanelHandoff, clearHandoff, HANDOFF_KEY, mergeHandoff, readHandoff, readPanelPublishAcknowledgements, removePanelPublishAcknowledgements, PANEL_PUBLISH_ACK_KEY, tournamentFromHandoff, type PanelHandoff } from '../panelBridge';
+import { getTournament, replaceActiveTournament } from '../../api';
+import { ApiError } from '../../api';
+import { buildLocalPanelBase, comparePanelRevisions, hasRemoteCursorAdvanced } from '../reconciliation';
+import { clearPendingPanelReconciliation, readPanelSyncBase, readPendingPanelReconciliation, writePanelSyncBase, writePendingPanelReconciliation } from '../panelSync';
+import { ADUMA_DEFAULT_NAME, createTabTournament, PRESET_OPTIONS, presetSettings } from '../presets';
 import { roundIsComplete, type DebateOutcome } from '../results';
 import { createSampleTournament } from '../sample';
-import { MAX_BACKUPS, type TabStore, type TabStoreState } from '../store';
+import { INDEX_KEY, MAX_BACKUPS, tournamentKey, type TabStore, type TabStoreState } from '../store';
 import { eliminationRounds, isFallenAt, makeTabId, qualifyingRounds, type PresetId, type TabTournament, type PanelEntityIdMap } from '../types';
 import { BUILD_INFO, exportTournamentCopy, Field, formatNumber, IssueList, Notice, type NoticeKind } from '../ui';
 
+function findLinkedLocalTournamentId(remoteId: string): string | null {
+  try {
+    const index = JSON.parse(window.localStorage.getItem(INDEX_KEY) ?? 'null') as { tournaments?: Array<{ id?: unknown }> } | null;
+    for (const entry of index?.tournaments ?? []) {
+      if (typeof entry.id !== 'string') continue;
+      const raw = JSON.parse(window.localStorage.getItem(tournamentKey(entry.id)) ?? 'null') as { panelLink?: { remoteId?: unknown } } | null;
+      if (raw?.panelLink?.remoteId === remoteId) return entry.id;
+    }
+  } catch { /* A damaged local entry must not block the current manager snapshot. */ }
+  return null;
+}
 
 type CreatablePreset = Exclude<PresetId, 'custom'>;
 
@@ -116,12 +133,88 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     return true;
   };
 
-  // Tabulation is the source of truth. Never bootstrap an official Tabulation
-  // tournament by importing Management's active singleton.
   useEffect(() => {
-    if (state.readOnly || tournament || state.tournaments.length > 0) return;
-    setSyncStatus('Crea un torneo en Tabulación o importa una publicación oficial.');
-  }, [state.readOnly, state.tournament?.id, state.tournaments.length]);
+    if (state.readOnly) return;
+    const token = readManagerSession(window.localStorage)?.token ?? null;
+    if (!token) return;
+    const attemptKey = token + ':' + handoffVersion;
+    if (managerBootstrapAttempt.current === attemptKey) return;
+    managerBootstrapAttempt.current = attemptKey;
+    let disposed = false;
+    const bootstrapFromManager = async () => {
+      try {
+        const manager = await getTournament(token);
+        if (disposed || !manager.remoteId) return;
+        const existingId = findLinkedLocalTournamentId(manager.remoteId);
+        if (existingId) {
+          if (existingId !== tournament?.id) store.open(existingId);
+          clearHandoff(window.localStorage);
+          setSyncStatus('Torneo vinculado cargado desde el Gestor. Se comprobará su revisión vigente.');
+          return;
+        }
+        const snapshot = buildPanelHandoff(manager);
+        // A local tournament without a canonical link must not force a manual
+        // identity-mapping workflow. Import the active manager tournament
+        // automatically when the local tournament is only an empty workspace.
+        // If it already contains tournament data, ask before switching the
+        // active workspace; keep a recoverable backup before doing so.
+        if (tournament) {
+          const hasProgress = tournament.rounds.length > 0 || Boolean(tournament.draftRound)
+            || tournament.teams.length > 0 || tournament.speakers.length > 0
+            || tournament.judges.length > 0 || tournament.venues.length > 0;
+          const belongsToAnotherTournament = Boolean(
+            tournament.panelLink?.remoteId && tournament.panelLink.remoteId !== manager.remoteId,
+          );
+          if (hasProgress) {
+            const reason = belongsToAnotherTournament
+              ? 'El torneo abierto está vinculado a otra identidad de Gestión.'
+              : 'El torneo abierto contiene datos o actividad que se sustituirán en la vista activa.';
+            const confirmed = window.confirm(
+              reason + '\n\nSe activará «' + manager.tournamentName + '» desde Gestión. ' +
+              'Antes se guardará una copia recuperable del torneo local actual, que seguirá disponible en este navegador. ¿Continuar?',
+            );
+            if (!confirmed) {
+              setManualHandoff(null);
+              setSyncStatus('Se ha conservado el torneo local. No se ha cambiado el vínculo ni se han sobrescrito sus datos.');
+              return;
+            }
+            if (!store.backup('Antes de cargar desde Gestión: ' + manager.tournamentName)) {
+              setSyncStatus('No se pudo crear una copia de seguridad del torneo local. No se ha cambiado el torneo activo.');
+              notify('No se ha podido crear una copia de seguridad. Libera espacio o exporta una copia antes de cargar el torneo de Gestión.', 'error');
+              return;
+            }
+          }
+        }
+        const created = tournamentFromHandoff(snapshot, 'ledu-groups');
+        store.create(created);
+        if (!store.flush()) {
+          notify('Se ha importado el torneo del Gestor, pero no se ha podido confirmar su guardado local. No cierres esta pestaña hasta resolverlo.', 'error');
+          return;
+        }
+        writePanelSyncBase(window.localStorage, created.id, snapshot);
+        clearHandoff(window.localStorage);
+        setHandoffVersion((value) => value + 1);
+        setSyncStatus('Torneo inicial creado automáticamente con la información vigente del Gestor.');
+        notify('Tabulación ha cargado automáticamente el torneo y los participantes actuales del Gestor.');
+      } catch (error) {
+        if (!disposed) {
+          managerBootstrapAttempt.current = '';
+          setSyncStatus(error instanceof ApiError && error.code === 'UNAUTHORIZED'
+            ? 'Inicia sesión en el Gestor para cargar el torneo vigente.'
+            : 'No se pudo cargar el torneo del Gestor. Se conserva cualquier copia local y se reintentará al recuperar conexión.');
+        }
+      }
+    };
+    void bootstrapFromManager();
+    const retry = () => { managerBootstrapAttempt.current = ''; setHandoffVersion((value) => value + 1); };
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    return () => {
+      disposed = true;
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+    };
+  }, [state.readOnly, handoffVersion, tournament?.id, store, notify]);
 
   useEffect(() => {
     // The panel may send its participants while this page is open.
@@ -136,9 +229,240 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     setSyncStatus('');
   }, [tournament?.id]);
 
-  // The manager no longer acts as a source for tournament entities. Its room
-  // operations are refreshed by the manager shell; Tabulation only sends the
-  // authoritative publication and consumes operational acknowledgements.
+  useEffect(() => {
+    if (!tournament || state.readOnly) return;
+    const applyAcknowledgements = () => {
+      const pending = readPanelPublishAcknowledgements(window.localStorage)
+        .filter((ack) => ack.tabTournamentId === tournament.id);
+      if (!pending.length) return;
+      const applied: string[] = [];
+      const updates = pending.filter((ack) => tournament.rounds.some((round) => round.id === ack.tabulationRoundId));
+      if (!updates.length) return;
+      const changed = store.update((current) => ({
+        ...current,
+        rounds: current.rounds.map((round) => {
+          const ack = updates.find((item) => item.tabulationRoundId === round.id);
+          if (!ack) return round;
+          const assignmentMap = new Map(ack.debateAssignments.map((item) => [item.tabulationDebateId, item.assignmentId]));
+          return {
+            ...round,
+            managerRoundId: ack.managerRoundId,
+            debates: round.debates.map((debate) => {
+              const assignmentId = assignmentMap.get(debate.id);
+              return assignmentId ? { ...debate, managerAssignmentId: assignmentId } : debate;
+            }),
+          };
+        }),
+        panelLink: current.panelLink ? {
+          ...current.panelLink,
+          remoteRevision: Math.max(current.panelLink.remoteRevision ?? 0, ...updates.map((ack) => ack.revision)),
+          remoteUpdatedAt: Math.max(current.panelLink.remoteUpdatedAt ?? 0, ...updates.flatMap((ack) => typeof ack.updatedAt === 'number' ? [ack.updatedAt] : [])),
+        } : current.panelLink,
+      }), { type: 'panel.round.ack', message: 'Correspondencias de debates confirmadas por el Gestor y guardadas en Tabulación.' });
+      if (changed && store.flush()) {
+        applied.push(...updates.map((ack) => ack.operationId));
+        removePanelPublishAcknowledgements(window.localStorage, applied);
+        setSyncStatus('Publicación confirmada: se han vinculado los debates con sus asignaciones del Gestor.');
+      } else {
+        setSyncStatus('El Gestor confirmó la publicación, pero no se pudo guardar el mapping local. La confirmación se conserva para reintentar.');
+      }
+    };
+    applyAcknowledgements();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PANEL_PUBLISH_ACK_KEY) applyAcknowledgements();
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [tournament, state.readOnly, store]);
+
+  useEffect(() => {
+    if (!tournament || state.readOnly) return;
+    let disposed = false;
+    let running = false;
+    const consume = async () => {
+      if (disposed || running || !tabulationDeliveryConsumer.current) return;
+      running = true;
+      let delivery: Awaited<ReturnType<typeof claimPanelPublishAck>> = null;
+      const consumer = tabulationDeliveryConsumer.current;
+      try {
+        delivery = await claimPanelPublishAck(consumer);
+        if (!delivery) return;
+        const ack = delivery.payload;
+        if (readPanelPublishAcknowledgements(window.localStorage).some((item) => item.operationId === ack.operationId)) {
+          await releaseApplicationDelivery(delivery.deliveryId, consumer);
+          return;
+        }
+        const round = tournament.rounds.find((item) => item.id === ack.tabulationRoundId);
+        if (ack.tabTournamentId !== tournament.id || !round) {
+          await releaseApplicationDelivery(delivery.deliveryId, consumer);
+          return;
+        }
+        const map = new Map(ack.debateAssignments.map((item) => [item.tabulationDebateId, item.assignmentId]));
+        const applied = round.managerRoundId === ack.managerRoundId
+          && round.debates.every((debate) => !map.has(debate.id) || debate.managerAssignmentId === map.get(debate.id));
+        if (!applied) {
+          const changed = store.update((current) => ({
+            ...current,
+            rounds: current.rounds.map((item) => item.id !== ack.tabulationRoundId ? item : ({
+              ...item, managerRoundId: ack.managerRoundId,
+              debates: item.debates.map((debate) => map.has(debate.id)
+                ? { ...debate, managerAssignmentId: map.get(debate.id)! } : debate),
+            })),
+            panelLink: current.panelLink ? {
+              ...current.panelLink,
+              remoteRevision: Math.max(current.panelLink.remoteRevision ?? 0, ack.revision),
+              remoteUpdatedAt: Math.max(current.panelLink.remoteUpdatedAt ?? 0, ack.updatedAt ?? 0),
+            } : current.panelLink,
+          }), { type: 'panel.round.ack', message: 'ACK de publicación recuperado desde la cola duradera.' });
+          if (!changed || !store.flush()) {
+            await releaseApplicationDelivery(delivery.deliveryId, consumer);
+            setSyncStatus('El ACK está recibido, pero no se ha podido guardar localmente; se reintentará.');
+            return;
+          }
+        }
+        if (await acknowledgeApplicationDelivery(delivery.deliveryId, consumer)) {
+          removePanelPublishAcknowledgements(window.localStorage, [ack.operationId]);
+          setSyncStatus('Publicación confirmada y ACK persistido en Tabulación.');
+        }
+      } catch (error) {
+        if (delivery) await releaseApplicationDelivery(delivery.deliveryId, consumer).catch(() => false);
+        if (!disposed) setSyncStatus(error instanceof Error ? error.message : 'No se pudo recuperar el ACK.');
+      } finally { running = false; }
+    };
+    void consume();
+    const interval = window.setInterval(() => void consume(), 15000);
+    return () => { disposed = true; window.clearInterval(interval); };
+  }, [tournament, state.readOnly, store]);
+
+  useEffect(() => {
+    if (!tournament || !tournament.panelLink?.remoteId || state.readOnly) return;
+    const linkedRemoteId = tournament.panelLink.remoteId;
+    let disposed = false;
+    let running = false;
+    let activeController: AbortController | null = null;
+    const pull = async () => {
+      if (disposed || running || document.visibilityState === 'hidden' || !navigator.onLine) return;
+      let token = '';
+      const session = readManagerSession(window.localStorage);
+      if (!session) {
+        setSyncStatus('Inicia sesión en el Gestor para sincronizar este torneo.');
+        return;
+      }
+      token = session.token;
+      running = true;
+      const controller = new AbortController();
+      activeController = controller;
+      const timeout = window.setTimeout(() => controller.abort(), 10000);
+      try {
+        const remoteTournament = await getTournament(token, controller.signal);
+        if (disposed) return;
+        if (remoteTournament.remoteId !== linkedRemoteId) {
+          setSyncStatus('La identidad remota del Gestor ha cambiado. Se ha bloqueado la sincronización para evitar mezclar torneos. Revisa el vínculo manualmente.');
+          return;
+        }
+        const remote = buildPanelHandoff(remoteTournament);
+        const storedBase = readPanelSyncBase(window.localStorage, tournament.id);
+        const isLegacyBaseline = !storedBase;
+        const base = storedBase ?? buildLocalPanelBase(tournament);
+        if (!base) {
+          setSyncStatus('No se puede reconstruir la base de comparación. Vuelve a vincular el torneo mediante revisión manual.');
+          return;
+        }
+        if (base.tournamentId !== linkedRemoteId) {
+          setSyncStatus('La base de sincronización pertenece a otra identidad remota. Se ha bloqueado la reconciliación.');
+          return;
+        }
+        const remoteRevisionAdvanced = hasRemoteCursorAdvanced(base, remote);
+        const existingPending = readPendingPanelReconciliation(window.localStorage, tournament.id);
+        if (existingPending) {
+          setPendingReconciliation(existingPending);
+          setSyncStatus('Hay cambios remotos pendientes de revisión.');
+          return;
+        }
+        const diff = comparePanelRevisions(tournament, base, remote);
+        if (isLegacyBaseline && diff.changes.some((item) => item.change !== 'unchanged')) {
+          const pending = { base, remote, detectedAt: Date.now() };
+          writePendingPanelReconciliation(window.localStorage, tournament.id, pending);
+          setPendingReconciliation(pending);
+          setSyncStatus('Este vínculo no tenía snapshot base persistido. Revisa manualmente el primer diff antes de sincronizar.');
+          return;
+        }
+        if (!remoteRevisionAdvanced && diff.changes.every((item) => item.change === 'unchanged')) {
+          setSyncStatus('Al día · revisión remota ' + (base.revision ?? 0));
+          return;
+        }
+        if (diff.hasConflicts || diff.requiresHistoricalReview) {
+          const pending = { base, remote, detectedAt: Date.now() };
+          writePendingPanelReconciliation(window.localStorage, tournament.id, pending);
+          setPendingReconciliation(pending);
+          setSyncStatus('Cambios remotos requieren revisión: ' + diff.changes.filter((item) => item.change === 'conflict' || item.change === 'historical-review').length + ' elemento(s).');
+          return;
+        }
+        const changed = diff.changes.some((item) => item.change !== 'unchanged');
+        if (!changed) {
+          const metadataUpdated = store.update((current) => ({
+            ...current,
+            panelLink: current.panelLink ? {
+              ...current.panelLink,
+              remoteRevision: remote.revision ?? current.panelLink.remoteRevision,
+              remoteUpdatedAt: remote.updatedAt ?? current.panelLink.remoteUpdatedAt,
+            } : current.panelLink,
+          }), { type: 'panel.sync.cursor', message: 'Revisión remota confirmada sin cambios de entidades.' });
+          if (!metadataUpdated || !store.flush()) {
+            setSyncStatus('No se pudo guardar la revisión remota confirmada; se volverá a consultar.');
+            return;
+          }
+          writePanelSyncBase(window.localStorage, tournament.id, remote);
+          setSyncStatus('Al día · revisión remota ' + (remote.revision ?? 0));
+          return;
+        }
+        if (!store.backup('Antes de sincronizar revisión remota ' + remote.revision)) {
+          setSyncStatus('No se pudo crear una copia previa. Exporta una copia antes de sincronizar.');
+          return;
+        }
+        const merged = mergeHandoff(tournament, remote);
+        if (merged.issues.length) {
+          setSyncStatus('Sincronización detenida: ' + merged.issues.join(' '));
+          return;
+        }
+        if (!store.update(() => merged.tournament, { type: 'panel.sync.pull', message: 'Sincronización remota aplicada (revisión ' + remote.revision + '): ' + merged.added + ' altas y ' + merged.updated + ' actualizaciones.' })) {
+          setSyncStatus('No se pudo guardar la sincronización local. No se ha avanzado la revisión base.');
+          return;
+        }
+        if (!store.flush()) {
+          setSyncStatus('La sincronización está aplicada en memoria, pero no se ha confirmado su guardado local. La revisión base no se ha avanzado.');
+          return;
+        }
+        writePanelSyncBase(window.localStorage, tournament.id, remote);
+        setSyncStatus('Sincronizado · revisión remota ' + (remote.revision ?? 0));
+        notify('Cambios compatibles del Gestor sincronizados: ' + merged.added + ' altas y ' + merged.updated + ' actualizaciones.');
+      } catch (error) {
+        if (!disposed) setSyncStatus(error instanceof ApiError && error.code === 'UNAUTHORIZED'
+          ? 'La sesión del Gestor ha caducado. Inicia sesión de nuevo.'
+          : 'No se ha podido consultar el Gestor. Los datos locales permanecen intactos; se reintentará.');
+      } finally {
+        window.clearTimeout(timeout);
+        if (activeController === controller) activeController = null;
+        running = false;
+      }
+    };
+    void pull();
+    const interval = window.setInterval(() => void pull(), 30000);
+    const onOnline = () => void pull();
+    const onFocus = () => void pull();
+    const onVisibility = () => { if (document.visibilityState === 'visible') void pull(); };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      disposed = true;
+      activeController?.abort();
+      window.clearInterval(interval);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [tournament, state.readOnly, store, notify]);
 
   const debates = tournament?.rounds.flatMap((round) => round.debates.map((debate) => ({ debate, round }))) ?? [];
   const teams = tournament ? new Map(tournament.teams.map((team) => [team.id, team])) : new Map();
@@ -154,35 +478,145 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
     return state.readOnly;
   };
 
-  const create = (sample: boolean) => {
+  const create = async (sample: boolean) => {
     if (readOnlyNotice()) return;
-    const created = sample
-      ? createSampleTournament(presetId)
-      : createTabTournament(name, presetId);
-    store.create(created);
-    if (!store.flush()) {
-      notify('No se ha confirmado el guardado local del torneo. Resuelve el aviso antes de continuar.', 'error');
+    if (sample) {
+      store.create(createSampleTournament(presetId));
+      setName('');
+      notify('Torneo de ejemplo creado para probar la herramienta.');
+      onNavigate('rondas');
       return;
     }
-    setName('');
-    notify(sample ? 'Torneo de ejemplo creado.' : 'Torneo creado en Tabulación. Gestión no ha sustituido ni modificado ningún torneo.');
-    onNavigate('reglas');
+    const session = readManagerSession(window.localStorage);
+    if (!session?.token) {
+      notify('Para crear un torneo sincronizado, inicia sesión primero en Gestión. No se ha sustituido ningún dato.', 'error');
+      return;
+    }
+    let manager;
+    try {
+      manager = await getTournament(session.token);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'No se pudo comprobar el torneo activo de Gestión.', 'error');
+      return;
+    }
+    const nextName = name.trim() || 'Nuevo torneo';
+    const confirmed = window.confirm(
+      'Vas a sustituir el torneo activo «' + manager.tournamentName + '» por «' + nextName + '». ' +
+      'Se guardará un archivo recuperable del torneo anterior. Sus rondas, salas, asignaciones, cronómetros y actas dejarán de estar activos. ¿Continuar?',
+    );
+    if (!confirmed) return;
+
+    if (!store.backup('Antes de sustituir el torneo activo')) {
+      notify('No se ha podido crear una copia local de seguridad. No se ha iniciado la sustitución.', 'error');
+      return;
+    }
+    const draft = createTabTournament(nextName, presetId);
+    store.create(draft);
+    if (!store.flush()) {
+      notify('No se ha podido guardar el borrador local. La sustitución remota no se ha iniciado.', 'error');
+      return;
+    }
+    try {
+      const result = await replaceActiveTournament(
+        session.token,
+        manager.revision,
+        nextName,
+        presetSettings(presetId),
+        makeTabId('replace'),
+      );
+      store.update((current) => current.id !== draft.id ? current : ({
+        ...current,
+        panelLink: {
+          tournamentName: result.tournament.tournamentName,
+          linkedAt: Date.now(),
+          remoteId: result.tournament.remoteId,
+          remoteRevision: result.tournament.revision,
+          remoteUpdatedAt: result.tournament.updatedAt,
+          identityMode: 'local-canonical',
+          idMap: { teams: {}, speakers: {}, judges: {}, venues: {} },
+        },
+      }), { type: 'tournament.link', message: 'Nuevo torneo vinculado a la identidad canónica de Gestión', details: { remoteId: result.tournament.remoteId, archiveId: result.archiveId } });
+      writePanelSyncBase(window.localStorage, draft.id, buildPanelHandoff(result.tournament));
+      if (!store.flush()) {
+        notify('Gestión ha creado el nuevo torneo y archivado el anterior, pero no se ha podido confirmar el vínculo local. Conserva esta pestaña abierta y recupera el borrador desde las copias locales.', 'error');
+        return;
+      }
+      setName('');
+      notify('Nuevo torneo creado y vinculado a Gestión. El anterior queda archivado como ' + result.archiveId + '.');
+      onNavigate('reglas');
+    } catch (error) {
+      notify((error instanceof Error ? error.message : 'No se pudo sustituir el torneo en Gestión.') +
+        ' El borrador local y la copia previa se conservan; el torneo remoto anterior no se ha modificado si la operación falló.', 'error');
+    }
   };
 
-  const createAduma = (sample: boolean) => {
+  const createAduma = async (sample: boolean) => {
     if (readOnlyNotice()) return;
-    const created = sample
-      ? { ...createSampleTournament('aduma'), name: 'Ensayo ADUMA (equipos de ejemplo)' }
-      : createTabTournament(ADUMA_DEFAULT_NAME, 'aduma');
-    store.create(created);
-    if (!store.flush()) {
-      notify('El torneo se ha creado, pero el navegador no ha confirmado su guardado. Resuelve el aviso antes de continuar.', 'error');
+    if (sample) {
+      const created = { ...createSampleTournament('aduma'), name: 'Ensayo ADUMA (equipos de ejemplo)' };
+      store.create(created);
+      notify('Ensayo creado con 20 equipos, 30 jueces y 10 salas de ejemplo: genera rondas y simula resultados sin tocar el torneo real.');
+      onNavigate('rondas');
       return;
     }
-    notify(sample
-      ? 'Ensayo creado con 20 equipos, 30 jueces y 10 salas de ejemplo.'
-      : 'Torneo ADUMA creado en Tabulación. Gestión recibirá su publicación sin sustituir ningún torneo operativo.');
-    onNavigate(sample ? 'rondas' : 'participantes');
+
+    const session = readManagerSession(window.localStorage);
+    if (!session?.token) {
+      notify('Para crear un torneo ADUMA sincronizado, inicia sesión primero en Gestión. No se ha creado ningún torneo local sin vínculo.', 'error');
+      return;
+    }
+    let manager;
+    try {
+      manager = await getTournament(session.token);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'No se pudo comprobar el torneo activo de Gestión.', 'error');
+      return;
+    }
+    const confirmed = window.confirm(
+      'Vas a crear «' + ADUMA_DEFAULT_NAME + '» en Gestión y sustituir el torneo activo «' +
+      manager.tournamentName + '». Gestión archivará el torneo anterior. Tabulación guardará una copia local del torneo que tengas abierto. ¿Continuar?',
+    );
+    if (!confirmed) return;
+    if (tournament && !store.backup('Antes de crear ADUMA y sustituir el torneo activo')) {
+      notify('No se ha podido crear una copia local de seguridad. No se ha iniciado la sustitución.', 'error');
+      return;
+    }
+
+    try {
+      const result = await replaceActiveTournament(
+        session.token,
+        manager.revision,
+        ADUMA_DEFAULT_NAME,
+        presetSettings('aduma'),
+        makeTabId('replace'),
+      );
+      const created = createTabTournament(ADUMA_DEFAULT_NAME, 'aduma');
+      store.create(created);
+      store.update((current) => current.id !== created.id ? current : ({
+        ...current,
+        panelLink: {
+          tournamentName: result.tournament.tournamentName,
+          linkedAt: Date.now(),
+          remoteId: result.tournament.remoteId,
+          remoteRevision: result.tournament.revision,
+          remoteUpdatedAt: result.tournament.updatedAt,
+          identityMode: 'local-canonical',
+          idMap: { teams: {}, speakers: {}, judges: {}, venues: {} },
+        },
+      }), { type: 'tournament.link', message: 'Torneo ADUMA creado y vinculado automáticamente a Gestión', details: {
+        remoteId: result.tournament.remoteId, archiveId: result.archiveId,
+      } });
+      writePanelSyncBase(window.localStorage, created.id, buildPanelHandoff(result.tournament));
+      if (!store.flush()) {
+        notify('Gestión ha creado ADUMA y archivado el torneo anterior, pero Tabulación no ha podido confirmar el vínculo local. Recarga para recuperar el torneo desde Gestión.', 'error');
+        return;
+      }
+      notify('Torneo ADUMA creado y vinculado automáticamente. El torneo anterior queda archivado como ' + result.archiveId + '. Añade ahora equipos, jueces, incompatibilidades y salas.');
+      onNavigate('participantes');
+    } catch (error) {
+      notify((error instanceof Error ? error.message : 'No se pudo crear ADUMA en Gestión.') +
+        ' No se ha creado una copia local sin vínculo.', 'error');
+    }
   };
 
   const createFromPanel = async () => {
