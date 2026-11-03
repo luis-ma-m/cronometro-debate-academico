@@ -1382,6 +1382,33 @@ export default function App() {
       ? 'Participantes enviados mediante la cola duradera. Se conserva también el buzón compatible para versiones anteriores.'
       : 'Participantes enviados por el mecanismo compatible; la cola duradera no está disponible. Si no se ha abierto, entra en /tabulacion.');
   };
+  const claimCurrentTournamentOutbox = async (consumer: string, tournamentId: string) => {
+    // Old deliveries survive a local tournament replacement in IndexedDB.
+    // ACK only deliveries that cannot belong to the active canonical tournament;
+    // never release them, otherwise the oldest stale item would block the queue.
+    while (true) {
+      const delivery = await claimPanelOutbox(consumer);
+      if (!delivery) break;
+      if (delivery.payload.tournamentId === tournamentId) {
+        return { delivery, outbox: delivery.payload };
+      }
+      const acknowledged = await acknowledgeApplicationDelivery(delivery.deliveryId, consumer);
+      if (!acknowledged) {
+        await releaseApplicationDelivery(delivery.deliveryId, consumer).catch(() => false);
+        throw new Error('Se ha encontrado una propuesta antigua, pero no se ha podido retirarla de la cola. Reintenta la operación.');
+      }
+    }
+
+    const legacyOutbox = readOutbox(localStorage);
+    if (legacyOutbox && legacyOutbox.tournamentId !== tournamentId) {
+      // The compatibility mailbox is a single slot, so discard it only after
+      // proving its identity is missing or belongs to a different tournament.
+      clearOutbox(localStorage);
+      return { delivery: null, outbox: null };
+    }
+    return { delivery: null, outbox: legacyOutbox };
+  };
+
   const loadFromTabulation = async () => {
     let sourceData = data;
     // The manager shell can be behind Neon even when Tabulation has already
@@ -1416,19 +1443,27 @@ export default function App() {
     }
     let delivery: Awaited<ReturnType<typeof claimPanelOutbox>> = null;
     let consumer = '';
+    let outbox: ReturnType<typeof readOutbox> = null;
     try {
       consumer = deliveryConsumerId();
-      delivery = await claimPanelOutbox(consumer);
+      if (apiConfigured) {
+        const claimed = await claimCurrentTournamentOutbox(consumer, sourceData.remoteId ?? '');
+        delivery = claimed.delivery;
+        outbox = claimed.outbox;
+      } else {
+        delivery = await claimPanelOutbox(consumer);
+        outbox = delivery?.payload ?? readOutbox(localStorage);
+      }
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se pudo leer la cola duradera.');
       return;
     }
-    const outbox = delivery?.payload ?? readOutbox(localStorage);
-    if (!outbox) { setServerError('No hay ninguna ronda enviada desde la tabulación. En /tabulacion, abre la ronda y pulsa «Más acciones» → «Enviar al panel de cronómetros».'); return; }
+    if (!outbox) { setServerError('No hay ninguna ronda enviada desde la tabulación para el torneo activo. En /tabulacion, actualiza el vínculo, abre la ronda y vuelve a enviarla.'); return; }
     const release = async () => { if (delivery) await releaseApplicationDelivery(delivery.deliveryId, consumer).catch(() => false); };
     if (apiConfigured && (!outbox.tournamentId || outbox.tournamentId !== sourceData.remoteId)) {
-      await release();
-      setServerError('La propuesta no pertenece a la identidad canónica del torneo activo. Actualiza el vínculo en Tabulación y vuelve a enviarla.');
+      if (delivery) await acknowledgeApplicationDelivery(delivery.deliveryId, consumer).catch(() => false);
+      else clearOutbox(localStorage);
+      setServerError('La propuesta no contiene una identidad canónica verificable. Se ha retirado sin aplicarla; actualiza el vínculo en Tabulación y vuelve a enviarla.');
       return;
     }
     if (apiConfigured && (outbox.basePanelRevision !== sourceData.revision
@@ -1470,22 +1505,25 @@ export default function App() {
     }
     let delivery: Awaited<ReturnType<typeof claimPanelOutbox>> = null;
     let consumer = '';
+    let outbox: ReturnType<typeof readOutbox> = null;
     try {
       consumer = deliveryConsumerId();
-      delivery = await claimPanelOutbox(consumer);
+      const claimed = await claimCurrentTournamentOutbox(consumer, data.remoteId);
+      delivery = claimed.delivery;
+      outbox = claimed.outbox;
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se pudo leer la cola duradera.');
       return;
     }
     const release = async () => { if (delivery) await releaseApplicationDelivery(delivery.deliveryId, consumer).catch(() => false); };
-    const outbox = delivery?.payload ?? readOutbox(localStorage);
     if (!outbox) {
-      setServerError('No hay ninguna propuesta de ronda. En Tabulación, revisa la ronda y utiliza «Enviar al panel de cronómetros».');
+      setServerError('No hay ninguna propuesta de ronda para el torneo activo. En Tabulación, actualiza el vínculo y utiliza «Enviar al panel de cronómetros».');
       return;
     }
     if (!outbox.tournamentId || outbox.tournamentId !== data.remoteId) {
-      await release();
-      setServerError('La propuesta no contiene la identidad canónica de este torneo o pertenece a otro torneo. Actualiza el vínculo y vuelve a generarla.');
+      if (delivery) await acknowledgeApplicationDelivery(delivery.deliveryId, consumer).catch(() => false);
+      else clearOutbox(localStorage);
+      setServerError('La propuesta no contiene una identidad canónica verificable. Se ha retirado sin publicarla; actualiza el vínculo y vuelve a generarla.');
       return;
     }
     const nextRoundNumber = Math.max(0, ...data.rounds.map((round) => round.number)) + 1;
