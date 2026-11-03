@@ -207,7 +207,7 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
           // phases, Tabulation identity metadata and audit records in Neon.
           const operation = {
             protocolVersion: 1 as const,
-            operationId: globalThis.crypto.randomUUID(),
+            operationId: 'tab-round-' + pending.round.id,
             tournamentId: savedTournament.panelLink.remoteId,
             entityType: 'round' as const,
             entityId: pending.round.id,
