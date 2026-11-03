@@ -20,3 +20,15 @@ CREATE TABLE IF NOT EXISTS tabulation_publication_operations (
   snapshot_sha256 char(64) NOT NULL CHECK (snapshot_sha256 ~ '^[a-f0-9]{64}$'),
   created_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Records which authoritative Tabulation revision was last imported into the
+-- Management singleton, without coupling the two tournament identity domains.
+CREATE TABLE IF NOT EXISTS tabulation_manager_imports (
+  manager_tournament_id text PRIMARY KEY CHECK (length(btrim(manager_tournament_id)) BETWEEN 1 AND 200),
+  tab_tournament_id text NOT NULL CHECK (length(btrim(tab_tournament_id)) BETWEEN 1 AND 200),
+  imported_revision bigint NOT NULL CHECK (imported_revision >= 1),
+  snapshot_sha256 char(64) NOT NULL CHECK (snapshot_sha256 ~ '^[a-f0-9]{64}$'),
+  imported_by text NOT NULL,
+  imported_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS tabulation_manager_imports_tab_idx ON tabulation_manager_imports(tab_tournament_id);
