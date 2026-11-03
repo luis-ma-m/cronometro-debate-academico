@@ -3,7 +3,7 @@ import { TabulationRulesPanel } from './components/TabulationRulesPanel';
 import { clearManagerSession, readManagerSession, writeManagerSession } from './contracts/managerSession';
 import { activeTournamentContext } from './contracts/activeTournamentContext';
 import { createApplicationBootstrap } from './contracts/applicationBootstrap';
-import { SHARED_TOURNAMENT_KEY } from './contracts/sharedTournamentRepository';
+import { CANONICAL_TOURNAMENT_KEY } from './contracts/canonicalTournamentRepository';
 import { acknowledgeApplicationDelivery, claimPanelOutbox, createDeliveryConsumerId, enqueuePanelHandoff, releaseApplicationDelivery } from './contracts/applicationDeliveryAdapters';
 import { participantSnapshotFromManager } from './contracts/participantSnapshot';
 import { TabulationTournamentRanking } from './components/TabulationTournamentRanking';
@@ -168,7 +168,7 @@ export default function App() {
   // mode, refresh the manager projection when safe; never replace an unsaved draft.
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key === SHARED_TOURNAMENT_KEY && demoMode && !hasUnsavedRef.current) {
+      if (event.key === CANONICAL_TOURNAMENT_KEY && demoMode && !hasUnsavedRef.current) {
         setData(readDemo());
       }
     };
