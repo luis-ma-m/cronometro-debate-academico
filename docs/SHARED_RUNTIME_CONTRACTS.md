@@ -155,6 +155,7 @@ La implementación inicial `sharedTournamentRepository.ts` (un objeto con proyec
 - Gestión es la fuente preferente para nombre, institución y estado cuando existe un registro de Gestión explícitamente asociado.
 - Las relaciones de orador→equipo e incompatibilidades de juez se almacenan usando IDs canónicos y se traducen de vuelta a los IDs locales al reconstruir cada modelo.
 - Tabulación solo comparte una entidad con Gestión mediante `panelLink.idMap` explícito. No se infieren equivalencias por nombre, institución, orden ni coincidencia aproximada. Sin mapping, ambas identidades se conservan separadas.
+- En modo demo/local, un `panelLink` explícito coloca ambas partes en el mismo ámbito local aunque no exista `remoteId`; el mapping sigue siendo obligatorio para unir cada entidad. Sin `panelLink`, Tabulación conserva su propio ámbito.
 - Las entidades comunes se eliminan de los estados específicos de módulo: esos estados conservan rondas, debates, resultados, papeletas, reglas, configuración y metadatos propios.
 
 ### Lecturas y escrituras migradas
