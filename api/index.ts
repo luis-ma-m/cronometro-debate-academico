@@ -1140,6 +1140,39 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     }
     validateTournamentInput(payload.tournament);
     const tournament = payload.tournament as Tournament;
+    if (current.remoteId) {
+      try {
+        const imported = await getPool().query(
+          "SELECT tab_tournament_id, imported_revision FROM tabulation_manager_imports WHERE manager_tournament_id = $1",
+          [current.remoteId],
+        );
+        if (imported.rows[0]) {
+          const normalizedRounds = (rounds: Round[]) => rounds.map(({ id, number, name, defaultFormatId, scoreType }) =>
+            ({ id, number, name, defaultFormatId, scoreType: scoreType ?? "qualifying" }));
+          const masterChanged = canonicalJson({
+            tournamentName: tournament.tournamentName,
+            teams: tournament.teams,
+            speakers: tournament.speakers ?? [],
+            judges: tournament.judges,
+            rounds: normalizedRounds(tournament.rounds),
+          }) !== canonicalJson({
+            tournamentName: current.tournamentName,
+            teams: current.teams,
+            speakers: current.speakers ?? [],
+            judges: current.judges,
+            rounds: normalizedRounds(current.rounds),
+          });
+          if (masterChanged) {
+            throw new ApiError("TABULATION_AUTHORITATIVE", "Este torneo está vinculado a una publicación de Tabulación. Los equipos, oradores, jueces y rondas solo pueden modificarse desde Tabulación; Gestión conserva las asignaciones y los cronómetros.", 409);
+          }
+        }
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        if ((error as { code?: string })?.code !== "42P01") throw error;
+        // A preview without migration 0025 retains legacy behavior; the new
+        // snapshot API itself remains unavailable until the migration is applied.
+      }
+    }
     const phases = Array.isArray(tournament.formatPhases) && tournament.formatPhases.length
       ? tournament.formatPhases
       : tournament.formats[0]?.phases || defaultPhases();
