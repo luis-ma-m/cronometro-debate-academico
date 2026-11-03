@@ -40,7 +40,7 @@ function seedFrom(text: string): number {
   return /^\d{1,9}$/.test(trimmed) ? Number(trimmed) : hashSeed(trimmed);
 }
 
-export function RoundsView({ tournament, outcomes, update, notify, store, projection, onProject, onNavigate, managerSessionToken }: ViewProps & {
+export function RoundsView({ tournament, outcomes, update, notify, store, projection, onProject, onNavigate, managerSessionToken, syncParticipants }: ViewProps & {
   projection: boolean;
   onProject: () => void;
   onNavigate: (view: string) => void;
@@ -180,7 +180,17 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
       notify('La ronda se ha confirmado, pero el navegador no la ha podido guardar: todavía no se exporta. Resuelve el aviso de guardado y pulsa «Descargar ZIP».', 'error');
       return;
     }
-    const savedTournament = store.getState().tournament;
+    let savedTournament = store.getState().tournament;
+    if (savedTournament?.panelLink?.remoteId) {
+      const synced = await syncParticipants();
+      if (!synced) {
+        notify('Ronda confirmada y guardada localmente, pero no se ha enviado: primero hay que confirmar los participantes, jueces y salas en Gestión.', 'error');
+        exportZip(pending.round.id, true);
+        setScreenId(pending.round.id);
+        return;
+      }
+      savedTournament = store.getState().tournament;
+    }
     let deliveryQueued = false;
     let deliveryIssue = '';
     if (savedTournament?.panelLink?.remoteId) {
@@ -328,7 +338,9 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
   };
 
   const sendToPanel = async (target: TabRound) => {
-    const { outbox, issues, warnings } = buildOutbox(tournament, target.id);
+    if (!(await syncParticipants())) { notify('No se puede enviar la ronda: los participantes, jueces y salas todavía no están confirmados en Gestión. Revisa el estado de sincronización y vuelve a intentarlo.', 'error'); return; }
+    const latest = store.getState().tournament ?? tournament;
+    const { outbox, issues, warnings } = buildOutbox(latest, target.id);
     if (!outbox) { notify(issues.join(' '), 'error'); return; }
     let queued = false;
     let legacy = false;

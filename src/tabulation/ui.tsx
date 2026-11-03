@@ -17,6 +17,8 @@ export interface ViewProps {
   store: TabStore;
   /** Session from the same-origin organisation panel; absent when not signed in. */
   managerSessionToken?: string;
+  /** Flushes the canonical participant snapshot before publishing a round. */
+  syncParticipants: () => Promise<boolean>;
 }
 
 /** Version of the running build, shown so everyone can tell which code is in use on the day. */

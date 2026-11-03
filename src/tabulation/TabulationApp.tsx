@@ -68,6 +68,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   const [participantSyncPending, setParticipantSyncPending] = useState(false);
   const participantSyncTimer = useRef<number | null>(null);
   const participantSyncInFlight = useRef(false);
+  const participantSyncPromise = useRef<Promise<boolean> | null>(null);
   const participantSyncBlocked = useRef(false);
   const tabSettingsRevision = useRef<number | null>(null);
   const tabSettingsHydrated = useRef(false);
@@ -307,12 +308,13 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     setNotice(null);
   }, []);
   const notify = useCallback((message: string, kind: NoticeKind = 'success') => setNotice({ message, kind }), []);
-  const syncParticipantDomain = useCallback(async () => {
+  const syncParticipantDomain = useCallback(async (): Promise<boolean> => {
     const token = managerSession?.token;
     const local = store.getState().tournament;
     const remoteId = local?.panelLink?.remoteId;
     const storedIdMap = local?.panelLink?.idMap;
-    if (!apiConfigured || !token || !local || !remoteId || !storedIdMap || participantSyncInFlight.current || participantSyncBlocked.current) return;
+    if (!apiConfigured || !token || !local || !remoteId || !storedIdMap || participantSyncBlocked.current) return false;
+    if (participantSyncInFlight.current) return participantSyncPromise.current ?? false;
     const idMap: PanelEntityIdMap = local.panelLink?.identityMode === 'local-canonical' ? {
       teams: { ...storedIdMap.teams, ...Object.fromEntries(local.teams.map((item) => [item.id, item.id])) },
       speakers: { ...storedIdMap.speakers, ...Object.fromEntries(local.speakers.map((item) => [item.id, item.id])) },
@@ -320,32 +322,39 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       venues: { ...storedIdMap.venues, ...Object.fromEntries(local.venues.map((item) => [item.id, item.id])) },
     } : storedIdMap;
     participantSyncInFlight.current = true;
-    try {
-      const context = activeTournamentContext(remoteId, local.panelLink?.remoteRevision ?? 0, 'server', local.panelLink?.remoteUpdatedAt ?? local.updatedAt);
-      const snapshot = participantSnapshotFromTabulation(context, {
-        teams: local.teams, speakers: local.speakers, judges: local.judges, venues: local.venues,
-      }, idMap);
-      const result = await persistTabulationParticipantSnapshot(token, snapshot, local.panelLink?.remoteRevision, {
-        getTournament,
-        saveTournament,
-      });
-      const saved = result.tournament;
-      window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
-      setParticipantSyncPending(false);
-      store.update((current) => ({
-        ...current,
-        panelLink: current.panelLink ? { ...current.panelLink, remoteRevision: saved.revision, remoteUpdatedAt: saved.updatedAt } : current.panelLink,
-      }), { type: 'sync.ack', message: result.changed ? 'Participantes confirmados en Neon' : 'Participantes ya sincronizados', details: { revision: saved.revision } });
-      if (result.changed) store.log({ type: 'sync.ack', message: 'Participantes, oradores, jueces e incompatibilidades confirmados en Neon', details: { revision: saved.revision, tournamentId: remoteId } });
-      setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se han podido sincronizar los participantes con Neon.';
-      if (message.startsWith('Conflicto de sincronización:')) participantSyncBlocked.current = true;
-      store.logError(message);
-      notify(message + ' Los cambios locales siguen guardados en este navegador.', 'error');
-    } finally {
-      participantSyncInFlight.current = false;
-    }
+    const run = (async () => {
+      try {
+        const context = activeTournamentContext(remoteId, local.panelLink?.remoteRevision ?? 0, 'server', local.panelLink?.remoteUpdatedAt ?? local.updatedAt);
+        const snapshot = participantSnapshotFromTabulation(context, {
+          teams: local.teams, speakers: local.speakers, judges: local.judges, venues: local.venues,
+        }, idMap);
+        const result = await persistTabulationParticipantSnapshot(token, snapshot, local.panelLink?.remoteRevision, {
+          getTournament,
+          saveTournament,
+        });
+        const saved = result.tournament;
+        window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
+        setParticipantSyncPending(false);
+        store.update((current) => ({
+          ...current,
+          panelLink: current.panelLink ? { ...current.panelLink, remoteRevision: saved.revision, remoteUpdatedAt: saved.updatedAt } : current.panelLink,
+        }), { type: 'sync.ack', message: result.changed ? 'Participantes confirmados en Neon' : 'Participantes ya sincronizados', details: { revision: saved.revision } });
+        if (result.changed) store.log({ type: 'sync.ack', message: 'Participantes, oradores, jueces e incompatibilidades confirmados en Neon', details: { revision: saved.revision, tournamentId: remoteId } });
+        setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'No se han podido sincronizar los participantes con Neon.';
+        if (message.startsWith('Conflicto de sincronización:')) participantSyncBlocked.current = true;
+        store.logError(message);
+        notify(message + ' Los cambios locales siguen guardados en este navegador.', 'error');
+        return false;
+      } finally {
+        participantSyncInFlight.current = false;
+      }
+    })();
+    participantSyncPromise.current = run;
+    try { return await run; }
+    finally { if (participantSyncPromise.current === run) participantSyncPromise.current = null; }
   }, [managerSession?.token, store, notify]);
   const syncTabulationSettings = useCallback(async () => {
     const token = managerSession?.token;
