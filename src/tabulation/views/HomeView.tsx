@@ -153,17 +153,37 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           return;
         }
         const snapshot = buildPanelHandoff(manager);
-        // Never silently replace an existing local tournament with a newly imported
-        // copy: expose the manager snapshot so the operator can explicitly review
-        // and establish the identity mapping for the existing tournament.
+        // A local tournament without a canonical link must not force a manual
+        // identity-mapping workflow. Import the active manager tournament
+        // automatically when the local tournament is only an empty workspace.
+        // If it already contains tournament data, ask before switching the
+        // active workspace; keep a recoverable backup before doing so.
         if (tournament) {
-          setManualHandoff(snapshot);
-          setSyncStatus(tournament.panelLink?.remoteId
-            ? 'El torneo abierto está vinculado a otra identidad. Revisa el vínculo antes de continuar.'
-            : tournament.panelLink
-              ? 'El torneo conserva un vínculo antiguo sin identidad verificable. Crea una copia vinculada nueva desde Gestión.'
-              : 'Torneo local detectado sin vínculo. Revisa las correspondencias para vincularlo al torneo activo de Gestión.');
-          return;
+          const hasProgress = tournament.rounds.length > 0 || Boolean(tournament.draftRound)
+            || tournament.teams.length > 0 || tournament.speakers.length > 0
+            || tournament.judges.length > 0 || tournament.venues.length > 0;
+          const belongsToAnotherTournament = Boolean(
+            tournament.panelLink?.remoteId && tournament.panelLink.remoteId !== manager.remoteId,
+          );
+          if (hasProgress) {
+            const reason = belongsToAnotherTournament
+              ? 'El torneo abierto está vinculado a otra identidad de Gestión.'
+              : 'El torneo abierto contiene datos o actividad que se sustituirán en la vista activa.';
+            const confirmed = window.confirm(
+              reason + '\n\nSe activará «' + manager.tournamentName + '» desde Gestión. ' +
+              'Antes se guardará una copia recuperable del torneo local actual, que seguirá disponible en este navegador. ¿Continuar?',
+            );
+            if (!confirmed) {
+              setManualHandoff(null);
+              setSyncStatus('Se ha conservado el torneo local. No se ha cambiado el vínculo ni se han sobrescrito sus datos.');
+              return;
+            }
+            if (!store.backup('Antes de cargar desde Gestión: ' + manager.tournamentName)) {
+              setSyncStatus('No se pudo crear una copia de seguridad del torneo local. No se ha cambiado el torneo activo.');
+              notify('No se ha podido crear una copia de seguridad. Libera espacio o exporta una copia antes de cargar el torneo de Gestión.', 'error');
+              return;
+            }
+          }
         }
         const created = tournamentFromHandoff(snapshot, 'ledu-groups');
         store.create(created);
