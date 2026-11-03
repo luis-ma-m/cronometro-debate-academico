@@ -6,7 +6,7 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId, type PanelEntityIdMap } from './types';
-import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament, publishTabulationSnapshot } from '../api';
+import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament, publishTabulationSnapshot, getAuthoritativeTabulationSnapshot } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
 import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
@@ -514,6 +514,39 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     };
   }, [managerSession?.token, refreshRemoteParticipants]);
   const authoritativePublication = useRef<{ timerId: string; inFlight: boolean; expectedRevision: number } | null>(null);
+  const hydrateAuthoritativeSnapshot = useCallback(async () => {
+    const token = managerSession?.token;
+    const local = store.getState().tournament;
+    if (!apiConfigured || !token || !local || local.sample) return false;
+    try {
+      const remote = await getAuthoritativeTabulationSnapshot(token, local.id);
+      if (!remote) return false;
+      if (remote.tabTournamentId !== local.id || remote.snapshot.id !== local.id
+        || remote.revision < 1 || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256)) {
+        throw new Error('La publicación remota de Tabulación no supera la comprobación de identidad e integridad.');
+      }
+      if (remote.revision <= (authoritativePublication.current?.timerId === local.id ? authoritativePublication.current.expectedRevision : 0)) return true;
+      if (store.getState().status === 'dirty' || store.getState().status === 'conflict') {
+        notify('Existe una revisión de Tabulación más reciente en Neon, pero hay cambios locales pendientes. No se ha sobrescrito ninguna versión.', 'warning');
+        return false;
+      }
+      store.backup('Antes de recuperar la revisión oficial ' + remote.revision);
+      const currentId = store.getState().tournament?.id;
+      if (currentId === local.id) {
+        store.update(() => ({ ...remote.snapshot, revision: Math.max(remote.snapshot.revision, remote.revision) }), {
+          type: 'sync.remote', message: 'Snapshot autoritativo recuperado desde Neon',
+          details: { revision: remote.revision, sha256: remote.snapshotSha256 },
+        });
+        if (!store.flush()) throw new Error('No se ha podido guardar la revisión recuperada en el navegador.');
+      }
+      authoritativePublication.current = { timerId: local.id, inFlight: false, expectedRevision: remote.revision };
+      setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
+      return true;
+    } catch (error) {
+      store.logError(error instanceof Error ? error.message : 'No se pudo recuperar el snapshot oficial de Tabulación.');
+      return false;
+    }
+  }, [managerSession?.token, store, notify]);
   const publishAuthoritativeSnapshot = useCallback(async (candidate: import('./types').TabTournament) => {
     const token = managerSession?.token;
     if (!apiConfigured || !token || candidate.sample) return;
@@ -549,10 +582,18 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     if (!tournament || state.readOnly || state.status !== 'saved' || tournament.sample) return;
     const token = managerSession?.token;
     if (!apiConfigured || !token) return;
-    if (authoritativePublication.current?.timerId === tournament.id
-      && authoritativePublication.current.expectedRevision >= tournament.revision) return;
-    void publishAuthoritativeSnapshot(tournament);
-  }, [tournament?.id, tournament?.revision, state.status, state.readOnly, managerSession?.token, publishAuthoritativeSnapshot]);
+    let disposed = false;
+    const run = async () => {
+      const recovered = await hydrateAuthoritativeSnapshot();
+      if (disposed || recovered) return;
+      const cursor = authoritativePublication.current;
+      if (cursor?.timerId === tournament.id && cursor.expectedRevision >= tournament.revision) return;
+      await publishAuthoritativeSnapshot(tournament);
+    };
+    void run();
+    return () => { disposed = true; };
+  }, [tournament?.id, tournament?.revision, state.status, state.readOnly, managerSession?.token, hydrateAuthoritativeSnapshot, publishAuthoritativeSnapshot]);
+
   const update = useCallback<ViewProps['update']>((mutator, meta) => {
     const before = store.getState().tournament;
     const applied = store.update(mutator, meta);
