@@ -373,3 +373,10 @@ export type AuthoritativeTabulationListing = {
 };
 export const listAuthoritativeTabulationSnapshots = (token: string) =>
   apiCall<AuthoritativeTabulationListing[]>('listAuthoritativeTabulationSnapshots', { token });
+
+export const recordTabulationSnapshotImport = (
+  token: string,
+  input: { managerTournamentId: string; tabTournamentId: string; revision: number; snapshotSha256: string },
+) => apiCall<{ managerTournamentId: string; tabTournamentId: string; revision: number; snapshotSha256: string; importedAt: number }>(
+  'recordTabulationSnapshotImport', { token, ...input },
+);
