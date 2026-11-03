@@ -51,7 +51,7 @@ async function executeJournaled(
     tournamentId: operation.tournamentId,
     entityType: operation.entityType,
     entityId: operation.entityId,
-    operation: operation.operation,
+    operation: operation.operation as 'publish-round' | 'replace-acta',
     baseRevision: operation.baseRevision,
     payload: operation.payload as Record<string, unknown>,
     payloadHash: operation.payloadHash,
