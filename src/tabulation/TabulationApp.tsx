@@ -593,7 +593,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
           : state.lastSavedAt ? 'Guardado en este navegador · hace ' + Math.max(0, Math.round((now - state.lastSavedAt) / 1000)) + ' s'
             : tournament ? 'Guardado en este navegador' : 'Sin torneo abierto';
 
-  const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store, managerSessionToken: applicationBootstrap.session?.token } : null;
+  const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store, managerSessionToken: applicationBootstrap.session?.token, syncParticipants: syncParticipantDomain } : null;
 
   return <div className={'app-shell tab-shell' + (projection ? ' tab-projection' : '') + (embedded ? ' tab-embedded' : '')}>
     {!embedded && <aside className="sidebar">
