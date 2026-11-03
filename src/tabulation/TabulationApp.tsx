@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ErrorInfo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo } from 'react';
 import { ChevronRight, ClipboardList, Download, ExternalLink, House, Lock, Projector, ScrollText, Shuffle, SlidersHorizontal, Trophy, Users, X } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { tournamentProgress } from './progress';
@@ -6,10 +6,11 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
-import { apiConfigured } from '../api';
+import { apiConfigured, getTournament, saveTournament } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
 import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
+import { applyTabulationParticipantSnapshot, sameParticipantDomain } from '../contracts/tabulationParticipantSync';
 import { activeTournamentContext } from '../contracts/activeTournamentContext';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
 import type { PendingSyncOperation } from './syncOutbox';
@@ -62,6 +63,9 @@ function TabulationShell() {
   const [managerSession, setManagerSession] = useState(() => readManagerSession(window.localStorage));
   const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   const [managerConnection, setManagerConnection] = useState<{ connected: boolean; checkedAt: number | null; lastSuccessAt: number | null }>({ connected: false, checkedAt: null, lastSuccessAt: null });
+  const participantSyncTimer = useRef<number | null>(null);
+  const participantSyncInFlight = useRef(false);
+  const participantSyncBlocked = useRef(false);
   const tournament = state.tournament;
   const activeTournament = useMemo(() => {
     const remoteId = tournament?.panelLink?.remoteId;
@@ -255,16 +259,86 @@ function TabulationShell() {
     setNotice(null);
   }, []);
   const notify = useCallback((message: string, kind: NoticeKind = 'success') => setNotice({ message, kind }), []);
+  const syncParticipantDomain = useCallback(async () => {
+    const token = managerSession?.token;
+    const local = store.getState().tournament;
+    const remoteId = local?.panelLink?.remoteId;
+    const idMap = local?.panelLink?.idMap;
+    if (!apiConfigured || !token || !local || !remoteId || !idMap || participantSyncInFlight.current || participantSyncBlocked.current) return;
+    participantSyncInFlight.current = true;
+    try {
+      const remote = await getTournament(token);
+      if (remote.remoteId !== remoteId) throw new Error('El torneo remoto activo no coincide con el torneo enlazado en Tabulación.');
+      const context = activeTournamentContext(remoteId, remote.revision, 'server', remote.updatedAt);
+      const snapshot = participantSnapshotFromTabulation(context, {
+        teams: local.teams, speakers: local.speakers, judges: local.judges, venues: local.venues,
+      }, idMap);
+      const candidate = applyTabulationParticipantSnapshot(remote, snapshot);
+      if (sameParticipantDomain(remote, candidate)) {
+        window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
+        store.update((current) => ({
+          ...current,
+          panelLink: current.panelLink ? { ...current.panelLink, remoteRevision: remote.revision, remoteUpdatedAt: remote.updatedAt } : current.panelLink,
+        }));
+        return;
+      }
+      const expectedRevision = local.panelLink?.remoteRevision;
+      if (typeof expectedRevision === 'number' && remote.revision !== expectedRevision) {
+        participantSyncBlocked.current = true;
+        throw new Error('Conflicto de sincronización: Neon ha cambiado desde la última versión confirmada. No he sobrescrito los cambios remotos; revisa o vuelve a enlazar el torneo antes de reintentar.');
+      }
+      const saved = await saveTournament(token, remote.revision, candidate);
+      window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
+      store.update((current) => ({
+        ...current,
+        panelLink: current.panelLink ? { ...current.panelLink, remoteRevision: saved.revision, remoteUpdatedAt: saved.updatedAt } : current.panelLink,
+      }), { type: 'sync.ack', message: 'Participantes confirmados en Neon', details: { revision: saved.revision } });
+      store.log({ type: 'sync.ack', message: 'Participantes, oradores, jueces e incompatibilidades confirmados en Neon', details: { revision: saved.revision, tournamentId: remoteId } });
+      setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se han podido sincronizar los participantes con Neon.';
+      store.logError(message);
+      notify(message + ' Los cambios locales siguen guardados en este navegador.', 'error');
+    } finally {
+      participantSyncInFlight.current = false;
+    }
+  }, [managerSession?.token, store, notify]);
   const update = useCallback<ViewProps['update']>((mutator, meta) => {
+    const before = store.getState().tournament;
     const applied = store.update(mutator, meta);
     if (!applied) {
       const current = store.getState();
       notify(current.readOnly ? 'Esta pestaña es de solo lectura: pulsa «Tomar el control» para hacer cambios.'
         : current.status === 'conflict' ? 'Resuelve antes el conflicto con la otra pestaña.'
           : current.error ?? 'No se ha podido aplicar el cambio.', 'error');
+    } else {
+      const after = store.getState().tournament;
+      const participantsChanged = Boolean(before && after && (
+        before.teams !== after.teams || before.speakers !== after.speakers
+        || before.judges !== after.judges || before.venues !== after.venues
+      ));
+      if (participantsChanged && after?.panelLink?.remoteId) {
+        participantSyncBlocked.current = false;
+        try { window.localStorage.setItem('ledu-tabulation-participant-sync-pending:' + after.panelLink.remoteId, String(Date.now())); } catch { /* IndexedDB remains the local data store. */ }
+        if (participantSyncTimer.current !== null) window.clearTimeout(participantSyncTimer.current);
+        participantSyncTimer.current = window.setTimeout(() => { participantSyncTimer.current = null; void syncParticipantDomain(); }, 800);
+      }
     }
     return applied;
-  }, [store, notify]);
+  }, [store, notify, syncParticipantDomain]);
+  useEffect(() => {
+    const remoteId = store.getState().tournament?.panelLink?.remoteId;
+    if (!remoteId || !window.localStorage.getItem('ledu-tabulation-participant-sync-pending:' + remoteId)) return;
+    void syncParticipantDomain();
+    const retry = () => { participantSyncBlocked.current = false; void syncParticipantDomain(); };
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+      if (participantSyncTimer.current !== null) window.clearTimeout(participantSyncTimer.current);
+    };
+  }, [store, syncParticipantDomain]);
   const onViewError = useCallback((error: Error, info: ErrorInfo) => {
     store.logError('Fallo de la pantalla: ' + error.message, { stack: (info.componentStack ?? '').slice(0, 2000) });
   }, [store]);
