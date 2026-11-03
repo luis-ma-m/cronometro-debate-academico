@@ -16,6 +16,7 @@ import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOut
 import type { PendingSyncOperation } from './syncOutbox';
 import { createSyncOutboxWorker } from './syncOutboxWorker';
 import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from './syncDispatcher';
+import { buildPanelHandoff, mergeHandoff, tournamentFromHandoff } from './panelBridge';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 
@@ -67,6 +68,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   const participantSyncTimer = useRef<number | null>(null);
   const participantSyncInFlight = useRef(false);
   const participantSyncBlocked = useRef(false);
+  const remoteParticipantRefreshInFlight = useRef(false);
   const tournament = state.tournament;
   const activeTournament = useMemo(() => {
     const remoteId = tournament?.panelLink?.remoteId;
@@ -294,6 +296,67 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       participantSyncInFlight.current = false;
     }
   }, [managerSession?.token, store, notify]);
+  const refreshRemoteParticipants = useCallback(async () => {
+    const token = managerSession?.token;
+    if (!apiConfigured || !token || remoteParticipantRefreshInFlight.current) return;
+    remoteParticipantRefreshInFlight.current = true;
+    try {
+      const remote = await getTournament(token);
+      if (!remote.remoteId) return;
+      const handoff = buildPanelHandoff(remote);
+      const local = store.getState().tournament;
+      if (!local) {
+        store.create(tournamentFromHandoff(handoff, 'ledu-groups'));
+        return;
+      }
+      if (local.panelLink?.remoteId !== remote.remoteId) return;
+      if (local.panelLink.remoteRevision === remote.revision
+        && local.panelLink.remoteUpdatedAt === remote.updatedAt) return;
+      const pendingKey = 'ledu-tabulation-participant-sync-pending:' + remote.remoteId;
+      if (window.localStorage.getItem(pendingKey)) {
+        setParticipantSyncPending(true);
+        participantSyncBlocked.current = true;
+        notify('Neon contiene una revisión más reciente mientras hay cambios locales pendientes. No he fusionado ni sobrescrito ninguna versión; resuelve el conflicto antes de continuar.', 'error');
+        return;
+      }
+      const merged = mergeHandoff(local, handoff);
+      if (merged.issues.length) {
+        notify(merged.issues.join(' '), 'error');
+        return;
+      }
+      if (merged.added || merged.updated || local.panelLink?.remoteRevision !== remote.revision) {
+        store.update(() => merged.tournament, {
+          type: 'sync.remote',
+          message: 'Participantes actualizados desde Neon',
+          details: { revision: remote.revision, added: merged.added, updated: merged.updated },
+        });
+        store.log({ type: 'sync.remote', message: 'Snapshot de participantes recibido desde Neon', details: { revision: remote.revision, added: merged.added, updated: merged.updated } });
+      }
+    } catch (error) {
+      store.logError(error instanceof Error ? error.message : 'No se pudo actualizar el snapshot remoto de participantes.');
+    } finally {
+      remoteParticipantRefreshInFlight.current = false;
+    }
+  }, [managerSession?.token, store, notify]);
+  useEffect(() => {
+    if (!apiConfigured || !managerSession?.token) return;
+    let disposed = false;
+    const refresh = () => {
+      if (!disposed && document.visibilityState !== 'hidden') void refreshRemoteParticipants();
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [managerSession?.token, refreshRemoteParticipants]);
   const update = useCallback<ViewProps['update']>((mutator, meta) => {
     const before = store.getState().tournament;
     const applied = store.update(mutator, meta);
