@@ -1383,8 +1383,33 @@ export default function App() {
       : 'Participantes enviados por el mecanismo compatible; la cola duradera no está disponible. Si no se ha abierto, entra en /tabulacion.');
   };
   const loadFromTabulation = async () => {
-    const round = data.rounds.find((item) => item.id === activeRound);
-    if (!round) { setServerError('Selecciona antes una ronda.'); return; }
+    let sourceData = data;
+    // The manager shell can be behind Neon even when Tabulation has already
+    // persisted its participant snapshot. Validate against the canonical,
+    // freshly-read aggregate, never against a stale React snapshot.
+    if (apiConfigured) {
+      if (!session) { setServerError('Inicia sesión para comprobar los participantes y las salas sincronizados en Gestión.'); return; }
+      if (hasUnsavedRef.current || hasUnsavedChanges || saving) {
+        setServerError('Guarda o descarta primero los cambios pendientes de Gestión. No puedo refrescar el torneo sin arriesgar esos cambios.');
+        return;
+      }
+      try {
+        sourceData = await getTournament(session.token);
+        if (sourceData.remoteId !== data.remoteId) {
+          setServerError('La identidad del torneo activo ha cambiado. Recarga Gestión antes de cargar la ronda.');
+          return;
+        }
+        setData(sourceData);
+        setLastSyncedAt(Date.now());
+        setConnected(true);
+      } catch (error) {
+        setServerError('No se ha podido actualizar el torneo desde Neon antes de cargar la ronda: '
+          + (error instanceof Error ? error.message : 'error de conexión.'));
+        return;
+      }
+    }
+    const round = sourceData.rounds.find((item) => item.id === activeRound);
+    if (!round) { setServerError('La ronda seleccionada ya no existe en la versión actual de Gestión. Actualiza la vista y vuelve a intentarlo.'); return; }
     if (pendingLoadedOutboxDelivery.current) {
       setServerError('Ya hay una propuesta cargada pendiente de guardar. Guarda los cambios antes de cargar otra.');
       return;
@@ -1401,20 +1426,39 @@ export default function App() {
     const outbox = delivery?.payload ?? readOutbox(localStorage);
     if (!outbox) { setServerError('No hay ninguna ronda enviada desde la tabulación. En /tabulacion, abre la ronda y pulsa «Más acciones» → «Enviar al panel de cronómetros».'); return; }
     const release = async () => { if (delivery) await releaseApplicationDelivery(delivery.deliveryId, consumer).catch(() => false); };
-    const result = applyOutboxToPanel(data, round.id, outbox, { makeId });
-    if (!result.rooms) { await release(); setServerError('No se puede cargar «' + outbox.roundName + '» en ' + round.name + ': ' + result.issues.join(' ')); return; }
+    if (apiConfigured && (!outbox.tournamentId || outbox.tournamentId !== sourceData.remoteId)) {
+      await release();
+      setServerError('La propuesta no pertenece a la identidad canónica del torneo activo. Actualiza el vínculo en Tabulación y vuelve a enviarla.');
+      return;
+    }
+    if (apiConfigured && (outbox.basePanelRevision !== sourceData.revision
+      || (outbox.basePanelUpdatedAt !== undefined && outbox.basePanelUpdatedAt !== sourceData.updatedAt))) {
+      await release();
+      setServerError('La propuesta se generó con una versión anterior de Gestión. Se ha actualizado el panel; vuelve a Tabulación, espera a que los participantes estén sincronizados y envía de nuevo la ronda.');
+      return;
+    }
+    const result = applyOutboxToPanel(sourceData, round.id, outbox, { makeId });
+    if (!result.rooms) {
+      await release();
+      const participantIssues = result.issues.filter((issue) => issue.includes('no existe en el panel'));
+      if (participantIssues.length) {
+        setServerError('No se puede cargar la ronda porque faltan participantes o salas en el torneo canónico de Gestión. La propuesta no se ha aplicado. Comprueba el estado de sincronización de participantes en Tabulación y vuelve a enviar la ronda. Detalle: ' + result.issues.join(' '));
+      } else {
+        setServerError('No se puede cargar «' + outbox.roundName + '» en ' + round.name + ': ' + result.issues.join(' '));
+      }
+      return;
+    }
     if (!result.changed) { await release(); setTabulationNotice(round.name + ' ya coincide con «' + outbox.roundName + '» de la tabulación.'); return; }
-    const otherTournament = outbox.panelTournamentName && outbox.panelTournamentName !== data.tournamentName
-      ? '\n\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».' : '';
+    const otherTournament = outbox.panelTournamentName && outbox.panelTournamentName !== sourceData.tournamentName
+      ? '\\n\\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».': '';
     if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament
-      + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) { await release(); return; }
+      + '\\n\\n' + result.summary.join('\\n') + '\\n\\nLas salas de esta ronda que no aparecen quedarán vacías.')) { await release(); return; }
     const rooms = result.rooms;
     updateData((current) => ({ ...current, rooms }));
     if (delivery) pendingLoadedOutboxDelivery.current = { deliveryId: delivery.deliveryId, createdAt: delivery.createdAt, tabulationRoundId: delivery.payload.tabulationRoundId };
     setServerError('');
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios»; la entrega se confirmará al guardar.');
   };
-
   const publishFromTabulation = async () => {
     if (!apiConfigured || !session || !data.remoteId) {
       setServerError('La publicación remota requiere una sesión del gestor y una identidad canónica de torneo.');
