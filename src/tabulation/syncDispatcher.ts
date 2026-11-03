@@ -1,4 +1,4 @@
-import { ApiError, ackSyncOperation, previewTabulationActa, publishTabulationRound, recordSyncOperation, saveTabulationActa } from '../api';
+import { ApiError, ackSyncOperation, getTabulationSyncOperationStatus, previewTabulationActa, publishTabulationRound, recordSyncOperation, saveTabulationActa } from '../api';
 import { appendPanelPublishAcknowledgement } from './panelBridge';
 import { enqueuePanelPublishAck } from '../contracts/applicationDeliveryAdapters';
 import type { PendingSyncOperation } from './syncOutbox';
@@ -87,7 +87,9 @@ async function executeJournaled(
 
 async function dispatchRound(token: string, operation: PendingSyncOperation): Promise<SyncDispatchResult> {
   const payload = operation.payload as Record<string, unknown>;
-  const published = await publishTabulationRound(token, {
+  const previous = await getTabulationSyncOperationStatus(token, operation);
+  const published = previous.found ? previous.response as Awaited<ReturnType<typeof publishTabulationRound>>
+    : await publishTabulationRound(token, {
     protocolVersion: 1, operationId: operation.operationId, tournamentId: operation.tournamentId,
     entityType: 'round', entityId: operation.entityId, operation: 'publish-round',
     baseRevision: operation.baseRevision, payload, payloadHash: operation.payloadHash,
@@ -114,6 +116,8 @@ async function dispatchRound(token: string, operation: PendingSyncOperation): Pr
 async function dispatchActa(token: string, operation: PendingSyncOperation): Promise<SyncDispatchResult> {
   const payload = operation.payload;
   if (!record(payload)) return { status: 'failed', error: { code: 'INVALID_PAYLOAD', message: 'El payload del acta pendiente no es válido.' } };
+  const previous = await getTabulationSyncOperationStatus(token, operation);
+  if (previous.found) return { status: 'acknowledged', response: previous.response };
   if (payload.mode === 'first-save') {
     if (payload.assignmentId !== operation.entityId || !record(payload.source)) {
       return { status: 'failed', error: { code: 'INVALID_PAYLOAD', message: 'La primera publicación no coincide con la asignación pendiente.' } };
