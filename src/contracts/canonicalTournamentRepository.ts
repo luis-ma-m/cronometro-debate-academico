@@ -66,8 +66,11 @@ function parseDocument(raw: string | null): CanonicalDocument | null {
   } catch { return null; }
 }
 
-function sharedFields(kind: EntityKind, data: JsonRecord) {
-  if (kind === 'speaker') return { name: typeof data.name === 'string' ? data.name : undefined };
+function sharedFields(kind: EntityKind, data: JsonRecord, mapRelation: (kind: EntityKind, id: string) => string = (_kind, id) => id) {
+  if (kind === 'speaker') return {
+    name: typeof data.name === 'string' ? data.name : undefined,
+    teamId: typeof data.teamId === 'string' ? mapRelation('team', data.teamId) : undefined,
+  };
   if (kind === 'venue') return {
     name: typeof data.name === 'string' ? data.name : undefined,
     active: typeof data.active === 'boolean' ? data.active : undefined,
@@ -76,6 +79,9 @@ function sharedFields(kind: EntityKind, data: JsonRecord) {
     name: typeof data.name === 'string' ? data.name : undefined,
     institution: typeof data.institution === 'string' ? data.institution : undefined,
     active: typeof data.active === 'boolean' ? data.active : undefined,
+    incompatibleJudgeIds: Array.isArray(data.incompatibleJudgeIds)
+      ? data.incompatibleJudgeIds.filter((id): id is string => typeof id === 'string').map((id) => mapRelation('judge', id))
+      : undefined,
   };
 }
 
@@ -87,6 +93,7 @@ function upsertSource(
   source: 'manager' | 'tabulation',
   sourceId: string,
   data: JsonRecord,
+  sharedOverride?: CanonicalEntity['shared'],
 ): void {
   const key = entityKey(scope, kind, canonicalId);
   const previous = document.entities[key];
@@ -99,7 +106,7 @@ function upsertSource(
     tabulationSourceId: source === 'tabulation' ? sourceId : previous?.tabulationSourceId,
     managerData, tabulationData,
     // Gestión owns shared identity fields whenever it has an explicit record.
-    shared: sharedFields(kind, preferred),
+    shared: source === 'manager' || !previous?.managerData ? (sharedOverride ?? sharedFields(kind, preferred)) : previous.shared,
   };
 }
 
@@ -188,7 +195,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
         if (typeof data.id !== 'string') continue;
         const key = entityKey(scope, kind, data.id);
         seen.add(key);
-        upsertSource(document, scope, kind, data.id, 'manager', data.id, data);
+        upsertSource(document, scope, kind, data.id, 'manager', data.id, data, sharedFields(kind, data));
       }
       pruneSourceEntities(document, scope, 'manager', seen);
     }, now);
@@ -198,8 +205,17 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     const document = readDocument();
     if (!document.managerState) return null;
     const scope = document.managerScope;
+    const sourceId = (kind: EntityKind, canonical: string) =>
+      listSource(document, scope, kind, 'manager').find((entity) => entity.canonicalId === canonical)?.managerSourceId ?? canonical;
     const entities = (kind: EntityKind) => listSource(document, scope, kind, 'manager')
-      .map((entity) => ({ ...(entity.managerData ?? {}), ...entity.shared, id: entity.managerSourceId ?? entity.canonicalId }));
+      .map((entity) => {
+        const data = { ...(entity.managerData ?? {}), ...entity.shared, id: entity.managerSourceId ?? entity.canonicalId };
+        if ((kind === 'team' || kind === 'judge') && Array.isArray(entity.shared.incompatibleJudgeIds)) {
+          data.incompatibleJudgeIds = entity.shared.incompatibleJudgeIds.map((id) => sourceId('judge', id));
+        }
+        if (kind === 'speaker' && typeof entity.shared.teamId === 'string') data.teamId = sourceId('team', entity.shared.teamId);
+        return data;
+      });
     return {
       ...clone(document.managerState),
       teams: entities('team'),
@@ -226,7 +242,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
         const canonicalId = mapTabCanonical(kind, data.id, tournament);
         const key = entityKey(scope, kind, canonicalId);
         seen.add(key);
-        upsertSource(document, scope, kind, canonicalId, 'tabulation', data.id, data);
+        upsertSource(document, scope, kind, canonicalId, 'tabulation', data.id, data, sharedFields(kind, data, (relationKind, relationId) => mapTabCanonical(relationKind, relationId, tournament)));
       }
       pruneSourceEntities(document, scope, 'tabulation', seen);
     }, now);
@@ -237,8 +253,17 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     const state = document.tabulationStates[id];
     if (!state) return null;
     const scope = typeof state.__canonicalScope === 'string' ? state.__canonicalScope : 'tabulation:' + id;
+    const sourceId = (kind: EntityKind, canonical: string) =>
+      listSource(document, scope, kind, 'tabulation').find((entity) => entity.canonicalId === canonical)?.tabulationSourceId ?? canonical;
     const entities = (kind: EntityKind) => listSource(document, scope, kind, 'tabulation')
-      .map((entity) => ({ ...(entity.tabulationData ?? {}), ...entity.shared, id: entity.tabulationSourceId ?? entity.canonicalId }));
+      .map((entity) => {
+        const data = { ...(entity.tabulationData ?? {}), ...entity.shared, id: entity.tabulationSourceId ?? entity.canonicalId };
+        if ((kind === 'team' || kind === 'judge') && Array.isArray(entity.shared.incompatibleJudgeIds)) {
+          data.incompatibleJudgeIds = entity.shared.incompatibleJudgeIds.map((id) => sourceId('judge', id));
+        }
+        if (kind === 'speaker' && typeof entity.shared.teamId === 'string') data.teamId = sourceId('team', entity.shared.teamId);
+        return data;
+      });
     return {
       ...Object.fromEntries(Object.entries(state).filter(([key]) => key !== '__canonicalScope')),
       teams: entities('team'),
