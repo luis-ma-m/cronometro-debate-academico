@@ -776,7 +776,7 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
     const nextGeneration = oldGeneration + 1;
     const now = Date.now();
 
-    const [actaSources, settingsVersions, settingsOperations, debateAssignments, roundMetadata, identityMaps, syncOperations, shortLinks] = await Promise.all([
+    const [actaSources, settingsVersions, settingsOperations, debateAssignments, roundMetadata, identityMaps, syncOperations, shortLinks, shortLinkEvents, idempotencyRows, tabulationSettings] = await Promise.all([
       client.query("SELECT * FROM tabulation_acta_sources WHERE tournament_id=$1::uuid ORDER BY created_at,id", [oldTournamentId]),
       client.query("SELECT * FROM tabulation_settings_versions ORDER BY revision"),
       client.query("SELECT * FROM tabulation_settings_operations ORDER BY created_at"),
@@ -784,7 +784,10 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
       client.query("SELECT * FROM tabulation_round_metadata WHERE tournament_id=$1::uuid ORDER BY manager_round_id", [oldTournamentId]),
       client.query("SELECT * FROM tabulation_entity_identity_maps WHERE tournament_id=$1::uuid ORDER BY tab_tournament_id,entity_kind,local_id", [oldTournamentId]),
       client.query("SELECT * FROM sync_operations WHERE tournament_id=$1::uuid ORDER BY created_at,operation_id", [oldTournamentId]),
-      client.query("SELECT to_jsonb(link) AS row FROM tabulation_acta_short_links link ORDER BY created_at,id").catch(() => ({ rows: [] })),
+      client.query("SELECT * FROM acta_short_links ORDER BY created_at,id"),
+      client.query("SELECT * FROM acta_short_link_events ORDER BY occurred_at,id"),
+      client.query("SELECT * FROM idempotency_keys ORDER BY created_at,operation_key"),
+      client.query("SELECT * FROM tabulation_settings WHERE id=1"),
     ]);
     const snapshot = {
       schemaVersion: 1,
@@ -798,6 +801,9 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
       tabulationEntityIdentityMaps: identityMaps.rows,
       syncOperations: syncOperations.rows,
       shortLinks: shortLinks.rows,
+      shortLinkEvents: shortLinkEvents.rows,
+      idempotencyKeys: idempotencyRows.rows,
+      tabulationSettings: tabulationSettings.rows,
     };
     const snapshotJson = JSON.stringify(snapshot);
     const snapshotHash = sha256(snapshotJson);
@@ -819,6 +825,7 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
     await client.query("DELETE FROM sync_operations");
     await client.query("DELETE FROM tabulation_settings_operations");
     await client.query("DELETE FROM tabulation_settings_versions");
+    await client.query("UPDATE acta_short_links SET revoked_at=COALESCE(revoked_at,now()),updated_at=now() WHERE tournament_id=$1", [oldTournamentId]);
     await client.query("DELETE FROM scorecard_category_scores");
     await client.query("DELETE FROM scorecard_team_scores");
     await client.query("DELETE FROM scorecard_judges");
