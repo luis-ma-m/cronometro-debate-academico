@@ -14,7 +14,7 @@ CREATE INDEX IF NOT EXISTS tabulation_tournaments_updated_idx ON tabulation_tour
 
 CREATE TABLE IF NOT EXISTS tabulation_publication_operations (
   operation_id varchar(128) PRIMARY KEY CHECK (operation_id ~ '^[a-zA-Z0-9_-]{8,128}$'),
-  tab_tournament_id text NOT NULL REFERENCES tabulation_tournaments(tab_tournament_id) ON DELETE RESTRICT,
+  tab_tournament_id text NOT NULL CHECK (length(btrim(tab_tournament_id)) BETWEEN 1 AND 200),
   base_revision bigint NOT NULL CHECK (base_revision >= 0),
   committed_revision bigint NOT NULL CHECK (committed_revision >= 1),
   snapshot_sha256 char(64) NOT NULL CHECK (snapshot_sha256 ~ '^[a-f0-9]{64}$'),
