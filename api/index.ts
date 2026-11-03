@@ -425,6 +425,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "listActaShortLinks": await requireSession(payload.token); return listActaShortLinks(payload);
     case "updateActaShortLinkExpiry": await requireSession(payload.token); return updateActaShortLinkExpiry(payload);
     case "revokeActaShortLinks": await requireSession(payload.token); return revokeActaShortLinks(payload);
+    case "listAuthoritativeTabulationSnapshots":
+      await requireSession(payload.token);
+      return listAuthoritativeTabulationSnapshots();
     case "publishTabulationSnapshot":
       await requireSession(payload.token);
       return publishAuthoritativeTabulationSnapshot(payload, str(payload.token));
@@ -552,6 +555,22 @@ async function getAuthoritativeTabulationSnapshot(tabTournamentId: string): Prom
     schemaVersion: num(row.schema_version), revision: num(row.revision), snapshot, snapshotSha256: digest, updatedAt: num(row.updated_at) };
 }
 
+
+async function listAuthoritativeTabulationSnapshots(): Promise<Array<Pick<AuthoritativeTabulationDocument, "tabTournamentId" | "tournamentName" | "schemaVersion" | "revision" | "snapshotSha256" | "updatedAt">>> {
+  const result = await getPool().query(
+    `SELECT tab_tournament_id, tournament_name, schema_version, revision, snapshot_sha256,
+            floor(extract(epoch FROM updated_at) * 1000)::bigint AS updated_at
+       FROM tabulation_tournaments ORDER BY updated_at DESC`,
+  );
+  return result.rows.map((row) => ({
+    tabTournamentId: str(row.tab_tournament_id),
+    tournamentName: str(row.tournament_name),
+    schemaVersion: num(row.schema_version),
+    revision: num(row.revision),
+    snapshotSha256: str(row.snapshot_sha256),
+    updatedAt: num(row.updated_at),
+  }));
+}
 
 async function publishAuthoritativeTabulationSnapshot(payload: Record<string, unknown>, actor: string) {
   const input = validateAuthoritativeTabulationSnapshot(payload);
