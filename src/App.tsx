@@ -13,7 +13,7 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory, listAuthoritativeTabulationSnapshots, getAuthoritativeTabulationSnapshot } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory, listAuthoritativeTabulationSnapshots, getAuthoritativeTabulationSnapshot, recordTabulationSnapshotImport } from './api';
 import type { RoundActivationPreview, RoomConnectionStatus, TabulationActaHistory as TabulationActaHistoryData } from './api';
 import { ActaVersionDetails } from './components/ActaVersionDetails';
 import { readDemo, writeDemo } from './demo';
@@ -328,6 +328,22 @@ export default function App() {
         throw new Error('Tabulación ha publicado una revisión nueva durante la importación. Actualiza la lista y vuelve a revisar antes de continuar.');
       }
       const saved = await saveTournament(session.token, current.revision, imported);
+      let provenanceWarning = '';
+      if (saved.remoteId) {
+        try {
+          await recordTabulationSnapshotImport(session.token, {
+            managerTournamentId: saved.remoteId,
+            tabTournamentId: published.tabTournamentId,
+            revision: published.revision,
+            snapshotSha256: published.snapshotSha256,
+          });
+        } catch (error) {
+          provenanceWarning = ' No se pudo guardar la marca de procedencia de la revisión importada: '
+            + (error instanceof Error ? error.message : 'error desconocido') + '.';
+        }
+      } else {
+        provenanceWarning = ' Gestión no devolvió una identidad canónica; no se pudo registrar la procedencia de la importación.';
+      }
       writeCanonicalManager(saved);
       setData(saved);
       setSelectedRound(importedRounds[0]?.id ?? '');
@@ -338,7 +354,7 @@ export default function App() {
       setServerError('');
       setTabulationNotice('Importado «' + published.tournamentName + '» · revisión ' + published.revision +
         '. Se han creado ' + importedRounds.length + ' rondas y ' + importedRooms.length +
-        ' asignaciones. El historial anterior se conserva como inactivo; las actas maestras siguen en Tabulación.');
+        ' asignaciones. El historial anterior se conserva como inactivo; las actas maestras siguen en Tabulación.' + provenanceWarning);
       await refreshTabulationPublications();
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se pudo importar el snapshot autoritativo.');
