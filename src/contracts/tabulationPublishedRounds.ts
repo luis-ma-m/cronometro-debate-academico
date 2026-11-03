@@ -99,7 +99,9 @@ export function mergePublishedTabulationRounds(
   snapshotRows: TabulationPublishedRoundRow[],
   now = Date.now(),
 ): TabTournament {
-  const relevant = snapshotRows.filter((row) => row.tabTournamentId === tournament.id);
+  // The TabTournament id is browser-local in legacy installations. The manager tournament is the canonical scope,
+  // so a second device must hydrate rows even when its local TabTournament id differs from the publishing device.
+  const relevant = snapshotRows;
   if (!relevant.length) return tournament;
   const firstMap = parseRecord(relevant[0].entityIdMap) as unknown as PanelEntityIdMap | null;
   if (!firstMap || !record(firstMap.teams) || !record(firstMap.speakers) || !record(firstMap.judges) || !record(firstMap.venues)) {
