@@ -119,7 +119,7 @@ describe("transactional Tabulation round publication", () => {
   it("commits the round, assignments, audit trail, revision and idempotent ACK atomically", async () => {
     const result = await publishTabulationRound(await operation());
     expect(result).toMatchObject({
-      tournamentId, roundId: "tab-round-1", roundNumber: 1, roundName: "Ronda 1",
+      tournamentId, roundId: expect.stringMatching(/^[0-9a-f-]{36}$/i), roundNumber: 1, roundName: "Ronda 1",
       roundKind: "qualifying", revision: 8, updatedAt: baseUpdatedAt + 1, operationId: "publish-operation-0001",
     });
     expect(query.mock.calls.some(([sql]) => String(sql).startsWith("SELECT t.id, t.name") && String(sql).includes("team_judge_incompatibilities"))).toBe(true);
