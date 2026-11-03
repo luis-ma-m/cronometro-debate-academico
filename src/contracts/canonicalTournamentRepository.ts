@@ -30,6 +30,7 @@ interface CanonicalDocument {
   managerScope: string;
   managerState: JsonRecord | null;
   tabulationStates: Record<string, JsonRecord>;
+  deletedTabulationIds: Record<string, true>;
   tabulationIndex: { activeId: string | null; tournaments: Array<{ id: string; name: string; updatedAt: number }> };
   entities: Record<string, CanonicalEntity>;
 }
@@ -41,7 +42,7 @@ export interface CanonicalStorage {
 
 const emptyDocument = (): CanonicalDocument => ({
   schemaVersion: 2, revision: 0, updatedAt: 0, managerScope: 'manager:local',
-  managerState: null, tabulationStates: {}, tabulationIndex: { activeId: null, tournaments: [] }, entities: {},
+  managerState: null, tabulationStates: {}, deletedTabulationIds: {}, tabulationIndex: { activeId: null, tournaments: [] }, entities: {},
 });
 const object = (value: unknown): value is JsonRecord => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -53,13 +54,14 @@ function parseDocument(raw: string | null): CanonicalDocument | null {
     const value = JSON.parse(raw) as Partial<CanonicalDocument>;
     if (value.schemaVersion !== 2 || !Number.isSafeInteger(value.revision) || (value.revision ?? -1) < 0
       || !Number.isSafeInteger(value.updatedAt) || (value.updatedAt ?? -1) < 0
-      || !object(value.entities) || !object(value.tabulationStates) || !object(value.tabulationIndex)
+      || !object(value.entities) || !object(value.tabulationStates) || !object(value.deletedTabulationIds ?? {}) || !object(value.tabulationIndex)
       || !Array.isArray(value.tabulationIndex.tournaments)) return null;
     return {
       schemaVersion: 2, revision: value.revision!, updatedAt: value.updatedAt!,
       managerScope: typeof value.managerScope === 'string' ? value.managerScope : 'manager:local',
       managerState: object(value.managerState) ? value.managerState : null,
       tabulationStates: value.tabulationStates as Record<string, JsonRecord>,
+      deletedTabulationIds: (value.deletedTabulationIds ?? {}) as Record<string, true>,
       tabulationIndex: value.tabulationIndex as CanonicalDocument['tabulationIndex'],
       entities: value.entities as Record<string, CanonicalEntity>,
     };
@@ -237,6 +239,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     updateDocument(storage, (document) => {
       const { teams = [], speakers = [], judges = [], venues = [], ...state } = tournament;
       document.tabulationStates[tournament.id] = { ...clone(state as unknown as JsonRecord), __canonicalScope: scope };
+      delete document.deletedTabulationIds[tournament.id];
       const entries: Array<[EntityKind, Array<JsonRecord>]> = [
         ['team', teams as unknown as JsonRecord[]],
         ['speaker', speakers as unknown as JsonRecord[]],
@@ -257,6 +260,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
 
   function readTabulation<T = TabTournament>(id: string): T | null {
     const document = readDocument();
+    if (document.deletedTabulationIds[id]) return null;
     const state = document.tabulationStates[id];
     if (!state) return null;
     const scope = typeof state.__canonicalScope === 'string' ? state.__canonicalScope : 'tabulation:' + id;
@@ -288,16 +292,21 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     return clone(readDocument().tabulationIndex);
   }
 
+  function isTabulationDeleted(id: string): boolean {
+    return readDocument().deletedTabulationIds[id] === true;
+  }
+
   function deleteTabulation(id: string): void {
     updateDocument(storage, (document) => {
       delete document.tabulationStates[id];
+      document.deletedTabulationIds[id] = true;
       // Entity history is retained; deleting an index entry never destroys canonical entities.
       document.tabulationIndex.tournaments = document.tabulationIndex.tournaments.filter((entry) => entry.id !== id);
       if (document.tabulationIndex.activeId === id) document.tabulationIndex.activeId = document.tabulationIndex.tournaments[0]?.id ?? null;
     }, now);
   }
 
-  return { readManager, writeManager, readTabulation, writeTabulation, readIndex, writeIndex, deleteTabulation };
+  return { readManager, writeManager, readTabulation, writeTabulation, readIndex, writeIndex, deleteTabulation, isTabulationDeleted };
 }
 
 export function getBrowserCanonicalTournamentRepository() {
@@ -344,6 +353,7 @@ export function migrateLegacyTournamentStorage(storage: Storage): void {
   const migratedEntries: CanonicalDocument['tabulationIndex']['tournaments'] = [];
   for (const key of keys) {
     const id = key.slice(TAB_PREFIX.length);
+    if (repository.isTabulationDeleted(id)) continue;
     let tournament = repository.readTabulation<TabTournament>(id);
     if (!tournament) {
       try {
@@ -379,6 +389,7 @@ export function createCanonicalTabulationStorage(legacy: Storage): Storage {
       }
       if (isTournamentKey(key)) {
         const id = key.slice(TAB_PREFIX.length);
+        if (repository.isTabulationDeleted(id)) return null;
         const canonical = repository.readTabulation(id);
         if (canonical) return JSON.stringify(canonical);
       }
