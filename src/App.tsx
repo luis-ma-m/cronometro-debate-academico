@@ -3,6 +3,7 @@ import { TabulationRulesPanel } from './components/TabulationRulesPanel';
 import { clearManagerSession, readManagerSession, writeManagerSession } from './contracts/managerSession';
 import { activeTournamentContext } from './contracts/activeTournamentContext';
 import { createApplicationBootstrap } from './contracts/applicationBootstrap';
+import { SHARED_TOURNAMENT_KEY } from './contracts/sharedTournamentRepository';
 import { acknowledgeApplicationDelivery, claimPanelOutbox, createDeliveryConsumerId, enqueuePanelHandoff, releaseApplicationDelivery } from './contracts/applicationDeliveryAdapters';
 import { participantSnapshotFromManager } from './contracts/participantSnapshot';
 import { TabulationTournamentRanking } from './components/TabulationTournamentRanking';
@@ -162,6 +163,18 @@ export default function App() {
     activeTournament,
     participants: managerParticipants,
   }), [session, activeTournament, managerParticipants]);
+
+  // A second browser tab may update the shared local tournament document. In demo
+  // mode, refresh the manager projection when safe; never replace an unsaved draft.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === SHARED_TOURNAMENT_KEY && demoMode && !hasUnsavedRef.current) {
+        setData(readDemo());
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [demoMode]);
 
   const reloadAdmin = useCallback(async () => {
     if (demoMode) return;
