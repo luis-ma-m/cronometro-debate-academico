@@ -312,13 +312,22 @@ export function migrateLegacyTournamentStorage(storage: Storage): void {
   const canonicalRaw = storage.getItem(CANONICAL_TOURNAMENT_KEY);
   if (canonicalRaw !== null && !parseDocument(canonicalRaw)) return;
   const repository = createCanonicalTournamentRepository(storage);
+  let legacyShared: { manager?: unknown; tabulation?: Record<string, string> } | null = null;
+  try { legacyShared = JSON.parse(storage.getItem(LEGACY_SHARED_KEY) ?? 'null') as typeof legacyShared; }
+  catch { /* Invalid legacy bytes are left untouched for manual recovery. */ }
   if (!repository.readManager()) {
     let legacyManager: unknown = null;
     try {
-      const shared = JSON.parse(storage.getItem(LEGACY_SHARED_KEY) ?? 'null') as { manager?: unknown } | null;
-      legacyManager = shared?.manager ?? JSON.parse(storage.getItem(LEGACY_MANAGER_KEY) ?? 'null');
+      legacyManager = legacyShared?.manager ?? JSON.parse(storage.getItem(LEGACY_MANAGER_KEY) ?? 'null');
     } catch { /* Invalid legacy bytes are left untouched for manual recovery. */ }
     if (object(legacyManager)) repository.writeManager(legacyManager as unknown as Tournament);
+  }
+  // The previous projection adapter could hold Tabulation keys only inside its
+  // shared document. Restore those bytes only when the original key is absent.
+  for (const [key, value] of Object.entries(legacyShared?.tabulation ?? {})) {
+    if (key.startsWith(TAB_PREFIX) || key === TAB_INDEX_KEY) {
+      if (storage.getItem(key) === null && typeof value === 'string') storage.setItem(key, value);
+    }
   }
 
   let index: CanonicalDocument['tabulationIndex'] | null = null;
@@ -347,11 +356,12 @@ export function migrateLegacyTournamentStorage(storage: Storage): void {
     }
     if (tournament) migratedEntries.push({ id, name: tournament.name, updatedAt: tournament.updatedAt });
   }
-  if (index) repository.writeIndex(index);
-  else if (migratedEntries.length) repository.writeIndex({
-    activeId: migratedEntries.sort((a, b) => b.updatedAt - a.updatedAt)[0].id,
-    tournaments: migratedEntries,
-  });
+  const currentIndex = repository.readIndex();
+  if (index && JSON.stringify(index) !== JSON.stringify(currentIndex)) repository.writeIndex(index);
+  else if (!index && !currentIndex.tournaments.length && migratedEntries.length) {
+    const ordered = [...migratedEntries].sort((a, b) => b.updatedAt - a.updatedAt);
+    repository.writeIndex({ activeId: ordered[0].id, tournaments: ordered });
+  }
 }
 
 export function createCanonicalTabulationStorage(legacy: Storage): Storage {
