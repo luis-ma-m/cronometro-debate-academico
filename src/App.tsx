@@ -3,7 +3,7 @@ import { TabulationRulesPanel } from './components/TabulationRulesPanel';
 import { clearManagerSession, readManagerSession, writeManagerSession } from './contracts/managerSession';
 import { activeTournamentContext } from './contracts/activeTournamentContext';
 import { createApplicationBootstrap } from './contracts/applicationBootstrap';
-import { CANONICAL_TOURNAMENT_KEY } from './contracts/canonicalTournamentRepository';
+import { CANONICAL_TOURNAMENT_KEY, readCanonicalManager, writeCanonicalManager } from './contracts/canonicalTournamentRepository';
 import { acknowledgeApplicationDelivery, claimPanelOutbox, createDeliveryConsumerId, enqueuePanelHandoff, releaseApplicationDelivery } from './contracts/applicationDeliveryAdapters';
 import { participantSnapshotFromManager } from './contracts/participantSnapshot';
 import { TabulationTournamentRanking } from './components/TabulationTournamentRanking';
@@ -182,7 +182,9 @@ export default function App() {
       setAdminLoading(true);
       try {
         const requestStartedAt = Date.now();
-        const fresh = await getTournament(session.token);
+        const remoteFresh = await getTournament(session.token);
+        writeCanonicalManager(remoteFresh);
+        const fresh = readCanonicalManager<Tournament>() ?? remoteFresh;
         const responseReceivedAt = Date.now();
         if (typeof fresh.serverTime === 'number') setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
         setData((current) => {
@@ -499,6 +501,8 @@ export default function App() {
       if (apiConfigured) {
         if (!session) throw new Error('Inicia sesión antes de guardar.');
         saved = await saveTournament(session.token, sourceData.revision, payload);
+        writeCanonicalManager(saved);
+        saved = readCanonicalManager<Tournament>() ?? saved;
       } else {
         saved = { ...payload, revision: payload.revision + 1, updatedAt: Date.now() };
         writeDemo(saved);
