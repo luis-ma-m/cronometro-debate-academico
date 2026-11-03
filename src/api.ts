@@ -249,6 +249,29 @@ export interface PersistedTabulationSettings {
 }
 export const getTabulationSettings = (token: string) =>
   apiCall<PersistedTabulationSettings>('getTabulationSettings', { token });
+export interface TabulationPublishedRoundRow {
+  tabTournamentId: string;
+  tabulationRoundId: string;
+  tabulationDebateId: string;
+  managerRoundId: string;
+  assignmentId: string;
+  chairJudgeId: string;
+  sidesProvisional: boolean;
+  roundNumber: number;
+  roundName: string;
+  roundKind: 'qualifying' | 'elimination';
+  sideMode: 'draw' | 'balanced';
+  teamMetadata: unknown;
+  entityIdMap: unknown;
+  physicalRoomId: string;
+  teamFavorId: string;
+  teamContraId: string;
+  judgeIds: unknown;
+  currentSourceId: string | null;
+  currentSourcePayload: unknown;
+}
+export const getTabulationPublishedRounds = (token: string, tournamentId: string) =>
+  apiCall<TabulationPublishedRoundRow[]>('getTabulationPublishedRounds', { token, tournamentId });
 export const saveTabulationSettings = (
   token: string,
   expectedRevision: number,
