@@ -26,7 +26,7 @@ describe('canonical Tabulation round hydration', () => {
       managerRoundId: 'roundRemote', assignmentId: 'assignmentRemote', chairJudgeId: 'judgeRemote',
       sidesProvisional: false, roundNumber: 1, roundName: 'Ronda 1', roundKind: 'qualifying', sideMode: 'balanced',
       teamMetadata: [{ teamId: 'teamRemoteA', swing: false, breakEligible: true }],
-      entityIdMap: local.panelLink.idMap, physicalRoomId: 'venueRemote',
+      entityIdMap: { teams: { publisherTeamA: 'teamRemoteA', publisherTeamB: 'teamRemoteB' }, speakers: { publisherSpeaker: 'speakerRemoteA' }, judges: { publisherJudge: 'judgeRemote' }, venues: { publisherVenue: 'venueRemote' } }, physicalRoomId: 'venueRemote',
       teamFavorId: 'teamRemoteA', teamContraId: 'teamRemoteB', judgeIds: ['judgeRemote'],
       currentSourceId: 'source-1',
       currentSourcePayload: { sourceMode: 'judges', acta: { result: {
