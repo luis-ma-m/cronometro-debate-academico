@@ -115,7 +115,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     store.logError('Fallo de la pantalla: ' + error.message, { stack: (info.componentStack ?? '').slice(0, 2000) });
   }, [store]);
   const outcomes = useMemo(() => (tournament ? computeTournamentOutcomes(tournament) : new Map()), [tournament]);
-  const activeView: ViewId = tournament ? view : 'inicio';
+  const activeView: ViewId = view;
   // A new screen starts at its top, not at the scroll position of the previous one.
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -201,6 +201,11 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         {props && activeView === 'actas' && <BallotsView {...props} />}
         {props && activeView === 'clasificacion' && <StandingsView {...props} projection={projection} onProject={() => setProjection(true)} />}
         {props && activeView === 'registro' && <LogView {...props} />}
+        {!props && activeView !== 'inicio' && <section className="panel tab-empty-workspace">
+          <div className="panel-title"><div><h3>{VIEWS.find((item) => item.id === activeView)?.label ?? 'Tabulación'}</h3><p>Esta sección estará disponible cuando crees o importes un torneo.</p></div></div>
+          <p className="muted">Ve a Inicio para crear un torneo nuevo o importar una copia de seguridad. La navegación permanece disponible para que puedas acceder directamente a cada apartado.</p>
+          <button type="button" className="button primary" onClick={() => setView('inicio')}>Ir a Inicio</button>
+        </section>}
       </ErrorBoundary>
       <footer className="footer tab-no-project"><span>Debate Control · Tabulación local · {BUILD_INFO}</span><span>Los datos se guardan solo en este navegador. Exporta copias con regularidad.</span></footer>
     </main>
