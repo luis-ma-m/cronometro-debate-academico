@@ -175,6 +175,7 @@ La implementación inicial `sharedTournamentRepository.ts` (un objeto con proyec
 - Tombstones y preservación de un documento canónico corrupto.
 
 ### Límites restantes
-- El repositorio normaliza las entidades compartidas principales, pero rondas/debates/asignaciones y resultados siguen en los estados especializados. Su identidad ya tiene contratos, pero falta migrar sus lecturas y relaciones a registros canónicos equivalentes.
+- También se normalizan rondas y asignaciones publicadas: una ronda de Tabulación solo comparte identidad con Gestión mediante `managerRoundId`; un debate solo comparte asignación mediante `managerAssignmentId` y el `assignmentId` de Gestión. Los debates sin asignación publicada conservan identidad local bajo el ámbito de Tabulación.
+- Los resultados, papeletas, actas, borradores, configuración y reglas siguen siendo datos especializados de Tabulación; no existe un equivalente seguro en el modelo de Gestión para fusionarlos.
 - La persistencia local sigue limitada al navegador/origen. No hay sincronización multi-dispositivo nueva ni migración a Neon en este incremento.
 - La migración automática no hace matching de participantes sin un mapping explícito. Los registros sin correspondencia permanecen separados hasta que el flujo de vinculación aporte IDs verificables.
