@@ -142,14 +142,42 @@ describe('tabulation → panel', () => {
     expect(applied.issues[0]).toContain('cronómetro');
   });
 
-  it('rejects conflicts the panel would not save and entities the panel does not know', () => {
+  it('creates missing physical rooms and rejects assignment conflicts', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
     tab.rounds[0].debates[0].judgeIds = ['j1', 'j3'];
     expect(applyOutboxToPanel(source, 'r2', buildOutbox(tab, 'r1', now).outbox!, { makeId, now }).issues.join(' ')).toContain('incompatibles');
+    tab.rounds[0].debates[0].judgeIds = ['j2'];
     tab.rounds[0].debates[0].venueId = 'tab-sala';
     tab.venues.push({ id: 'tab-sala', name: 'Aula nueva', active: true });
-    expect(applyOutboxToPanel(source, 'r2', buildOutbox(tab, 'r1', now).outbox!, { makeId, now }).issues.join(' ')).toContain('no existe en el panel');
+    const imported = applyOutboxToPanel(source, 'r2', buildOutbox(tab, 'r1', now).outbox!, { makeId, now });
+    expect(imported.issues).toEqual([]);
+    expect(imported.addedPhysicalRooms).toBe(1);
+    expect(imported.physicalRooms.find((room) => room.name === 'Aula nueva')).toMatchObject({ name: 'Aula nueva', active: true });
+    expect(imported.rooms!.find((room) => room.roundId === 'r2' && room.name === 'Aula nueva')).toMatchObject({ teamFavorId: 't1', teamContraId: 't3', judgeIds: ['j2'] });
+  });
+
+  it('reuses physical rooms by normalized name when tabulation IDs differ', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.venues.find((venue) => venue.id === 'physical-a1')!.name = '  SALA   A1 ';
+    tab.rounds[0].debates[0].venueId = 'tab-a1';
+    tab.venues.push({ id: 'tab-a1', name: 'sala a1', active: true });
+    const imported = applyOutboxToPanel(source, 'r2', buildOutbox(tab, 'r1', now).outbox!, { makeId, now });
+    expect(imported.issues).toEqual([]);
+    expect(imported.addedPhysicalRooms).toBe(0);
+    expect(imported.physicalRooms).toHaveLength(source.physicalRooms.length);
+    expect(imported.rooms!.find((room) => room.roundId === 'r2' && room.physicalRoomId === 'physical-a1')).toBeDefined();
+  });
+
+  it('reports existing assignments that will be overwritten', () => {
+    const source = panel();
+    source.rooms.push({ ...source.rooms[0], id: 'a2-r2', name: 'Sala A1', roundId: 'r2', teamFavorId: 't2', teamContraId: 't4', judgeIds: ['j3'] });
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    const imported = applyOutboxToPanel(source, 'r2', buildOutbox(tab, 'r1', now).outbox!, { makeId, now });
+    expect(imported.issues).toEqual([]);
+    expect(imported.overwrittenRooms).toBe(1);
+    expect(imported.rooms!.find((room) => room.id === 'a2-r2')).toMatchObject({ teamFavorId: 't1', teamContraId: 't3', judgeIds: ['j2'] });
   });
 
   it('requires a venue for every debate before building the outbox', () => {
