@@ -636,7 +636,7 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
         {notice && <Notice kind={notice.kind} onClose={() => setNotice(null)}>{notice.message}</Notice>}
       </div>
       <ErrorBoundary resetKey={activeView} onError={onViewError}>
-        {activeView === 'inicio' && <HomeView store={store} state={state} outcomes={outcomes} notify={notify} onNavigate={(id) => setView(id as ViewId)} />}
+        <div hidden={activeView !== 'inicio'}><HomeView store={store} state={state} outcomes={outcomes} notify={notify} onNavigate={(id) => setView(id as ViewId)} /></div>
         {props && activeView === 'reglas' && <RulesView {...props} />}
         {props && activeView === 'participantes' && <ParticipantsView {...props} />}
         {props && activeView === 'rondas' && <RoundsView {...props} projection={projection} onProject={() => setProjection(true)} onNavigate={(id) => setView(id as ViewId)} />}
