@@ -105,7 +105,7 @@ export async function getSyncOperations(tournamentId: string, authenticated: boo
     throw new ApiError("INVALID_PAYLOAD", "El ID canónico del torneo no es válido.");
   }
   const result = await getPool().query(
-    "SELECT * FROM sync_operations WHERE tournament_id=$1 AND created_at >= to_timestamp($2/1000.0) ORDER BY created_at, operation_id LIMIT 500",
+    "SELECT * FROM sync_operations WHERE tournament_id=$1 AND (extract(epoch FROM updated_at) * 1000)::bigint > $2 ORDER BY updated_at, operation_id LIMIT 500",
     [tournamentId, Math.max(0, after)],
   );
   return result.rows.map((row) => rowToEntry(row as Record<string, unknown>));
