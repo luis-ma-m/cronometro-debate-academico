@@ -221,7 +221,8 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   };
 }
 
-export async function loadPostgresSheetData(): Promise<PostgresSheetData> {
+export async function loadPostgresSheetData(transactionClient?: PoolClient): Promise<PostgresSheetData> {
+  if (transactionClient) return readSnapshot(transactionClient);
   const client = await getPool().connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -597,10 +598,11 @@ export async function readIdempotentResponse(operationKey: string, scope: string
   }
 }
 
-export async function writePostgresTables(data: PostgresSheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[]): Promise<void> {
-  const client = await getPool().connect();
+export async function writePostgresTables(data: PostgresSheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[], transactionClient?: PoolClient): Promise<void> {
+  const ownsTransaction = !transactionClient;
+  const client = transactionClient ?? await getPool().connect();
   try {
-    await client.query("BEGIN");
+    if (ownsTransaction) await client.query("BEGIN");
     await client.query("SET CONSTRAINTS ALL DEFERRED");
     // Re-check the snapshot cursor after acquiring the database row lock.
     // A competing writer that committed after loadSnapshot is rejected before
@@ -684,9 +686,9 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
       else await client.query("DELETE FROM format_presets");
     }
     if (appendEvent) await persistEvent(client, appendEvent);
-    await client.query("COMMIT");
+    if (ownsTransaction) await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    if (ownsTransaction) await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof ApiError) throw error;
     const code = (error as { code?: string })?.code;
     if (code === "23505" || code === "23503" || code === "23514") {
@@ -694,6 +696,6 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     }
     throw new ApiError("DATABASE_WRITE_FAILED", "No se ha podido guardar el torneo en PostgreSQL. No se ha confirmado ningún cambio.", 503);
   } finally {
-    client.release();
+    if (ownsTransaction) client.release();
   }
 }
