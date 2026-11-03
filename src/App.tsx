@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TabulationRulesPanel } from './components/TabulationRulesPanel';
+
+const TabulationWorkspace = lazy(() => import('./tabulation/TabulationApp'));
 import { clearManagerSession, readManagerSession, writeManagerSession } from './contracts/managerSession';
 import { activeTournamentContext } from './contracts/activeTournamentContext';
 import { createApplicationBootstrap } from './contracts/applicationBootstrap';
@@ -30,7 +32,7 @@ import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from
 
 /** Only used when there is no backend (local demo mode); production checks ADMIN_PASSWORD on the server. */
 const DEMO_PASSWORD = 'gestor123';
-type View = 'overview' | 'rooms' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
+type View = 'overview' | 'rooms' | 'tabulation' | 'teams' | 'judges' | 'scoring' | 'tournament' | 'settings';
 
 type ScoreInputDraft = { teamScores: Record<string, string>; speakerScores: Record<number, string> };
 
@@ -99,7 +101,10 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [serverError, setServerError] = useState('');
-  const [view, setView] = useState<View>('overview');
+  const [view, setView] = useState<View>(() => {
+    const hash = window.location.hash.replace(/^#/, '').split('/')[0];
+    return hash === 'tabulation' || ['inicio', 'reglas', 'participantes', 'rondas', 'actas', 'clasificacion', 'registro'].includes(hash) ? 'tabulation' : 'overview';
+  });
   const [selectedRound, setSelectedRound] = useState('');
   const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
   const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([]);
@@ -113,6 +118,15 @@ export default function App() {
   const [preparingRoomId, setPreparingRoomId] = useState<string | null>(null);
   const [preparedRoomLink, setPreparedRoomLink] = useState<{ roomName: string; href: string } | null>(null);
   const [tabulationNotice, setTabulationNotice] = useState('');
+  useEffect(() => {
+    const onHashChange = () => {
+      const hash = window.location.hash.replace(/^#/, '').split('/')[0];
+      setView(hash === 'tabulation' || ['inicio', 'reglas', 'participantes', 'rondas', 'actas', 'clasificacion', 'registro'].includes(hash)
+        ? 'tabulation' : hash === 'rooms' ? 'rooms' : 'overview');
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
   const [publishingTabulationRound, setPublishingTabulationRound] = useState(false);
   const [syncQueue, setSyncQueue] = useState<PendingSyncOperation[]>([]);
   // Reuse already fetched room-control links for the lifetime of this admin session.
@@ -1523,14 +1537,9 @@ export default function App() {
 
   return <div className="app-shell">
     <aside className="sidebar"><div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div><div className="sidebar-section">TORNEO</div><nav>
-      <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => setView('overview')} />
-      <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => setView('rooms')} />
-      <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
-      <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
-      <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
-      <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
-      <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
-      <a className="nav-button" href="/tabulacion" target="_blank" rel="noopener"><ClipboardList size={18} /><span>Tabulación local</span><ExternalLink size={15} /></a>
+      <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => { window.location.hash = 'overview'; setView('overview'); }} />
+      <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => { window.location.hash = 'rooms'; setView('rooms'); }} />
+      <NavButton icon={<ClipboardList size={18} />} label="Tabulación" selected={view === 'tabulation'} onClick={() => { window.location.hash = 'tabulation'; setView('tabulation'); }} />
     </nav><div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div></aside>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
@@ -1557,6 +1566,8 @@ export default function App() {
           <div className="activation-dialog-actions"><button className="button secondary" onClick={() => setActivationPreview(null)} disabled={activatingRound}>Cancelar</button><button className="button primary" onClick={() => void confirmRoundActivation(activationPreview.pending.length > 0)} disabled={activatingRound}>{activatingRound ? 'Activando ronda…' : activationPreview.pending.length > 0 ? 'Activar igualmente' : 'Activar ronda'}</button></div>
         </section>
       </div>}
+      {view === 'tabulation' && <Suspense fallback={<div className="tab-loading">Cargando espacio de tabulación…</div>}><TabulationWorkspace embedded /></Suspense>}
+
       {view === 'overview' && <><div className="page-heading"><div><p className="eyebrow">VISTA OPERATIVA</p><h2>Estado del torneo</h2><p className="muted">Seguimiento de debates, asignaciones y cronómetros.</p></div><div className="round-badge"><BookOpen size={17} /><span>Ronda activa: <b>{data.rounds.find((round) => round.id === activeTournamentRoundId)?.name ?? 'Sin ronda activa'}</b></span></div></div>
       {overviewIncompatibilityIncidents.length > 0 && <section className="panel warning-notice" role="status" aria-live="polite"><div className="panel-title"><div><h3>Incompatibilidades detectadas ({overviewIncompatibilityIncidents.length})</h3><p>Estas asignaciones existentes requieren revisión. No se han eliminado automáticamente.</p></div></div><div className="pending-debates-list">{overviewIncompatibilityIncidents.map((incident) => <article className="pending-debate-item" key={[incident.type, incident.roomId, ...incident.teamIds, ...incident.judgeIds].join(':')}><div className="pending-debate-heading"><b>{incident.roomName}</b><span className="state-pill issue">{incident.type === 'institution' ? 'Institución' : incident.type === 'team-judge' ? 'Equipo–juez' : 'Juez–juez'}</span></div><p>{incident.message}</p><div className="pending-debate-meta"><span>{incident.teamIds.map((id) => data.teams.find((team) => team.id === id)?.name ?? id).join(' · ') || 'Sin equipo afectado'}</span><span>{incident.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name ?? id).join(' · ')}</span><button className="text-button" onClick={() => { setSelectedRound(data.rooms.find((room) => room.id === incident.roomId)?.roundId ?? activeRound); setView('rooms'); }}>Revisar asignación <ChevronRight size={14} /></button></div></article>)}</div></section>}
       <div className="stat-grid"><Stat label="Salas de la ronda" value={overviewCounts.total} icon={<Monitor />} /><Stat label="En debate" value={overviewCounts.running} icon={<Activity />} /><Stat label="Preparadas" value={overviewCounts.ready} icon={<Check />} /><Stat label="Pendientes" value={overviewCounts.unassigned} icon={<Clock3 />} /></div>
