@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { enqueuePanelOutbox } from '../../contracts/applicationDeliveryAdapters';
-import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from '../syncOutbox';
 import { Check, ClipboardList, Copy, Dices, Download, FileText, Gavel, MessageCircle, MonitorPlay, MoreHorizontal, Projector, RotateCcw, Search, Send, Shuffle, Sparkles, Star, Trash2, Trophy, Undo2, X } from 'lucide-react';
 import { allocateJudgesForRound, judgesConflict, teamConflicts, type RoundProblem } from '../adjudication';
 import { computeBreak, tournamentChampion } from '../bracket';
@@ -22,7 +21,8 @@ import { simulateRoundResults } from '../sample';
 import { eliminationRounds, qualifyingRounds, type TabDebate, type TabJudge, type TabRound, type TabRoundDraft, type TabTournament } from '../types';
 import { copyText, downloadBytes, Empty, IssueList, lookups, Notice, STATUS_LABELS, type ViewProps } from '../ui';
 import { actaLinkMessage, buildActaLink, whatsAppNumber, whatsAppUrl } from '../whatsapp';
-import { createActaShortLink, listActaShortLinks, revokeActaShortLinks, updateActaShortLinkExpiry, type ActaShortLink } from '../../api';
+import { createActaShortLink, listActaShortLinks, publishTabulationRound, revokeActaShortLinks, updateActaShortLinkExpiry, type ActaShortLink } from '../../api';
+import { hashSyncPayload } from '../syncOutbox';
 
 const DRAFT_TAB = '__borrador__';
 type Look = ReturnType<typeof lookups>;
@@ -192,33 +192,54 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
       }
       savedTournament = store.getState().tournament;
     }
-    let publicationQueued = false;
+    let publicationSucceeded = false;
     let publicationIssue = '';
     if (savedTournament?.panelLink?.remoteId) {
       const proposal = buildOutbox(savedTournament, pending.round.id);
       if (!proposal.outbox) {
         publicationIssue = proposal.issues.join(' ');
       } else if (!managerSessionToken) {
-        publicationIssue = 'No hay una sesión autenticada de Gestión para publicar la ronda.';
+        publicationIssue = 'No hay una sesión autenticada de Gestión para escribir la ronda en la base de datos.';
       } else {
         try {
-          // Confirmation is the publication intent: enqueue the canonical server operation
-          // directly. The Tabulation sync worker publishes it to Neon and the manager then
-          // reads the round and room assignments from the canonical repository.
-          const syncOutbox = createSyncOutbox(createIndexedDbSyncOutboxRepository());
-          const queued = await syncOutbox.enqueue({
+          // Confirmation performs the canonical database write synchronously.
+          // The API transaction inserts rounds, room_assignments, judges,
+          // phases, Tabulation identity metadata and audit records in Neon.
+          const operation = {
+            protocolVersion: 1 as const,
+            operationId: globalThis.crypto.randomUUID(),
             tournamentId: savedTournament.panelLink.remoteId,
-            entityType: 'round',
+            entityType: 'round' as const,
             entityId: pending.round.id,
-            operation: 'publish-round',
+            operation: 'publish-round' as const,
             baseRevision: savedTournament.panelLink.remoteRevision ?? 0,
             payload: proposal.outbox,
-          });
-          publicationQueued = queued.operation.status === 'pending' || queued.operation.status === 'sending';
+            payloadHash: await hashSyncPayload(proposal.outbox),
+          };
+          const published = await publishTabulationRound(managerSessionToken, operation);
+          const assignmentByDebate = new Map(published.debateAssignments.map((item) => [item.tabulationDebateId, item.assignmentId]));
+          store.update((current) => ({
+            ...current,
+            panelLink: current.panelLink ? {
+              ...current.panelLink,
+              remoteRevision: published.revision,
+              remoteUpdatedAt: published.updatedAt,
+            } : current.panelLink,
+            rounds: current.rounds.map((item) => item.id !== pending.round.id ? item : ({
+              ...item,
+              managerRoundId: published.roundId,
+              pushedAt: Date.now(),
+              debates: item.debates.map((debate) => ({
+                ...debate,
+                ...(assignmentByDebate.has(debate.id) ? { managerAssignmentId: assignmentByDebate.get(debate.id) } : {}),
+              })),
+            })),
+          }), { type: 'sync.ack', message: 'Ronda y asignaciones escritas directamente en Neon', details: {
+            operationId: published.operationId, roundId: published.roundId, assignmentCount: published.assignmentIds.length,
+          } });
+          publicationSucceeded = true;
         } catch (error) {
           publicationIssue = errorText(error);
-          // Retain the prior hand-off as a recovery path, but do not report it as published.
-          try { await enqueuePanelOutbox(proposal.outbox); } catch { /* The explicit warning below is authoritative. */ }
         }
       }
     } else {
@@ -226,10 +247,10 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
     }
     exportZip(pending.round.id, true);
     setScreenId(pending.round.id);
-    if (publicationQueued) {
-      notify('Ronda confirmada y guardada. Publicación automática en curso: al confirmarse en Neon aparecerá en «Rondas y salas» sin pasos manuales.', 'success');
+    if (publicationSucceeded) {
+      notify('Ronda confirmada y escrita en la base de datos compartida. Sus salas y asignaciones ya están disponibles en «Rondas y salas».', 'success');
     } else {
-      notify('Ronda confirmada y guardada localmente, pero no se ha podido iniciar su publicación automática. ' + publicationIssue, 'warning');
+      notify('La ronda está guardada localmente, pero NO se ha escrito en la base de datos compartida. ' + publicationIssue, 'error');
     }
   };
 
