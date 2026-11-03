@@ -3,9 +3,9 @@ import { expect, test } from './fixtures';
 test('smoke: crear torneo, generar y confirmar una ronda', async ({ page }) => {
   page.on('dialog', (dialog) => void dialog.accept());
   await page.goto('/tabulacion');
-  await expect(page.getByRole('button', { name: 'Crear Torneo ADUMA' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Crear ensayo ADUMA con equipos de ejemplo/ })).toBeVisible();
 
-  await page.getByRole('button', { name: /Crear ensayo ADUMA/ }).click();
+  await page.getByRole('button', { name: /Crear ensayo ADUMA con equipos de ejemplo/ }).click();
   await expect(page.getByRole('heading', { level: 2, name: 'Rondas' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Nueva ronda (Ronda 1)' }).click();
