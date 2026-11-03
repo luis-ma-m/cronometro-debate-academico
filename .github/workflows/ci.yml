@@ -4,6 +4,7 @@ on:
     branches: [main, "feat/**", "fix/**"]
   pull_request:
     branches: [main]
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -14,11 +15,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run test:coverage
+      # Fast feedback on every branch push; coverage remains available locally.
+      - run: npm test
       - run: npm run typecheck:api
       - run: npm run build
+
   e2e:
+    # Full browser tests are useful on PRs and main, not on every intermediate feature push.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,8 +33,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      # Against the production build served as static files: proves the tabulation needs no backend.
+      # Browser and OS dependencies are already included in the pinned Playwright image.
       - run: npm run test:e2e
         env:
           E2E_PREVIEW: '1'
