@@ -188,3 +188,73 @@ describe.skipIf(!runIntegration)("Neon PostgreSQL integration invariants", () =>
   });
 
 });
+  it("serializes concurrent whole-tournament snapshots with row locking and revision CAS", async () => {
+    const second = new Client(connectionString!);
+    await second.connect();
+    try {
+      const firstRead = await client!.query("SELECT revision FROM tournament_settings WHERE id=1");
+      const staleRevision = Number(firstRead.rows[0].revision);
+
+      await client!.query("BEGIN");
+      const winner = await client!.query(
+        "UPDATE tournament_settings SET revision=revision+1, updated_at=now() WHERE id=1 AND revision=$1 RETURNING revision",
+        [staleRevision],
+      );
+      expect(winner.rowCount).toBe(1);
+
+      await second.query("BEGIN");
+      // The second connection can start, but its row lock must wait until the first writer commits.
+      const lockPromise = second.query("SELECT revision FROM tournament_settings WHERE id=1 FOR UPDATE");
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(await Promise.race([lockPromise.then(() => "acquired"), Promise.resolve("waiting")])).toBe("waiting");
+
+      await client!.query("COMMIT");
+      const locked = await lockPromise;
+      expect(Number(locked.rows[0].revision)).toBe(staleRevision + 1);
+      const guarded = await second.query(
+        "UPDATE tournament_settings SET revision=revision+1 WHERE id=1 AND revision=$1 RETURNING revision",
+        [staleRevision],
+      );
+      expect(guarded.rowCount).toBe(0);
+      await second.query("ROLLBACK");
+
+      const current = await second.query("SELECT revision FROM tournament_settings WHERE id=1");
+      expect(Number(current.rows[0].revision)).toBe(staleRevision + 1);
+    } finally {
+      await second.query("ROLLBACK").catch(() => undefined);
+      await second.end();
+    }
+  });
+
+  it("makes an operation idempotent across concurrent retries", async () => {
+    const second = new Client(connectionString!);
+    await second.connect();
+    try {
+      const operationId = "sync-op-" + randomBytes(8).toString("hex");
+      const scope = "saveTournament:integration";
+      const response = { revision: 2, accepted: true };
+      await client!.query("BEGIN");
+      await client!.query(
+        "INSERT INTO idempotency_keys(operation_key,scope,response,completed_at) VALUES($1,$2,$3::jsonb,now())",
+        [operationId, scope, JSON.stringify(response)],
+      );
+      await client!.query("COMMIT");
+
+      const [left, right] = await Promise.all([
+        client!.query("SELECT scope,response FROM idempotency_keys WHERE operation_key=$1", [operationId]),
+        second.query("SELECT scope,response FROM idempotency_keys WHERE operation_key=$1", [operationId]),
+      ]);
+      expect(left.rows[0].scope).toBe(scope);
+      expect(right.rows[0].scope).toBe(scope);
+      expect(left.rows[0].response).toEqual(response);
+      expect(right.rows[0].response).toEqual(response);
+
+      await expect(second.query(
+        "INSERT INTO idempotency_keys(operation_key,scope,response,completed_at) VALUES($1,$2,$3::jsonb,now())",
+        [operationId, "different-operation", JSON.stringify({ revision: 3 })],
+      )).rejects.toMatchObject({ code: "23505" });
+    } finally {
+      await second.end();
+    }
+  });
+

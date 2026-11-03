@@ -180,3 +180,16 @@ La implementación inicial `sharedTournamentRepository.ts` (un objeto con proyec
 - Los resultados, papeletas, actas, borradores, configuración y reglas siguen siendo datos especializados de Tabulación; no existe un equivalente seguro en el modelo de Gestión para fusionarlos.
 - La persistencia local sigue limitada al navegador/origen. No hay sincronización multi-dispositivo nueva ni migración a Neon en este incremento.
 - La migración automática no hace matching de participantes sin un mapping explícito. Los registros sin correspondencia permanecen separados hasta que el flujo de vinculación aporte IDs verificables.
+
+
+
+## Endurecimiento de escrituras concurrentes (iteración production-sync-hardening)
+
+- Las escrituras de snapshots completos del Gestor serializan la fase de persistencia sobre `tournament_settings` mediante `SELECT ... FOR UPDATE` dentro de la misma transacción que persiste configuración, entidades, asignaciones y auditoría.
+- El cursor leído fuera de esa transacción se compara de nuevo después de adquirir el bloqueo. Si otra escritura ya avanzó la revisión, la operación se rechaza con `REVISION_CONFLICT` antes de tocar las tablas de dominio.
+- La condición `UPDATE ... WHERE revision = expectedRevision` de `persistConfig` se conserva como CAS final; la serialización no sustituye el CAS.
+- Se añaden pruebas Neon con dos conexiones para verificar que el segundo escritor espera al primero y que una escritura con revisión obsoleta no confirma. Se añade prueba de lectura/reintento de la misma clave de idempotencia y rechazo de reutilización con distinto scope.
+
+**No confundir este endurecimiento con el cierre de la sincronización completa:** el repositorio canónico local sigue usando la fachada síncrona de `localStorage`, con IndexedDB como espejo asíncrono. Esa frontera no puede ofrecer por sí sola compare-and-swap multi-pestaña y multi-dispositivo. La outbox/worker de Tabulación sincroniza las operaciones autorizadas de publicación y actas, pero las escrituras locales de Gestión y el estado completo de Tabulación todavía no pasan en su totalidad por un journal remoto común. El siguiente cambio funcional debe reemplazar las escrituras de snapshot por comandos tipados persistidos en IndexedDB y enviados a Neon; no se debe adaptar con un LWW global.
+
+La prueba real requiere `NEON_TEST_DATABASE_URL` y `NEON_TEST_DATABASE_ISOLATED=1`; CI normal la omite. No se ha ejecutado contra Neon Preview ni Production por esta integración.
