@@ -13,7 +13,7 @@ import type { FormEvent } from 'react';
 import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
-import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory } from './api';
+import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses, getTabulationActaHistory, listAuthoritativeTabulationSnapshots, getAuthoritativeTabulationSnapshot } from './api';
 import type { RoundActivationPreview, RoomConnectionStatus, TabulationActaHistory as TabulationActaHistoryData } from './api';
 import { ActaVersionDetails } from './components/ActaVersionDetails';
 import { readDemo, writeDemo } from './demo';
@@ -141,6 +141,9 @@ export default function App() {
   const hasUnsavedRef = useRef(false);
   const [connected, setConnected] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
+  const [tabulationPublications, setTabulationPublications] = useState<import('./api').AuthoritativeTabulationListing[]>([]);
+  const [selectedTabulationPublication, setSelectedTabulationPublication] = useState('');
+  const [importingTabulation, setImportingTabulation] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [roomConnectionStatuses, setRoomConnectionStatuses] = useState<Record<string, RoomConnectionStatus>>({});
@@ -205,6 +208,103 @@ export default function App() {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
+
+  const refreshTabulationPublications = useCallback(async () => {
+    if (!apiConfigured || !session) return;
+    try {
+      const list = await listAuthoritativeTabulationSnapshots(session.token);
+      setTabulationPublications(list);
+      setSelectedTabulationPublication((current) =>
+        current && list.some((item) => item.tabTournamentId === current) ? current : list[0]?.tabTournamentId ?? '');
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudieron consultar los torneos publicados desde Tabulación.');
+    }
+  }, [session?.token]);
+  const importAuthoritativeTabulation = async () => {
+    if (!apiConfigured || !session || !selectedTabulationPublication || importingTabulation) return;
+    if (hasUnsavedChanges || hasUnsavedRef.current || saving) {
+      setServerError('Guarda o descarta primero los cambios pendientes de Gestión.');
+      return;
+    }
+    setImportingTabulation(true);
+    try {
+      const published = await getAuthoritativeTabulationSnapshot(session.token, selectedTabulationPublication);
+      if (!published || published.tabTournamentId !== selectedTabulationPublication
+        || published.snapshot.id !== published.tabTournamentId
+        || !/^[a-f0-9]{64}$/.test(published.snapshotSha256)) {
+        throw new Error('El snapshot publicado no supera la comprobación de identidad o integridad.');
+      }
+      const tab = published.snapshot;
+      const current = await getTournament(session.token);
+      const busyRooms = current.rooms.filter((room) => room.timer.status !== 'idle'
+        || (current.scoring?.scorecards ?? []).some((card) => card.roomId === room.id));
+      const hasOperationalProgress = Boolean(current.activeRoundId)
+        || current.rounds.some((round) => round.active)
+        || busyRooms.length > 0;
+      if (hasOperationalProgress && !window.confirm(
+        'Gestión tiene un torneo operativo con progreso (' + current.rounds.length + ' rondas, ' + busyRooms.length +
+        ' salas con temporizador/acta). Sustituir sus datos maestros por «' + published.tournamentName +
+        '» requiere confirmación. Se conservarán las salas físicas compatibles y el estado de sus cronómetros. ¿Continuar?',
+      )) return;
+
+      const teamMap = new Map(tab.teams.map((item) => [item.id, item.id]));
+      const judgeMap = new Map(tab.judges.map((item) => [item.id, item.id]));
+      const venueMap = new Map(tab.venues.map((item) => [item.id, item.id]));
+      const teamIds = new Set(tab.teams.map((item) => item.id));
+      const judgeIds = new Set(tab.judges.map((item) => item.id));
+      const roomIds = new Set(current.physicalRooms.map((item) => item.id));
+      const physicalRooms = tab.venues.map((venue) => {
+        const existing = current.physicalRooms.find((item) => item.id === venue.id);
+        if (existing) return { ...existing, name: venue.name, active: venue.active, updatedAt: Date.now() };
+        return { id: venue.id, slug: makeSlug(venue.name) + '-' + venue.id.slice(-6),
+          name: venue.name, active: venue.active, createdAt: Date.now(), updatedAt: Date.now() };
+      });
+      const validRoomIds = new Set(physicalRooms.map((item) => item.id));
+      const rounds = tab.rounds.map((round) => ({
+        id: round.id, number: round.number, name: round.name, active: false,
+        defaultFormatId: current.formats[0]?.id ?? '', scoreType: round.kind === 'elimination' ? 'elimination' as const : 'qualifying' as const,
+      }));
+      const imported: Tournament = {
+        ...current,
+        tournamentName: tab.name,
+        rounds,
+        teams: tab.teams.map((team) => ({
+          id: teamMap.get(team.id)!, name: team.name, institution: team.institution, active: team.active,
+          incompatibleJudgeIds: team.incompatibleJudgeIds.filter((id) => judgeIds.has(id)),
+        })),
+        speakers: tab.speakers.map((speaker) => ({ id: speaker.id, teamId: teamMap.get(speaker.teamId) ?? '', name: speaker.name })),
+        judges: tab.judges.map((judge) => ({
+          id: judgeMap.get(judge.id)!, name: judge.name, institution: judge.institution, active: judge.active,
+          incompatibleJudgeIds: judge.incompatibleJudgeIds.filter((id) => judgeIds.has(id)),
+        })),
+        physicalRooms,
+        rooms: current.rooms.filter((room) => validRoomIds.has(room.physicalRoomId))
+          .filter((room) => !tab.rounds.some((round) => round.id === room.roundId)),
+        activeRoundId: '',
+        activationRevision: current.activationRevision,
+        activatedAt: current.activatedAt,
+        revision: current.revision,
+        updatedAt: Date.now(),
+      };
+      const issues = validateAssignments(imported);
+      if (issues.length) throw new Error('El snapshot no se puede importar en Gestión: ' + issues.slice(0, 4).join(' '));
+      const saved = await saveTournament(session.token, current.revision, imported);
+      writeCanonicalManager(saved);
+      setData(saved);
+      hasUnsavedRef.current = false;
+      setHasUnsavedChanges(false);
+      setConnected(true);
+      setLastSyncedAt(Date.now());
+      setServerError('');
+      setTabulationNotice('Se ha importado «' + published.tournamentName + '» desde Tabulación, revisión ' + published.revision +
+        '. La publicación maestra se conserva separada del estado operativo de salas y cronómetros.');
+      await refreshTabulationPublications();
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : 'No se pudo importar el snapshot autoritativo.');
+    } finally {
+      setImportingTabulation(false);
+    }
+  };
 
   const reloadAdmin = useCallback(async () => {
     if (demoMode) return;
