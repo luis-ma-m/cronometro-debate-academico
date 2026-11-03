@@ -65,6 +65,24 @@ describe('Tabulation participant persistence adapter', () => {
       .toThrow('La instantánea de participantes pertenece a otro torneo.');
   });
 
+  it('does not treat server-generated physical-room timestamps as participant changes', () => {
+    const first = applyTabulationParticipantSnapshot(current, snapshot);
+    const second = applyTabulationParticipantSnapshot(first, snapshot);
+    expect(second.physicalRooms[0].updatedAt).toBeGreaterThanOrEqual(first.physicalRooms[0].updatedAt);
+    expect(sameParticipantDomain(first, second)).toBe(true);
+  });
+
+  it('does not write to Neon when the participant projection is already current', async () => {
+    const currentSnapshot = { ...snapshot, teams: [], speakers: [], judges: [], physicalRooms: [] };
+    const save = vi.fn(async (_token: string, _revision: number, tournament: Tournament) => tournament);
+    const result = await persistTabulationParticipantSnapshot('manager-token', currentSnapshot, 7, {
+      getTournament: async () => current,
+      saveTournament: save,
+    });
+    expect(result.changed).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it('detects when the participant projection is already current', () => {
     const projected = applyTabulationParticipantSnapshot(current, snapshot);
     expect(sameParticipantDomain(projected, projected)).toBe(true);
