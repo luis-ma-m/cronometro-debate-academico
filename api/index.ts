@@ -765,6 +765,13 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
     );
     const currentIdentity = locked.rows[0] as Record<string, unknown> | undefined;
     if (!currentIdentity) throw new ApiError("DATABASE_NOT_INITIALIZED", "No existe una identidad canónica activa.", 503);
+    // Re-check after acquiring the singleton lock: a concurrent retry may have
+    // completed the same operation while this request was waiting.
+    const lockedCached = await client.query("SELECT response FROM idempotency_keys WHERE operation_key=$1 AND scope='replaceActiveTournament' AND response IS NOT NULL", [operationKey]);
+    if (lockedCached.rows[0]?.response) {
+      await client.query("COMMIT");
+      return lockedCached.rows[0].response as { tournament: Tournament; archiveId: string };
+    }
     if (num(currentIdentity.revision) !== expectedRevision) {
       throw new ApiError("REVISION_CONFLICT", "El torneo activo cambió antes de la sustitución. Actualiza y vuelve a confirmar.", 409);
     }
