@@ -478,7 +478,7 @@ function GroupsList({ tournament, look, editable, update }: { tournament: TabTou
   </div>)}</div>;
 }
 
-function DraftPanel({ tournament, draft, look, acknowledged, onAcknowledge, onEdit, onUndo, onConfirm, onDiscard, onRegenerate }: {
+function DraftPanel({ tournament, draft, look, acknowledged, onAcknowledge, onEdit, onUndo, onConfirm, onDiscard, onRegenerate, onNavigate, managerSessionToken }: {
   tournament: TabTournament;
   draft: TabRoundDraft;
   look: Look;
