@@ -126,14 +126,6 @@ export async function publishTabulationRound(rawOperation: unknown) {
       }
       existingAssignmentByRoom.set(physicalRoomId, str(row.id));
     }
-    if (existingAssignmentsResult.rows.length
-      && existingAssignmentsResult.rows.length !== validated.debates.length) {
-      throw new ApiError("ROOM_SET_MISMATCH", "La ronda planificada tiene un número de salas distinto al sorteo confirmado. Ajusta las salas físicas en Gestión o Tabulación antes de sustituirla; no se han cambiado enlaces.", 409);
-    }
-    if (existingAssignmentsResult.rows.length
-      && validated.debates.some((debate) => !existingAssignmentByRoom.has(debate.physicalRoomId))) {
-      throw new ApiError("ROOM_IDENTITY_MISMATCH", "La propuesta cambia la identidad de una sala física ya enlazada. Para conservar sus URLs, las salas deben coincidir con las de la ronda planificada.", 409);
-    }
     if (existingRound) {
       const actas = await client.query(
         `SELECT 1
@@ -203,10 +195,12 @@ export async function publishTabulationRound(rawOperation: unknown) {
     );
 
     const assignmentIds: string[] = [];
+    const usedAssignmentIds = new Set<string>();
     for (const debate of validated.debates) {
       // Match by stable physical-room identity, not by array order or local debate ID.
       const assignmentId = existingAssignmentByRoom.get(debate.physicalRoomId) ?? randomUUID();
       assignmentIds.push(assignmentId);
+      usedAssignmentIds.add(assignmentId);
       if (existingAssignmentByRoom.has(debate.physicalRoomId)) {
         await client.query(
           `UPDATE room_assignments
@@ -256,6 +250,22 @@ export async function publishTabulationRound(rawOperation: unknown) {
           managerRoundId, assignmentId, JSON.stringify({ operationId: operation.operationId, chairJudgeId: debate.chairId || null,
             sidesProvisional: debate.sidesProvisional, venueName: debate.venueName, tournamentId: canonicalTournamentId })],
       );
+    }
+
+    // Any previously planned room not used by the confirmed draw stays addressable,
+    // but is cleared to an unassigned state instead of retaining stale teams/judges.
+    for (const assignmentId of existingAssignmentByRoom.values()) {
+      if (usedAssignmentIds.has(assignmentId)) continue;
+      await client.query(
+        `UPDATE room_assignments
+            SET team_favor_id = NULL, team_contra_id = NULL, notes = '',
+                timer_status = 'idle', phase_index = 0, remaining_seconds = $2,
+                started_at = NULL, last_resumed_at = NULL,
+                timer_revision = COALESCE(timer_revision, 0) + 1, timer_updated_at = now()
+          WHERE id = $1 AND round_id = $3`,
+        [assignmentId, firstPhaseDuration, managerRoundId],
+      );
+      await client.query("DELETE FROM assignment_judges WHERE assignment_id = $1", [assignmentId]);
     }
 
     const nextRevision = currentRevision + 1;
