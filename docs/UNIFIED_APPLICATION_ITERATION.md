@@ -1,43 +1,34 @@
-# Iteración: shell único de Gestión y Tabulación
+# Iteración: shell único y sincronización bidireccional de Tabulación
 
-## Cambios realizados
+## Aplicación y navegación
+- Gestión y Tabulación se montan dentro de una sola raíz React y un único shell visible.
+- `/tabulacion` se conserva como redirección compatible; `/acta` permanece como ruta pública independiente para jueces.
+- Los atajos heredados de equipos, jueces, puntuaciones, torneo y configuración conducen a las secciones integradas.
+- No se han borrado físicamente todos los componentes legacy ni los stores locales. Se conserva el almacenamiento offline y los datos de recuperación hasta completar una migración/exportación verificada.
 
-- El punto de entrada monta una sola raíz React para la aplicación de Gestión.
-- La ruta histórica `/tabulacion` se conserva como redirección compatible a `/#tabulation`; no monta un segundo root ni una página independiente.
-- El shell de Gestión expone Resumen, Rondas y salas y Tabulación.
-- Tabulación se carga de forma diferida dentro del contenido del shell y mantiene sus secciones internas (Inicio, Reglas, Participantes, Rondas, Actas, Clasificación y Registro).
-- Los atajos heredados que apuntaban a Equipos/Jueces/Puntuaciones/Torneo/Configuración se redirigen a Participantes/Actas/Clasificación/Reglas.
-- La ruta pública `/acta` permanece separada porque la utilizan jueces externos y no debe exigir sesión del gestor.
-- Se conserva la outbox IndexedDB, el dispatcher de comandos tipados y el diario remoto de operaciones. El ACK de una operación remota no debe inferirse del health check.
-- Tabulación conserva su store local para disponibilidad offline y ahora sincroniza cambios del dominio participante con el gestor/Neon mediante la revisión remota disponible.
+## Autoridad remota y sincronización
+- El agregado del Gestor se lee y escribe desde PostgreSQL normalizado (Neon) con control optimista de revisión.
+- Participantes, oradores, jueces, salas físicas e incompatibilidades se proyectan entre Tabulación y el agregado canónico del Gestor mediante el mapa de identidades y revisión optimista.
+- Las reglas de Tabulación se hidratan desde `tabulation_settings` y los cambios locales se guardan en Neon con revisión e idempotencia. Un conflicto no sobrescribe la versión remota; se conserva copia local.
+- La publicación de rondas crea en una transacción la ronda, asignaciones, fases del cronómetro, jueces, metadata y mappings de identidad.
+- El ACK de publicación actualiza en Tabulación el ID de ronda del Gestor y el mapping de cada debate a su asignación.
+- El endpoint `getTabulationPublishedRounds` reconstruye en clientes posteriores las rondas y asignaciones desde Neon, incluyendo los mappings de identidad y las cabezas oficiales de acta. Así el segundo dispositivo no depende de que exista el IndexedDB del dispositivo que publicó la ronda.
+- Las actas oficiales se leen desde la versión vigente de `tabulation_acta_heads`/`tabulation_acta_sources` y se vuelven a proyectar a IDs locales antes de calcular resultados y clasificación.
+- Las actas se publican mediante outbox IndexedDB, diario remoto, idempotencia y recuperación de ACK ambiguos. La primera escritura no sustituye una versión oficial diferente sin confirmación expresa.
+- El worker conserva la cola en desconexiones y solo elimina operaciones con confirmación remota.
 
-## Retirada de versiones locales antiguas
-
-Esta iteración retira el acceso operativo al frontend independiente de Tabulación y elimina sus enlaces de navegación. No borra todavía los stores, claves, formatos ni componentes legacy: el inventario `LEGACY_HANDOFF_INVENTORY.md` documenta consumidores de handoffs, mappings, ACKs, borradores, logs y backups. Eliminarlos sin migración/exportación verificada podría perder actas o impedir recuperar entregas pendientes.
-
-Los antiguos formularios internos de Gestión permanecen temporalmente en el código, pero ya no aparecen en la navegación principal y los accesos contextuales conocidos se redirigen a las vistas integradas. La eliminación física de esos componentes requiere verificar que no quedan consumidores, pruebas de equivalencia y un plan de rollback.
-
-## Límites de sincronización
-
-La integración visual no equivale a una sincronización total. En esta rama:
-
-- Participantes se proyectan al snapshot remoto del gestor con revisión optimista; los conflictos bloquean la sobrescritura.
-- Publicación de rondas y operaciones de actas usan la outbox local y el diario remoto, con ACK e idempotencia.
-- Se ha incorporado la recuperación de ACK ambiguos: antes de repetir una escritura de ronda/acta, el dispatcher consulta el resultado idempotente de Neon. El endpoint verifica sesión, torneo, operationId, tipo/ID de entidad y hash contra el diario antes de devolver el resultado previo.
-- Los tests del dispatcher cubren la recuperación de un acta ya confirmada sin repetir preview ni escritura.
-- El journal solo autoriza actualmente los comandos tipados de publicación de ronda y sustitución de acta. No es una API genérica de mutación.
-- Las reglas siguen siendo propiedad del gestor y necesitan persistencia/lectura versionada desde el mismo contexto remoto.
-- La reconstrucción multi-dispositivo del agregado completo (rondas, asignaciones, reglas, actas, resultados y proyecciones) todavía no está demostrada de extremo a extremo.
-- No se ha validado el ciclo completo de publicación → asignación del cronómetro → control desde otra sesión → acta → clasificación con dos clientes y Neon aislado.
+## Límites y precauciones
+- La sincronización local de Tabulación continúa disponible offline; una edición offline no se convierte en oficial hasta recibir ACK de Neon.
+- Los metadatos locales no almacenados por el Gestor (por ejemplo, algunos datos de organización/siembra) siguen preservándose en el navegador que los creó. La reconstrucción remota se centra en participantes, reglas, rondas, asignaciones y actas oficiales.
+- El inventario `LEGACY_HANDOFF_INVENTORY.md` sigue siendo la guía para retirar stores, claves, handoffs y componentes antiguos. No eliminarlos hasta verificar todos los consumidores y disponer de rollback.
+- No se han ejecutado migraciones ni escrituras de prueba contra Neon Production en esta iteración.
+- La reconstrucción multi-dispositivo debe probarse con dos sesiones reales y una base Neon de Preview/aislada; el build por sí solo no demuestra coherencia funcional.
 
 ## Validación y despliegue
-
-- Los cambios se han sometido a GitHub Actions mediante PR #88. Los jobs de `verify` y `e2e` continúan en cola; todavía no hay resultado de test que permita declarar CI aprobada.
-- Se han consumido 2 de los 3 deployments autorizados. Ambos han terminado en `BUILD_FAILED / Resource provisioning failed`, también con máquina de build turbo. Vercel no ha proporcionado eventos de build; el fallo ocurre antes de que podamos atribuirlo a TypeScript, Vite o al código de la aplicación.
-- Se reserva el tercer y último deployment. No se utilizará hasta que CI avance o exista una corrección concreta que merezca validar.
-- No se ha realizado ninguna migración ni escritura de prueba en Neon Production.
-- Mantener PR #88 en Draft hasta completar CI, Preview, pruebas multi-cliente y comprobación de los cronómetros.
+- GitHub Actions sigue con jobs `verify` y `e2e` en cola, sin pasos iniciados; el bloqueo está en la ejecución de Actions y no hay resultados que podamos declarar aprobados.
+- Los primeros deployments de esta iteración permitieron recuperar los errores de TypeScript ocultos por el fallo de infraestructura. Los errores identificados se han corregido en commits posteriores.
+- Presupuesto nuevo autorizado: 3 deployments. El primer deployment de este nuevo presupuesto detectó fallbacks JSON y un cast de acta conjunta que se corrigieron; el segundo confirmó que quedaba el cast sin corregir en el commit desplegado. El tercero queda reservado para validar el commit corregido.
+- Mantener PR #88 en Draft hasta que el build pase, la Preview responda, se verifique el endpoint con Neon aislado y se complete el recorrido con dos clientes.
 
 ## Criterio de cierre
-
-No marcar la solución como production-ready hasta que todos los flujos de escritura y lectura compartan autoridad remota, las operaciones sobrevivan a recarga y segundo dispositivo, los conflictos sean resolubles sin pérdida, y el recorrido de cronómetros y actas pase las pruebas de integración/E2E.
+No declarar production-ready ni fusionar hasta validar en dos dispositivos: edición de participantes/reglas, publicación de ronda, aparición de asignaciones en Gestión y cronómetros, envío/lectura de actas oficiales, clasificación equivalente, desconexión/reconexión, conflictos y recuperación tras perder un ACK.
