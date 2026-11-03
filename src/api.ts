@@ -345,3 +345,20 @@ export const getTabulationSyncOperationStatus = (
   token: string,
   operation: { operationId: string; tournamentId: string; entityType: string; entityId: string; payloadHash: string },
 ) => apiCall<{ found: boolean; response?: unknown }>('getTabulationSyncOperationStatus', { token, ...operation });
+
+export type AuthoritativeTabulationSnapshot = {
+  tabTournamentId: string;
+  tournamentName: string;
+  schemaVersion: number;
+  revision: number;
+  snapshot: import('./tabulation/types').TabTournament;
+  snapshotSha256: string;
+  updatedAt: number;
+};
+export type TabulationPublicationResult = AuthoritativeTabulationSnapshot & { created: boolean };
+export const publishTabulationSnapshot = (
+  token: string,
+  input: { tabTournamentId: string; expectedRevision: number; operationId: string; snapshot: import('./tabulation/types').TabTournament },
+) => apiCall<TabulationPublicationResult>('publishTabulationSnapshot', { token, ...input });
+export const getAuthoritativeTabulationSnapshot = (token: string, tabTournamentId: string) =>
+  apiCall<AuthoritativeTabulationSnapshot | null>('getAuthoritativeTabulationSnapshot', { token, tabTournamentId });
