@@ -213,7 +213,7 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
             entityId: pending.round.id,
             operation: 'publish-round' as const,
             baseRevision: savedTournament.panelLink.remoteRevision ?? 0,
-            payload: proposal.outbox,
+            payload: { ...proposal.outbox },
             payloadHash: await hashSyncPayload(proposal.outbox),
           };
           const published = await publishTabulationRound(managerSessionToken, operation);
