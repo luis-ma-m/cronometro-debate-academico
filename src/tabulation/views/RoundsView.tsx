@@ -510,7 +510,18 @@ function DraftPanel({ tournament, draft, look, acknowledged, onAcknowledge, onEd
       {problems.errors.length > 0 && <><h4 className="tab-review-title error">Errores que impiden confirmar ({problems.errors.length})</h4><IssueList items={problems.errors} kind="error" /></>}
       {problems.warnings.length > 0 && <><h4 className="tab-review-title">Avisos para revisar ({problems.warnings.length})</h4><IssueList items={problems.warnings} /></>}
     </div>}
-    <p className="muted tab-confirm-hint">Al confirmar se guarda la ronda, se descarga el ZIP (CSV, TXT, PDF y copia privada) y se muestra en pantalla.</p>
+    {!tournament.panelLink?.remoteId && <div className="tab-review" role="status">
+      <h4 className="tab-review-title">Este torneo todavía no está vinculado a Gestión</h4>
+      <p className="muted">El borrador se conserva, pero no se puede publicar hasta vincular este torneo con la identidad canónica de Gestión. Ve a Inicio y utiliza la revisión de correspondencias para vincularlo; se creará una copia de seguridad y podrás conservar los IDs locales.</p>
+      <div className="tab-actions">
+        <button type="button" className="button secondary" onClick={() => onNavigate('inicio')}>Ir a Inicio para vincular</button>
+      </div>
+    </div>}
+    {tournament.panelLink?.remoteId && !managerSessionToken && <div className="tab-review" role="status">
+      <h4 className="tab-review-title">Gestión no tiene una sesión autenticada</h4>
+      <p className="muted">El torneo está vinculado, pero necesitas iniciar sesión en Gestión antes de publicar. El borrador permanece guardado.</p>
+    </div>}
+    <p className="muted tab-confirm-hint">Al confirmar, Gestión valida y guarda la ronda en Neon. El borrador solo pasa a confirmada cuando el servidor devuelve su acuse de recibo.</p>
     <div className="tab-confirm-bar">
       <div className="tab-confirm-status">
         <span className={'state-pill ' + (problems.errors.length ? 'tab-invalid' : 'ready')}>{problems.errors.length ? problems.errors.length + (problems.errors.length === 1 ? ' error' : ' errores') : 'Sin errores'}</span>
