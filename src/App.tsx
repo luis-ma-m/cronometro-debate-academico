@@ -322,6 +322,11 @@ export default function App() {
       };
       const issues = validateAssignments(imported);
       if (issues.length) throw new Error('El snapshot no se puede importar en Gestión: ' + issues.slice(0, 5).join(' '));
+      const latestPublication = await getAuthoritativeTabulationSnapshot(session.token, selectedTabulationPublication);
+      if (!latestPublication || latestPublication.revision !== published.revision
+        || latestPublication.snapshotSha256 !== published.snapshotSha256) {
+        throw new Error('Tabulación ha publicado una revisión nueva durante la importación. Actualiza la lista y vuelve a revisar antes de continuar.');
+      }
       const saved = await saveTournament(session.token, current.revision, imported);
       writeCanonicalManager(saved);
       setData(saved);
