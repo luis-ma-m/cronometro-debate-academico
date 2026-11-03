@@ -163,6 +163,7 @@ describe('canonical tournament repository', () => {
     const raw = JSON.parse(local.getItem(CANONICAL_TOURNAMENT_KEY)!);
     expect(Object.keys(raw.entities).filter((key) => key.includes('|round|round-manager'))).toHaveLength(1);
     expect(Object.keys(raw.entities).filter((key) => key.includes('|assignment|assignment-manager'))).toHaveLength(1);
+    expect(repository.readManager<Tournament>()?.rounds[0]).toMatchObject({ id: 'round-manager', name: 'Ronda oficial' });
     expect(repository.readManager<Tournament>()?.rooms[0]).toMatchObject({
       id: 'room-manager', assignmentId: 'assignment-manager',
     });
