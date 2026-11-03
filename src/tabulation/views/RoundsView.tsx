@@ -272,8 +272,10 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
       const changes = diffRounds(current, latest, next);
       return changes.length ? { next: { ...current, rounds: current.rounds.map((item) => (item.id === target.id ? next : item)) }, meta: { type: 'round.edit', message: target.name + ' · jueces completados automáticamente: ' + changes.join(' ') } } : null;
     });
-    if (applied) await enqueueUpdatedRound(target.id);
-    else notify('No hay asientos de juez que se puedan completar.', 'warning');
+    if (applied) {
+      if (store.getState().tournament?.panelLink?.remoteId) await enqueueUpdatedRound(target.id);
+      else notify('Paneles completados con los jueces disponibles.', 'success');
+    } else notify('No hay asientos de juez que se puedan completar.', 'warning');
   };
 
   const reopen = (target: TabRound) => {
