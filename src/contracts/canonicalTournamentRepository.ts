@@ -19,7 +19,7 @@ interface CanonicalEntity {
   tabulationSourceId?: string;
   managerData?: JsonRecord;
   tabulationData?: JsonRecord;
-  shared: { name?: string; institution?: string; active?: boolean };
+  shared: { name?: string; institution?: string; active?: boolean; teamId?: string; incompatibleJudgeIds?: string[] };
 }
 
 interface CanonicalDocument {
@@ -45,7 +45,6 @@ const emptyDocument = (): CanonicalDocument => ({
 const object = (value: unknown): value is JsonRecord => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const entityKey = (scope: string, kind: EntityKind, id: string) => scope + '|' + kind + '|' + id;
-const sourceRecord = (value: unknown): JsonRecord => object(value) ? value : {};
 
 function parseDocument(raw: string | null): CanonicalDocument | null {
   if (!raw) return null;
@@ -132,7 +131,11 @@ function pruneSourceEntities(document: CanonicalDocument, scope: string, source:
       delete next.tabulationSourceId;
     }
     if (!next.managerData && !next.tabulationData) delete document.entities[key];
-    else document.entities[key] = next;
+    else {
+      const remaining = next.managerData ?? next.tabulationData ?? {};
+      next.shared = sharedFields(entity.kind, remaining);
+      document.entities[key] = next;
+    }
   }
 }
 
@@ -316,22 +319,33 @@ export function migrateLegacyTournamentStorage(storage: Storage): void {
   try {
     const raw = JSON.parse(storage.getItem(TAB_INDEX_KEY) ?? 'null') as CanonicalDocument['tabulationIndex'] | null;
     if (raw && Array.isArray(raw.tournaments)) index = raw;
-  } catch { /* The store will rebuild from individual legacy tournament keys. */ }
-  if (index) repository.writeIndex(index);
+  } catch { /* Rebuild from individual legacy tournament keys. */ }
 
   const keys: string[] = [];
   for (let i = 0; i < storage.length; i++) {
     const key = storage.key(i);
     if (key?.startsWith(TAB_PREFIX)) keys.push(key);
   }
+  const migratedEntries: CanonicalDocument['tabulationIndex']['tournaments'] = [];
   for (const key of keys) {
     const id = key.slice(TAB_PREFIX.length);
-    if (repository.readTabulation(id)) continue;
-    try {
-      const raw = JSON.parse(storage.getItem(key) ?? 'null') as TabTournament | null;
-      if (raw && raw.id === id) repository.writeTabulation(raw);
-    } catch { /* Keep the malformed legacy record untouched. */ }
+    let tournament = repository.readTabulation<TabTournament>(id);
+    if (!tournament) {
+      try {
+        const raw = JSON.parse(storage.getItem(key) ?? 'null') as TabTournament | null;
+        if (raw && raw.id === id) {
+          repository.writeTabulation(raw);
+          tournament = raw;
+        }
+      } catch { /* Keep the malformed legacy record untouched. */ }
+    }
+    if (tournament) migratedEntries.push({ id, name: tournament.name, updatedAt: tournament.updatedAt });
   }
+  if (index) repository.writeIndex(index);
+  else if (migratedEntries.length) repository.writeIndex({
+    activeId: migratedEntries.sort((a, b) => b.updatedAt - a.updatedAt)[0].id,
+    tournaments: migratedEntries,
+  });
 }
 
 export function createCanonicalTabulationStorage(legacy: Storage): Storage {
