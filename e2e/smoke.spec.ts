@@ -9,7 +9,6 @@ test('smoke: crear torneo, generar y confirmar una ronda', async ({ page }) => {
     sessionStorage.clear();
   });
   await page.goto('/tabulacion');
-  await page.getByRole('navigation').getByRole('button', { name: 'Inicio' }).click();
   await expect(page.getByRole('heading', { level: 2, name: 'Tabulación del torneo' })).toBeVisible();
   const createSample = page.getByRole('button', { name: /Crear ensayo ADUMA/ });
   await expect(createSample).toBeVisible();
