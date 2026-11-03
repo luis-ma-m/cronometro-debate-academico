@@ -9,7 +9,7 @@ let browserStore: TabStore | null = null;
  * of the browser writes; the others stay read-only until they take control.
  */
 export function getBrowserTabStore(): TabStore {
-  browserStore ??= createTabStore({ storage: window.localStorage, lock: null });
+  browserStore ??= createTabStore({ storage: window.localStorage, lock: createWriterLock({ name: 'ledu-tabulacion' }) });
   return browserStore;
 }
 

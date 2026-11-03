@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
+import TabulationApp, { type TabulationViewId } from './tabulation/TabulationApp';
 import TabulationApp from './tabulation/TabulationApp';
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, Settings, ShieldCheck, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Settings, ShieldCheck, Shuffle, SlidersHorizontal, Trophy, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
 import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
@@ -95,6 +96,7 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [serverError, setServerError] = useState('');
   const [view, setView] = useState<View>(() => window.location.pathname === '/tabulacion' ? 'tabulation' : 'overview');
+  const [tabulationView, setTabulationView] = useState<TabulationViewId>(() => { const value = window.location.hash.replace(/^#/, '').split('/')[0]; return ['inicio','reglas','participantes','rondas','actas','clasificacion','registro'].includes(value) ? value as TabulationViewId : 'inicio'; });
   const [selectedRound, setSelectedRound] = useState('');
   const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
   const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([]);
@@ -1249,18 +1251,23 @@ export default function App() {
     ? incompatibilityIncidents.filter((incident) => data.rooms.some((room) => room.id === incident.roomId && room.roundId === activeTournamentRoundId))
     : [];
 
-  if (view === 'tabulation') {
-    return <div className="app-shell unified-shell">
-      <UnifiedSidebar view={view} setView={(next) => { setView(next); window.history.replaceState(null, '', next === 'tabulation' ? '/tabulacion' + window.location.hash : '/'); }} apiConfigured={apiConfigured} logout={logout} />
-      <main className="main-area unified-main">
-        <div className="workspace-heading"><div><span className="eyebrow">ESPACIO DE COMPETICIÓN</span><h1>{data.tournamentName}</h1></div><span className="workspace-tag tab-tag">TABULACIÓN</span></div>
-        <TabulationApp embedded />
-      </main>
-    </div>;
-  }
-
   return <div className="app-shell unified-shell">
-    <UnifiedSidebar view={view} setView={(next) => { setView(next); window.history.replaceState(null, '', '/'); }} apiConfigured={apiConfigured} logout={logout} />
+    <UnifiedSidebar
+      view={view}
+      tabulationView={tabulationView}
+      setView={(next) => {
+        setView(next);
+        window.history.replaceState(null, '', next === 'tabulation' ? '/tabulacion' + (window.location.hash || '#inicio') : '/');
+      }}
+      setTabulationView={(id) => {
+        setTabulationView(id);
+        if (view !== 'tabulation') setView('tabulation');
+        window.history.replaceState(null, '', '/tabulacion#' + id);
+      }}
+      apiConfigured={apiConfigured}
+      logout={logout}
+    />
+    <div className="manager-workspace" hidden={view === 'tabulation'}>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
       {preparingRoomId && <div className="notice warning-notice"><RefreshCw size={17} /><span>Guardando los cambios y preparando el enlace de la sala…</span></div>}
@@ -1416,6 +1423,11 @@ export default function App() {
 
       <footer className="footer"><span>Debate Control · Herramienta de organización</span><span>{connected ? 'Conectado' : 'Conexión no confirmada'} · {lastSyncedAt ? 'Última sincronización: ' + new Date(lastSyncedAt).toLocaleTimeString('es-ES') : 'Sin sincronización confirmada'} · {apiConfigured ? 'Neon PostgreSQL' : 'Demo local'}</span></footer>
     </main>
+    </div>
+    <div className="tabulation-workspace" hidden={view !== 'tabulation'}>
+      <div className="tab-workspace-heading"><span className="eyebrow">ESPACIO DE COMPETICIÓN</span><span className="workspace-tag">TABULACIÓN</span></div>
+      <TabulationApp embedded onViewChange={(id) => setTabulationView(id)} />
+    </div>
   </div>;
 }
 
@@ -1675,7 +1687,7 @@ function ScoringView({
   </>;
 }
 
-function UnifiedSidebar({ view, setView, apiConfigured, logout }: { view: View; setView: (next: View) => void; apiConfigured: boolean; logout: () => void }) {
+function UnifiedSidebar({ view, tabulationView, setView, setTabulationView, apiConfigured, logout }: { view: View; tabulationView: TabulationViewId; setView: (next: View) => void; setTabulationView: (id: TabulationViewId) => void; apiConfigured: boolean; logout: () => void }) {
   return <aside className="sidebar unified-sidebar">
     <div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div>
     <div className="sidebar-section">GESTIÓN</div>
@@ -1690,7 +1702,13 @@ function UnifiedSidebar({ view, setView, apiConfigured, logout }: { view: View; 
     </nav>
     <div className="sidebar-section unified-section">TABULACIÓN</div>
     <nav>
-      <NavButton icon={<ClipboardList size={18} />} label="Inicio" selected={view === 'tabulation'} onClick={() => setView('tabulation')} />
+      <NavButton icon={<ClipboardList size={18} />} label="Inicio" selected={view === 'tabulation' && tabulationView === 'inicio'} onClick={() => { setView('tabulation'); setTabulationView('inicio'); }} />
+      <NavButton icon={<SlidersHorizontal size={18} />} label="Reglas" selected={view === 'tabulation' && tabulationView === 'reglas'} onClick={() => { setView('tabulation'); setTabulationView('reglas'); }} />
+      <NavButton icon={<Users size={18} />} label="Participantes" selected={view === 'tabulation' && tabulationView === 'participantes'} onClick={() => { setView('tabulation'); setTabulationView('participantes'); }} />
+      <NavButton icon={<Shuffle size={18} />} label="Rondas" selected={view === 'tabulation' && tabulationView === 'rondas'} onClick={() => { setView('tabulation'); setTabulationView('rondas'); }} />
+      <NavButton icon={<ClipboardList size={18} />} label="Actas" selected={view === 'tabulation' && tabulationView === 'actas'} onClick={() => { setView('tabulation'); setTabulationView('actas'); }} />
+      <NavButton icon={<Trophy size={18} />} label="Clasificación" selected={view === 'tabulation' && tabulationView === 'clasificacion'} onClick={() => { setView('tabulation'); setTabulationView('clasificacion'); }} />
+      <NavButton icon={<ScrollText size={18} />} label="Registro" selected={view === 'tabulation' && tabulationView === 'registro'} onClick={() => { setView('tabulation'); setTabulationView('registro'); }} />
     </nav>
     <div className="sidebar-bottom"><span className="connection-dot" />{apiConfigured ? 'Base de datos conectada' : 'Modo demostración'}<button className="sidebar-logout" onClick={logout}><LogOut size={16} /> Cerrar sesión</button></div>
   </aside>;

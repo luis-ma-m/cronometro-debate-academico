@@ -25,7 +25,8 @@ const VIEWS = [
   { id: 'clasificacion', label: 'Clasificación', icon: Trophy },
   { id: 'registro', label: 'Registro', icon: ScrollText },
 ] as const;
-type ViewId = (typeof VIEWS)[number]['id'];
+export type TabulationViewId = (typeof VIEWS)[number]['id'];
+type ViewId = TabulationViewId;
 
 function readHashView(): ViewId {
   const id = window.location.hash.replace(/^#/, '').split('/')[0];
@@ -33,16 +34,16 @@ function readHashView(): ViewId {
 }
 
 /** Even a failure of the shell itself (not only of one screen) leaves the data safe and offers the emergency copy. */
-export default function TabulationApp({ embedded = false }: { embedded?: boolean }) {
+export default function TabulationApp({ embedded = false, onViewChange }: { embedded?: boolean; onViewChange?: (id: TabulationViewId) => void }) {
   const onError = (error: Error) => {
     try {
       getBrowserTabStore().logError('Fallo de la aplicación: ' + error.message);
     } catch { /* The crash screen still offers the emergency copy. */ }
   };
-  return <ErrorBoundary resetKey="app" onError={onError} page={!embedded}><TabulationShell embedded={embedded} /></ErrorBoundary>;
+  return <ErrorBoundary resetKey="app" onError={onError} page={!embedded}><TabulationShell embedded={embedded} onViewChange={onViewChange} /></ErrorBoundary>;
 }
 
-function TabulationShell({ embedded }: { embedded: boolean }) {
+function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onViewChange?: (id: TabulationViewId) => void }) {
   const store = getBrowserTabStore();
   const state = useTabStore(store);
   const [view, setViewState] = useState<ViewId>(readHashView);
@@ -52,11 +53,11 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   const tournament = state.tournament;
 
   useEffect(() => {
-    const onHashChange = () => setViewState(readHashView());
+    const onHashChange = () => { const next = readHashView(); setViewState(next); onViewChange?.(next); };
     window.addEventListener('hashchange', onHashChange);
     const timer = window.setInterval(() => setNow(Date.now()), 5000);
     return () => { window.removeEventListener('hashchange', onHashChange); window.clearInterval(timer); };
-  }, []);
+  }, [onViewChange]);
   useEffect(() => {
     // Every unexpected error is kept in the log (once per message); none of them stops the page.
     const onError = (event: ErrorEvent) => store.logError('Error en la página: ' + (event.message || 'desconocido') + '.');
@@ -96,8 +97,9 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   const setView = useCallback((id: ViewId) => {
     window.location.hash = id;
     setViewState(id);
+    onViewChange?.(id);
     setNotice(null);
-  }, []);
+  }, [onViewChange]);
   const notify = useCallback((message: string, kind: NoticeKind = 'success') => setNotice({ message, kind }), []);
   const update = useCallback<ViewProps['update']>((mutator, meta) => {
     const applied = store.update(mutator, meta);
