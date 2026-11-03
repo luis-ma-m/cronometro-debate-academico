@@ -135,6 +135,7 @@ export function mergePublishedTabulationRounds(
     grouped.set(row.tabulationRoundId, group);
   }
   const previous = new Map(tournament.rounds.map((round) => [round.id, round]));
+  const publishedIds = new Set(grouped.keys());
   const rounds: TabRound[] = [...grouped.entries()].map(([id, group]) => {
     const row = group.first;
     const old = previous.get(id);
@@ -148,7 +149,11 @@ export function mergePublishedTabulationRounds(
       seed: old?.seed ?? 0, silent: old?.silent ?? false, debates,
       createdAt: old?.createdAt ?? now, managerRoundId: row.managerRoundId, pushedAt: old?.pushedAt ?? now,
     };
-  }).sort((a, b) => a.number - b.number);
+  });
+  // A locally generated draft/round that has not been published is not in Neon yet.
+  // Keep it intact rather than deleting it during a remote refresh.
+  for (const round of tournament.rounds) if (!publishedIds.has(round.id)) rounds.push(round);
+  rounds.sort((a, b) => a.number - b.number);
   const metadata = rows(relevant[0].teamMetadata);
   const metadataById = new Map(metadata.filter((item) => typeof item.teamId === 'string').map((item) => [String(item.teamId), item]));
   const teams = tournament.teams.map((item) => {
