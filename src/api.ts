@@ -276,7 +276,7 @@ export async function resolveActaShortLink(id:string):Promise<{snapshot:unknown;
 /** Read-only recovery of an ACK committed in Neon after an ambiguous timeout. */
 export const getTabulationSyncOperationStatus = (
   token: string, operation: {
-    operationId: string; tournamentId: string; entityType: 'round' | 'acta';
+    operationId: string; tournamentId: string; entityType: string;
     entityId: string; payloadHash: string;
   },
 ) => apiCall<{ found: boolean; response?: unknown }>('getTabulationSyncOperationStatus', { token, ...operation });
