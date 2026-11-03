@@ -272,3 +272,11 @@ export async function resolveActaShortLink(id:string):Promise<{snapshot:unknown;
  if(!response.ok||body.ok!==true||!body.data?.snapshot)throw new ApiError(body.error?.message??'No se ha podido recuperar el acta.',body.error?.code??'SHORT_LINK_ERROR');
  return{snapshot:body.data.snapshot,expiresAt:body.data.expiresAt??null};
 }
+
+/** Read-only recovery of an ACK committed in Neon after an ambiguous timeout. */
+export const getTabulationSyncOperationStatus = (
+  token: string, operation: {
+    operationId: string; tournamentId: string; entityType: 'round' | 'acta';
+    entityId: string; payloadHash: string;
+  },
+) => apiCall<{ found: boolean; response?: unknown }>('getTabulationSyncOperationStatus', { token, ...operation });
