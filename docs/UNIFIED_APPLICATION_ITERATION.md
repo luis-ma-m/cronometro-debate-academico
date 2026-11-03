@@ -23,6 +23,8 @@ La integración visual no equivale a una sincronización total. En esta rama:
 
 - Participantes se proyectan al snapshot remoto del gestor con revisión optimista; los conflictos bloquean la sobrescritura.
 - Publicación de rondas y operaciones de actas usan la outbox local y el diario remoto, con ACK e idempotencia.
+- Se ha incorporado la recuperación de ACK ambiguos: antes de repetir una escritura de ronda/acta, el dispatcher consulta el resultado idempotente de Neon. El endpoint verifica sesión, torneo, operationId, tipo/ID de entidad y hash contra el diario antes de devolver el resultado previo.
+- Los tests del dispatcher cubren la recuperación de un acta ya confirmada sin repetir preview ni escritura.
 - El journal solo autoriza actualmente los comandos tipados de publicación de ronda y sustitución de acta. No es una API genérica de mutación.
 - Las reglas siguen siendo propiedad del gestor y necesitan persistencia/lectura versionada desde el mismo contexto remoto.
 - La reconstrucción multi-dispositivo del agregado completo (rondas, asignaciones, reglas, actas, resultados y proyecciones) todavía no está demostrada de extremo a extremo.
