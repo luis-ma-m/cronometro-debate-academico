@@ -6,7 +6,7 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId, type PanelEntityIdMap } from './types';
-import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament } from '../api';
+import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament, publishTabulationSnapshot } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
 import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
@@ -513,6 +513,46 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [managerSession?.token, refreshRemoteParticipants]);
+  const authoritativePublication = useRef<{ timerId: string; inFlight: boolean; expectedRevision: number } | null>(null);
+  const publishAuthoritativeSnapshot = useCallback(async (candidate: import('./types').TabTournament) => {
+    const token = managerSession?.token;
+    if (!apiConfigured || !token || candidate.sample) return;
+    const current = authoritativePublication.current;
+    if (current?.inFlight) return;
+    const stateRevision = current?.timerId === candidate.id ? current.expectedRevision : 0;
+    authoritativePublication.current = { timerId: candidate.id, inFlight: true, expectedRevision: stateRevision };
+    const operationId = makeTabId('tabpub');
+    try {
+      const result = await publishTabulationSnapshot(token, {
+        tabTournamentId: candidate.id,
+        expectedRevision: stateRevision,
+        operationId,
+        snapshot: candidate,
+      });
+      if (result.tabTournamentId !== candidate.id || result.snapshot.id !== candidate.id
+        || result.revision !== stateRevision + 1 || !/^[a-f0-9]{64}$/.test(result.snapshotSha256)) {
+        throw new Error('El servidor devolvió una identidad, revisión o hash de snapshot incoherente.');
+      }
+      authoritativePublication.current = { timerId: candidate.id, inFlight: false, expectedRevision: result.revision };
+      store.log({ type: 'sync.ack', message: 'Snapshot íntegro publicado en Neon', details: {
+        tabTournamentId: candidate.id, revision: result.revision, snapshotSha256: result.snapshotSha256,
+      } });
+      setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
+    } catch (error) {
+      authoritativePublication.current = { timerId: candidate.id, inFlight: false, expectedRevision: stateRevision };
+      store.logError(error instanceof Error ? error.message : 'No se pudo publicar el snapshot autoritativo.');
+      notify((error instanceof Error ? error.message : 'No se pudo publicar el snapshot autoritativo.')
+        + ' La copia local sigue disponible; Gestión no debe considerar publicada esta revisión.', 'error');
+    }
+  }, [managerSession?.token, store, notify]);
+  useEffect(() => {
+    if (!tournament || state.readOnly || state.status !== 'saved' || tournament.sample) return;
+    const token = managerSession?.token;
+    if (!apiConfigured || !token) return;
+    if (authoritativePublication.current?.timerId === tournament.id
+      && authoritativePublication.current.expectedRevision >= tournament.revision) return;
+    void publishAuthoritativeSnapshot(tournament);
+  }, [tournament?.id, tournament?.revision, state.status, state.readOnly, managerSession?.token, publishAuthoritativeSnapshot]);
   const update = useCallback<ViewProps['update']>((mutator, meta) => {
     const before = store.getState().tournament;
     const applied = store.update(mutator, meta);
