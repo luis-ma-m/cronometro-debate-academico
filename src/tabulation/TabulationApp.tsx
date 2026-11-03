@@ -5,7 +5,7 @@ import { tournamentProgress } from './progress';
 import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
-import { isFallenAt, makeTabId } from './types';
+import { isFallenAt, makeTabId, type PanelEntityIdMap } from './types';
 import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
