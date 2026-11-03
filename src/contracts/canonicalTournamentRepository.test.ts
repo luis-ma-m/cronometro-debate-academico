@@ -185,6 +185,7 @@ describe('canonical tournament repository', () => {
     expect(repository.readTabulation<TabTournament>('tab-1')?.teams[0]).toMatchObject({
       id: 'team-tab', name: 'Equipo actualizado', institution: 'UMA',
     });
-    expect(Object.keys(JSON.parse(local.getItem(CANONICAL_TOURNAMENT_KEY)!)).filter((key) => key.includes('|team|team-manager'))).toHaveLength(1);
+    const canonical = JSON.parse(local.getItem(CANONICAL_TOURNAMENT_KEY)!);
+    expect(Object.keys(canonical.entities).filter((key: string) => key.includes('|team|team-manager'))).toHaveLength(1);
   });
 });
