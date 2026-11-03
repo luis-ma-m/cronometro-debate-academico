@@ -10,11 +10,11 @@ const PORT = preview ? 5182 : 5181;
 
 export default defineConfig({
   testDir: 'e2e',
-  timeout: 180_000,
-  expect: { timeout: 10_000 },
-  fullyParallel: false,
-  workers: 1,
-  retries: process.env.CI ? 1 : 0,
+  timeout: 60_000,
+  expect: { timeout: 5_000 },
+  fullyParallel: true,
+  workers: process.env.CI ? 2 : undefined,
+  retries: 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: 'http://localhost:' + PORT,
