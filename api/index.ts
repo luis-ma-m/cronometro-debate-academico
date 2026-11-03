@@ -832,6 +832,12 @@ async function replaceActiveTournament(payload: Record<string, unknown>): Promis
     await client.query("DELETE FROM scorecard_speaker_scores");
     await client.query("DELETE FROM scorecards");
     await client.query("DELETE FROM room_assignments");
+    // Release RESTRICT references before the normalised writer prunes the old institution catalogue.
+    await client.query("DELETE FROM speakers");
+    await client.query("DELETE FROM team_judge_incompatibilities");
+    await client.query("DELETE FROM judge_incompatibilities");
+    await client.query("DELETE FROM teams");
+    await client.query("DELETE FROM judges");
     await client.query("DELETE FROM audit_events");
 
     await client.query(
