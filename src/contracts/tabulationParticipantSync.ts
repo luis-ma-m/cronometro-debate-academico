@@ -74,10 +74,14 @@ export async function persistTabulationParticipantSnapshot(
 
 export function sameParticipantDomain(left: Tournament, right: Tournament): boolean {
   const project = (value: Tournament) => ({
-    teams: value.teams,
-    speakers: value.speakers ?? [],
-    judges: value.judges,
-    physicalRooms: value.physicalRooms,
+    teams: value.teams.map(({ id, name, institution, active, incompatibleJudgeIds }) => ({
+      id, name, institution, active, incompatibleJudgeIds,
+    })),
+    speakers: (value.speakers ?? []).map(({ id, teamId, name }) => ({ id, teamId, name })),
+    judges: value.judges.map(({ id, name, institution, active, incompatibleJudgeIds }) => ({
+      id, name, institution, active, incompatibleJudgeIds,
+    })),
+    physicalRooms: value.physicalRooms.map(({ id, slug, name, active }) => ({ id, slug, name, active })),
   });
   return JSON.stringify(project(left)) === JSON.stringify(project(right));
 }
