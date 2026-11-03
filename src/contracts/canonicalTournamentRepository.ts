@@ -182,8 +182,9 @@ function updateDocument(storage: CanonicalStorage, mutate: (document: CanonicalD
   next.revision = current.revision + 1;
   next.updatedAt = now();
   storage.setItem(CANONICAL_TOURNAMENT_KEY, JSON.stringify(next));
-  // IndexedDB is a durable mirror of the canonical document. The synchronous local
-  // transaction remains the browser runtime's read boundary for legacy sync stores.
+  // IndexedDB is currently only the durable local mirror. Remote synchronization
+  // is performed by the explicit typed outbox; never silently treat this mirror
+  // as a committed server write.
   try {
     mirrorChain = mirrorChain.then(async () => {
       const repository = createIndexedDbApplicationRecordRepository();
