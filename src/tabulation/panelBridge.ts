@@ -307,7 +307,7 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const mergedTeams = [...teams.values()];
   const mergedJudges = [...judgesById.values()];
   const institutions = [...new Set([...(panel.institutions ?? []), ...mergedTeams.map((team) => team.institution), ...mergedJudges.map((judge) => judge.institution)].map((value) => value.trim()).filter(Boolean))];
-  issues.push(...validateAssignments({ ...panel, physicalRooms, teams: mergedTeams, judges: mergedJudges, rooms: rooms.filter((room) => room.roundId === panelRoundId) }));
+  issues.push(...validateAssignments({ ...panel, teams: mergedTeams, judges: mergedJudges, rooms: rooms.filter((room) => room.roundId === panelRoundId) }));
   if (issues.length) return { ...empty, rooms: null, issues: [...new Set(issues)] };
   const name = (id: string) => teams.get(id)?.name ?? id;
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
