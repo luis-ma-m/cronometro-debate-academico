@@ -307,3 +307,9 @@ export const ackSyncOperation = (
 ) => apiCall<PersistedSyncJournalEntry>('ackSyncOperation', {
   token, operationId, payloadHash, status, result, error,
 });
+
+/** Read-only recovery of a domain commit after the HTTP response/ACK was lost. */
+export const getTabulationSyncOperationStatus = (
+  token: string,
+  operation: { operationId: string; tournamentId: string; entityType: string; entityId: string; payloadHash: string },
+) => apiCall<{ found: boolean; response?: unknown }>('getTabulationSyncOperationStatus', { token, ...operation });
