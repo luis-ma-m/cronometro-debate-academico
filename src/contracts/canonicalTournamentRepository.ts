@@ -10,7 +10,7 @@ const TAB_INDEX_KEY = 'ledu-tabulacion-index-v1';
 const TAB_PREFIX = 'ledu-tabulacion-v1:';
 let mirrorChain: Promise<void> = Promise.resolve();
 
-type EntityKind = 'team' | 'speaker' | 'judge' | 'venue';
+type EntityKind = 'team' | 'speaker' | 'judge' | 'venue' | 'round' | 'assignment' | 'debate';
 type JsonRecord = Record<string, unknown>;
 
 interface CanonicalEntity {
@@ -20,7 +20,7 @@ interface CanonicalEntity {
   tabulationSourceId?: string;
   managerData?: JsonRecord;
   tabulationData?: JsonRecord;
-  shared: { name?: string; institution?: string; active?: boolean; teamId?: string; incompatibleJudgeIds?: string[] };
+  shared: { name?: string; institution?: string; active?: boolean; teamId?: string; incompatibleJudgeIds?: string[]; number?: number };
 }
 
 interface CanonicalDocument {
@@ -79,6 +79,11 @@ function sharedFields(kind: EntityKind, data: JsonRecord, mapRelation: (kind: En
     name: typeof data.name === 'string' ? data.name : undefined,
     active: typeof data.active === 'boolean' ? data.active : undefined,
   };
+  if (kind === 'round') return {
+    name: typeof data.name === 'string' ? data.name : undefined,
+    number: typeof data.number === 'number' ? data.number : undefined,
+  };
+  if (kind === 'assignment' || kind === 'debate') return {};
   return {
     name: typeof data.name === 'string' ? data.name : undefined,
     institution: typeof data.institution === 'string' ? data.institution : undefined,
@@ -145,6 +150,11 @@ function pruneSourceEntities(document: CanonicalDocument, scope: string, source:
 }
 
 function mapTabCanonical(kind: EntityKind, sourceId: string, tournament: TabTournament): string {
+  if (kind === 'round') {
+    const round = tournament.rounds.find((item) => item.id === sourceId);
+    return round?.managerRoundId ?? 'tab:' + tournament.id + ':round:' + sourceId;
+  }
+  if (kind === 'debate') return 'tab:' + tournament.id + ':debate:' + sourceId;
   const key = kind === 'venue' ? 'venues' : kind === 'team' ? 'teams' : kind === 'speaker' ? 'speakers' : 'judges';
   const mapping = tournament.panelLink?.idMap?.[key] as Record<string, string> | undefined;
   // Only an explicit ID mapping joins a Tabulation entity to a Gestión entity.
@@ -193,20 +203,24 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
     const scope = managerScope(tournament);
     updateDocument(storage, (document) => {
       document.managerScope = scope;
-      const { teams = [], speakers = [], judges = [], physicalRooms = [], ...state } = tournament;
+      const { teams = [], speakers = [], judges = [], physicalRooms = [], rounds = [], rooms = [], ...state } = tournament;
       document.managerState = clone(state as unknown as JsonRecord);
       const entries: Array<[EntityKind, Array<JsonRecord>]> = [
         ['team', teams as unknown as JsonRecord[]],
         ['speaker', (speakers ?? []) as unknown as JsonRecord[]],
         ['judge', judges as unknown as JsonRecord[]],
         ['venue', physicalRooms as unknown as JsonRecord[]],
+        ['round', rounds as unknown as JsonRecord[]],
+        ['assignment', rooms as unknown as JsonRecord[]],
       ];
       const seen = new Set<string>();
       for (const [kind, values] of entries) for (const data of values) {
         if (typeof data.id !== 'string') continue;
-        const key = entityKey(scope, kind, data.id);
+        const canonicalId = kind === 'assignment' && typeof data.assignmentId === 'string' ? data.assignmentId
+          : kind === 'assignment' ? 'manager-room:' + data.id : data.id;
+        const key = entityKey(scope, kind, canonicalId);
         seen.add(key);
-        upsertSource(document, scope, kind, data.id, 'manager', data.id, data, sharedFields(kind, data));
+        upsertSource(document, scope, kind, canonicalId, 'manager', data.id, data, sharedFields(kind, data));
       }
       pruneSourceEntities(document, scope, 'manager', seen);
     }, now);
@@ -239,7 +253,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
   function writeTabulation(tournament: TabTournament): void {
     const scope = tabScope(tournament);
     updateDocument(storage, (document) => {
-      const { teams = [], speakers = [], judges = [], venues = [], ...state } = tournament;
+      const { teams = [], speakers = [], judges = [], venues = [], rounds = [], ...state } = tournament;
       document.tabulationStates[tournament.id] = { ...clone(state as unknown as JsonRecord), __canonicalScope: scope };
       delete document.deletedTabulationIds[tournament.id];
       const entries: Array<[EntityKind, Array<JsonRecord>]> = [
@@ -247,6 +261,7 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
         ['speaker', speakers as unknown as JsonRecord[]],
         ['judge', judges as unknown as JsonRecord[]],
         ['venue', venues as unknown as JsonRecord[]],
+        ['round', rounds.map(({ debates: _debates, ...round }) => round) as unknown as JsonRecord[]],
       ];
       const seen = new Set<string>();
       for (const [kind, values] of entries) for (const data of values) {
@@ -255,6 +270,13 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
         const key = entityKey(scope, kind, canonicalId);
         seen.add(key);
         upsertSource(document, scope, kind, canonicalId, 'tabulation', data.id, data, sharedFields(kind, data, (relationKind, relationId) => mapTabCanonical(relationKind, relationId, tournament)));
+      }
+      for (const round of rounds) for (const debate of round.debates) {
+        const canonicalId = debate.managerAssignmentId ?? 'tab:' + tournament.id + ':debate:' + debate.id;
+        const kind: EntityKind = debate.managerAssignmentId ? 'assignment' : 'debate';
+        const key = entityKey(scope, kind, canonicalId);
+        seen.add(key);
+        upsertSource(document, scope, kind, canonicalId, 'tabulation', debate.id, { ...debate, __roundId: round.id }, {});
       }
       pruneSourceEntities(document, scope, 'tabulation', seen);
     }, now);
@@ -283,6 +305,12 @@ export function createCanonicalTournamentRepository(storage: CanonicalStorage, n
       speakers: entities('speaker'),
       judges: entities('judge'),
       venues: entities('venue'),
+      rounds: entities('round').map((round) => ({
+        ...round,
+        debates: [...listSource(document, scope, 'assignment', 'tabulation'), ...listSource(document, scope, 'debate', 'tabulation')]
+          .filter((entity) => entity.tabulationData?.__roundId === round.id)
+          .map((entity) => Object.fromEntries(Object.entries(entity.tabulationData ?? {}).filter(([key]) => key !== '__roundId'))),
+      })),
     } as T;
   }
 
