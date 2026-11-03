@@ -32,7 +32,12 @@ function restoreActaResult(sourcePayload: unknown, ids: {
   const lineup: Record<string, Record<string, string>> = {};
   for (const [teamId, roles] of Object.entries(result.lineup)) {
     if (!record(roles)) return undefined;
-    lineup[team(teamId)] = Object.fromEntries(Object.entries(roles).map(([role, speakerId]) => [role, typeof speakerId === 'string' ? speaker(speakerId) : speakerId as never])) as Record<string, string>;
+    const mappedRoles: Record<string, string> = {};
+    for (const [role, speakerId] of Object.entries(roles)) {
+      if (typeof speakerId !== 'string') return undefined;
+      mappedRoles[role] = speaker(speakerId);
+    }
+    lineup[team(teamId)] = mappedRoles;
   }
   const ballots = result.ballots.map((raw) => {
     if (!record(raw) || typeof raw.judgeId !== 'string' || !record(raw.totals) || !record(raw.speeches)) return null;
@@ -62,7 +67,8 @@ function restoreActaResult(sourcePayload: unknown, ids: {
     const quickTotals = raw.quickTotals === undefined ? undefined : mapObjectKeys(raw.quickTotals, team);
     const writtenTotals = raw.writtenTotals === undefined ? undefined : mapObjectKeys(raw.writtenTotals, team);
     const speakerRows = parseRecord(raw.speakers);
-    if (!items || !speakerRows) return undefined;
+    if (!items || !speakerRows || (raw.quickTotals !== undefined && !quickTotals)
+      || (raw.writtenTotals !== undefined && !writtenTotals)) return undefined;
     const speakers: Record<string, unknown> = {};
     for (const [teamId, entries] of Object.entries(speakerRows)) {
       if (!Array.isArray(entries)) return undefined;
@@ -114,12 +120,12 @@ export function mergePublishedTabulationRounds(
     group.debates.push({
       id: row.tabulationDebateId,
       venueId,
-      teamIds: [favor, contra],
+      teamIds: [favor, contra] as [string, string],
       favorTeamId: favor,
       judgeIds: judgeIds.map((id) => ids.judges.get(id) ?? id),
       chairId: ids.judges.get(row.chairJudgeId) ?? row.chairJudgeId,
       managerAssignmentId: row.assignmentId,
-      ...(source ? { result: restoreActaResult(source, ids) } : {}),
+      ...(source && restoreActaResult(source, ids) ? { result: restoreActaResult(source, ids) } : {}),
     });
     grouped.set(row.tabulationRoundId, group);
   }
@@ -150,8 +156,5 @@ export function mergePublishedTabulationRounds(
       ...(typeof meta.fallenFromRound === 'number' ? { fallenFromRound: meta.fallenFromRound } : { fallenFromRound: undefined }),
     } : item;
   });
-  return { ...tournament, teams, rounds, panelLink: tournament.panelLink ? {
-    ...tournament.panelLink,
-    remoteRevision: Math.max(tournament.panelLink.remoteRevision ?? 0, ...relevant.map((row) => row.roundNumber >= 0 ? 0 : 0)),
-  } : tournament.panelLink };
+  return { ...tournament, teams, rounds };
 }
