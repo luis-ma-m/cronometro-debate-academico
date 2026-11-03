@@ -52,7 +52,7 @@ describe('canonical Tabulation round hydration', () => {
     });
   });
 
-  it('does not invent rounds for a different Tabulation tournament', () => {
+  it('hydrates a published round when the receiving browser has a different local tournament ID', () => {
     const tournament = createTabTournament('Torneo', 'ledu-groups', 100, 12);
     const result = mergePublishedTabulationRounds(tournament, [{
       tabTournamentId: 'other', tabulationRoundId: 'round', tabulationDebateId: 'debate',
@@ -61,6 +61,7 @@ describe('canonical Tabulation round hydration', () => {
       sideMode: 'draw', teamMetadata: [], entityIdMap: {}, physicalRoomId: '', teamFavorId: '',
       teamContraId: '', judgeIds: [], currentSourceId: null, currentSourcePayload: null,
     }]);
-    expect(result.rounds).toEqual(tournament.rounds);
+    expect(result.rounds).toHaveLength(1);
+    expect(result.rounds[0]).toMatchObject({ id: 'round', managerRoundId: 'manager-round' });
   });
 });
