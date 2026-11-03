@@ -428,6 +428,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "getTabulationSettings":
       await requireSession(payload.token);
       return getTabulationSettings();
+    case "getTabulationPublishedRounds":
+      await requireSession(payload.token);
+      return getTabulationPublishedRounds(payload.tournamentId);
     case "saveTabulationSettings":
       await requireSession(payload.token);
       return saveTabulationSettings(payload);
@@ -516,6 +519,71 @@ function defaultPersistedTabulationSettings(tournamentId: string): PersistedTabu
 
 function isMissingTabulationSettingsMigration(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && ["42P01", "42703"].includes(String((error as { code?: unknown }).code)));
+}
+
+async function getTabulationPublishedRounds(tournamentIdInput: unknown) {
+  const tournamentId = str(tournamentIdInput);
+  if (!/^[0-9a-fA-F-]{36}$/.test(tournamentId)) {
+    throw new ApiError("INVALID_PAYLOAD", "La identidad del torneo no es válida.");
+  }
+  const pool = getPool();
+  try {
+    const identity = await pool.query("SELECT tournament_id::text AS id FROM tournament_identity WHERE id = 1");
+    if (str(identity.rows[0]?.id) !== tournamentId) {
+      throw new ApiError("TOURNAMENT_MISMATCH", "La consulta pertenece a otro torneo.", 409);
+    }
+    const result = await pool.query(
+      `SELECT b.tab_tournament_id, b.tabulation_round_id, b.tabulation_debate_id,
+              b.manager_round_id, b.assignment_id, b.chair_judge_id, b.sides_provisional,
+              r.number AS round_number, r.name AS round_name, r.score_type AS round_kind,
+              m.side_mode, m.team_metadata, m.entity_id_map,
+              ra.physical_room_id, ra.team_favor_id, ra.team_contra_id,
+              COALESCE(jsonb_agg(DISTINCT aj.judge_id) FILTER (WHERE aj.judge_id IS NOT NULL), '[]'::jsonb) AS judge_ids,
+              s.source_payload AS current_source_payload,
+              h.source_id::text AS current_source_id
+         FROM tabulation_debate_assignments b
+         JOIN rounds r ON r.id = b.manager_round_id
+         JOIN room_assignments ra ON ra.id = b.assignment_id AND ra.round_id = b.manager_round_id
+         JOIN tabulation_round_metadata m ON m.tournament_id = b.tournament_id AND m.manager_round_id = b.manager_round_id
+         LEFT JOIN assignment_judges aj ON aj.assignment_id = b.assignment_id
+         LEFT JOIN tabulation_acta_heads h ON h.assignment_id = b.assignment_id
+         LEFT JOIN tabulation_acta_sources s ON s.id = h.source_id AND s.assignment_id = b.assignment_id
+        WHERE b.tournament_id = $1
+        GROUP BY b.tab_tournament_id, b.tabulation_round_id, b.tabulation_debate_id,
+                 b.manager_round_id, b.assignment_id, b.chair_judge_id, b.sides_provisional,
+                 r.number, r.name, r.score_type, m.side_mode, m.team_metadata, m.entity_id_map,
+                 ra.physical_room_id, ra.team_favor_id, ra.team_contra_id, s.source_payload, h.source_id
+        ORDER BY r.number, b.tabulation_round_id, b.tabulation_debate_id`,
+      [tournamentId],
+    );
+    return result.rows.map((row) => ({
+      tabTournamentId: str(row.tab_tournament_id),
+      tabulationRoundId: str(row.tabulation_round_id),
+      tabulationDebateId: str(row.tabulation_debate_id),
+      managerRoundId: str(row.manager_round_id),
+      assignmentId: str(row.assignment_id),
+      chairJudgeId: str(row.chair_judge_id),
+      sidesProvisional: bool(row.sides_provisional),
+      roundNumber: num(row.round_number),
+      roundName: str(row.round_name),
+      roundKind: str(row.round_kind) === "elimination" ? "elimination" : "qualifying",
+      sideMode: str(row.side_mode) === "draw" ? "draw" : "balanced",
+      teamMetadata: parseJson(row.team_metadata),
+      entityIdMap: parseJson(row.entity_id_map),
+      physicalRoomId: str(row.physical_room_id),
+      teamFavorId: str(row.team_favor_id),
+      teamContraId: str(row.team_contra_id),
+      judgeIds: parseJson(row.judge_ids),
+      currentSourceId: row.current_source_id ? str(row.current_source_id) : null,
+      currentSourcePayload: row.current_source_payload ?? null,
+    }));
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    if (error && typeof error === "object" && "code" in error && ["42P01", "42703"].includes(String((error as { code?: unknown }).code))) {
+      throw new ApiError("MIGRATION_REQUIRED", "Faltan las migraciones de sincronización de rondas y actas. No se han modificado datos.", 503);
+    }
+    throw new ApiError("DATABASE_UNAVAILABLE", "No se han podido recuperar las rondas publicadas de Tabulación.", 503);
+  }
 }
 
 async function getTabulationSettings(): Promise<PersistedTabulationSettings> {
