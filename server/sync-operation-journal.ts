@@ -122,16 +122,20 @@ export async function transitionSyncOperation(
     if (!current.rows[0]) throw new ApiError("SYNC_OPERATION_NOT_FOUND", "No existe la operación solicitada.", 404);
     const row = rowToEntry(current.rows[0] as Record<string, unknown>);
     if (row.payloadHash !== expectedHash) throw new ApiError("IDEMPOTENCY_MISMATCH", "El hash de la operación no coincide.", 409);
-    if (row.status === "committed") {
+    if (row.status !== "pending") {
+      const sameOutcome = row.status === status && JSON.stringify(row.result) === JSON.stringify(result ?? null)
+        && row.errorCode === (error?.code ?? null) && row.errorMessage === (error?.message ?? null);
+      if (!sameOutcome) throw new ApiError("SYNC_OPERATION_FINALIZED", "La operación ya tiene un resultado terminal distinto.", 409);
       await client.query("COMMIT");
       return row;
     }
     const committedAt = status === "committed" ? new Date() : null;
     const updated = await client.query(
       `UPDATE sync_operations SET status=$2,result=$3::jsonb,error_code=$4,error_message=$5,
-        committed_at=$6,updated_at=now() WHERE operation_id=$1 RETURNING *`,
+        committed_at=$6,updated_at=now() WHERE operation_id=$1 AND status='pending' RETURNING *`,
       [operationId,status,result === undefined ? null : JSON.stringify(result),error?.code ?? null,error?.message ?? null,committedAt],
     );
+    if (!updated.rows[0]) throw new ApiError("SYNC_OPERATION_RACE", "La operación cambió durante la confirmación.", 409);
     await client.query("COMMIT");
     return rowToEntry(updated.rows[0] as Record<string, unknown>);
   } catch (error) {
