@@ -10,7 +10,7 @@ import { apiConfigured, getTournament, saveTournament } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
 import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
 import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
-import { applyTabulationParticipantSnapshot, sameParticipantDomain } from '../contracts/tabulationParticipantSync';
+import { persistTabulationParticipantSnapshot } from '../contracts/tabulationParticipantSync';
 import { activeTournamentContext } from '../contracts/activeTournamentContext';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
 import type { PendingSyncOperation } from './syncOutbox';
@@ -267,36 +267,25 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     if (!apiConfigured || !token || !local || !remoteId || !idMap || participantSyncInFlight.current || participantSyncBlocked.current) return;
     participantSyncInFlight.current = true;
     try {
-      const remote = await getTournament(token);
-      if (remote.remoteId !== remoteId) throw new Error('El torneo remoto activo no coincide con el torneo enlazado en Tabulación.');
-      const context = activeTournamentContext(remoteId, remote.revision, 'server', remote.updatedAt);
+      const context = activeTournamentContext(remoteId, local.panelLink?.remoteRevision ?? 0, 'server', local.panelLink?.remoteUpdatedAt ?? local.updatedAt);
       const snapshot = participantSnapshotFromTabulation(context, {
         teams: local.teams, speakers: local.speakers, judges: local.judges, venues: local.venues,
       }, idMap);
-      const candidate = applyTabulationParticipantSnapshot(remote, snapshot);
-      if (sameParticipantDomain(remote, candidate)) {
-        window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
-        store.update((current) => ({
-          ...current,
-          panelLink: current.panelLink ? { ...current.panelLink, remoteRevision: remote.revision, remoteUpdatedAt: remote.updatedAt } : current.panelLink,
-        }));
-        return;
-      }
-      const expectedRevision = local.panelLink?.remoteRevision;
-      if (typeof expectedRevision === 'number' && remote.revision !== expectedRevision) {
-        participantSyncBlocked.current = true;
-        throw new Error('Conflicto de sincronización: Neon ha cambiado desde la última versión confirmada. No he sobrescrito los cambios remotos; revisa o vuelve a enlazar el torneo antes de reintentar.');
-      }
-      const saved = await saveTournament(token, remote.revision, candidate);
+      const result = await persistTabulationParticipantSnapshot(token, snapshot, local.panelLink?.remoteRevision, {
+        getTournament,
+        saveTournament,
+      });
+      const saved = result.tournament;
       window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
       store.update((current) => ({
         ...current,
         panelLink: current.panelLink ? { ...current.panelLink, remoteRevision: saved.revision, remoteUpdatedAt: saved.updatedAt } : current.panelLink,
-      }), { type: 'sync.ack', message: 'Participantes confirmados en Neon', details: { revision: saved.revision } });
-      store.log({ type: 'sync.ack', message: 'Participantes, oradores, jueces e incompatibilidades confirmados en Neon', details: { revision: saved.revision, tournamentId: remoteId } });
+      }), { type: 'sync.ack', message: result.changed ? 'Participantes confirmados en Neon' : 'Participantes ya sincronizados', details: { revision: saved.revision } });
+      if (result.changed) store.log({ type: 'sync.ack', message: 'Participantes, oradores, jueces e incompatibilidades confirmados en Neon', details: { revision: saved.revision, tournamentId: remoteId } });
       setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se han podido sincronizar los participantes con Neon.';
+      if (message.startsWith('Conflicto de sincronización:')) participantSyncBlocked.current = true;
       store.logError(message);
       notify(message + ' Los cambios locales siguen guardados en este navegador.', 'error');
     } finally {
