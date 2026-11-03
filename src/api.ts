@@ -272,3 +272,38 @@ export async function resolveActaShortLink(id:string):Promise<{snapshot:unknown;
  if(!response.ok||body.ok!==true||!body.data?.snapshot)throw new ApiError(body.error?.message??'No se ha podido recuperar el acta.',body.error?.code??'SHORT_LINK_ERROR');
  return{snapshot:body.data.snapshot,expiresAt:body.data.expiresAt??null};
 }
+
+export interface SyncJournalOperation {
+  protocolVersion: 1;
+  operationId: string;
+  tournamentId: string;
+  entityType: string;
+  entityId: string;
+  operation: 'publish-round' | 'replace-acta';
+  baseRevision: number;
+  payload: Record<string, unknown>;
+  payloadHash: string;
+}
+export interface PersistedSyncJournalEntry extends SyncJournalOperation {
+  status: 'pending' | 'committed' | 'conflict' | 'rejected';
+  result: unknown;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+  committedAt: number | null;
+}
+export const recordSyncOperation = (token: string, operation: SyncJournalOperation) =>
+  apiCall<PersistedSyncJournalEntry>('recordSyncOperation', { token, operation });
+export const getSyncOperations = (token: string, tournamentId: string, after = 0) =>
+  apiCall<PersistedSyncJournalEntry[]>('getSyncOperations', { token, tournamentId, after });
+export const ackSyncOperation = (
+  token: string,
+  operationId: string,
+  payloadHash: string,
+  status: 'committed' | 'conflict' | 'rejected',
+  result?: unknown,
+  error?: { code: string; message: string },
+) => apiCall<PersistedSyncJournalEntry>('ackSyncOperation', {
+  token, operationId, payloadHash, status, result, error,
+});
