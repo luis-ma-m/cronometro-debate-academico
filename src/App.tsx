@@ -236,58 +236,82 @@ export default function App() {
       }
       const tab = published.snapshot;
       const current = await getTournament(session.token);
-      const busyRooms = current.rooms.filter((room) => room.timer.status !== 'idle'
-        || (current.scoring?.scorecards ?? []).some((card) => card.roomId === room.id));
-      const hasOperationalProgress = Boolean(current.activeRoundId)
-        || current.rounds.some((round) => round.active)
-        || busyRooms.length > 0;
-      if (hasOperationalProgress && !window.confirm(
-        'Gestión tiene un torneo operativo con progreso (' + current.rounds.length + ' rondas, ' + busyRooms.length +
-        ' salas con temporizador/acta). Sustituir sus datos maestros por «' + published.tournamentName +
-        '» requiere confirmación. Se conservarán las salas físicas compatibles y el estado de sus cronómetros. ¿Continuar?',
+      const scoredRoomIds = new Set((current.scoring?.scorecards ?? []).map((card) => card.roomId));
+      const busyRooms = current.rooms.filter((room) => room.timer.status !== 'idle' || scoredRoomIds.has(room.id));
+      const hasProgress = Boolean(current.activeRoundId) || current.rounds.some((round) => round.active) || busyRooms.length > 0;
+      if (hasProgress && !window.confirm(
+        'Gestión tiene progreso operativo (' + current.rounds.length + ' rondas, ' + busyRooms.length +
+        ' salas con cronómetro o acta). Se archivarán sus entidades y rondas como inactivas, conservando las salas, cronómetros e históricos existentes. ¿Sustituir el conjunto activo por «' +
+        published.tournamentName + '», revisión ' + published.revision + '?',
       )) return;
 
-      const teamMap = new Map(tab.teams.map((item) => [item.id, item.id]));
-      const judgeMap = new Map(tab.judges.map((item) => [item.id, item.id]));
-      const venueMap = new Map(tab.venues.map((item) => [item.id, item.id]));
-      const teamIds = new Set(tab.teams.map((item) => item.id));
-      const judgeIds = new Set(tab.judges.map((item) => item.id));
-      const roomIds = new Set(current.physicalRooms.map((item) => item.id));
-      const physicalRooms = tab.venues.map((venue) => {
-        const existing = current.physicalRooms.find((item) => item.id === venue.id);
-        if (existing) return { ...existing, name: venue.name, active: venue.active, updatedAt: Date.now() };
-        return { id: venue.id, slug: makeSlug(venue.name) + '-' + venue.id.slice(-6),
-          name: venue.name, active: venue.active, createdAt: Date.now(), updatedAt: Date.now() };
-      });
-      const validRoomIds = new Set(physicalRooms.map((item) => item.id));
-      const rounds = tab.rounds.map((round) => ({
-        id: round.id, number: round.number, name: round.name, active: false,
-        defaultFormatId: current.formats[0]?.id ?? '', scoreType: round.kind === 'elimination' ? 'elimination' as const : 'qualifying' as const,
+      // Preserve the previous operational records as inactive history. New
+      // Tabulation IDs are translated explicitly; no name-based identity guesses.
+      const teamMap = new Map(tab.teams.map((item) => [item.id, makeId('team')]));
+      const judgeMap = new Map(tab.judges.map((item) => [item.id, makeId('judge')]));
+      const venueMap = new Map(tab.venues.map((item) => [item.id, makeId('venue')]));
+      const roundMap = new Map(tab.rounds.map((item) => [item.id, makeId('round')]));
+      const archivedTeams = current.teams.map((item) => ({ ...item, active: false }));
+      const archivedJudges = current.judges.map((item) => ({ ...item, active: false }));
+      const archivedRounds = current.rounds.map((item) => ({ ...item, active: false }));
+      const physicalRooms = [
+        ...current.physicalRooms,
+        ...tab.venues.map((venue) => ({
+          id: venueMap.get(venue.id)!,
+          slug: makeSlug(venue.name) + '-' + makeId('slug').slice(-6),
+          name: venue.name, active: venue.active, createdAt: Date.now(), updatedAt: Date.now(),
+        })),
+      ];
+      const format = current.formats[0];
+      if (!format) throw new Error('Gestión no tiene ningún formato de debate configurado para crear las asignaciones.');
+      const phases = format.phases;
+      const importedRounds: Round[] = tab.rounds.map((round) => ({
+        id: roundMap.get(round.id)!, number: round.number, name: round.name, active: false,
+        defaultFormatId: format.id, scoreType: round.kind === 'elimination' ? 'elimination' : 'qualifying',
       }));
+      const importedRooms: Room[] = [];
+      for (const round of tab.rounds) {
+        const roundId = roundMap.get(round.id)!;
+        for (const debate of round.debates) {
+          const teamA = teamMap.get(debate.teamIds[0]);
+          const teamB = teamMap.get(debate.teamIds[1]);
+          const physicalRoomId = venueMap.get(debate.venueId);
+          if (!teamA || !teamB || !physicalRoomId) {
+            throw new Error('La ronda «' + round.name + '» contiene un debate con equipos o sala inexistentes. No se ha aplicado la importación.');
+          }
+          const room: Room = {
+            id: makeId('room'), name: tab.venues.find((venue) => venue.id === debate.venueId)?.name ?? 'Sala',
+            roundId, physicalRoomId, formatId: format.id, teamFavorId: teamMap.get(debate.favorTeamId ?? debate.teamIds[0])!,
+            teamContraId: teamMap.get(debate.favorTeamId === debate.teamIds[1] ? debate.teamIds[0] : (debate.favorTeamId ? debate.teamIds[1] : debate.teamIds[1]))!,
+            judgeIds: debate.judgeIds.map((judgeId) => judgeMap.get(judgeId)).filter((value): value is string => Boolean(value)),
+            status: 'ready', phases, timer: createTimer(phases), notes: '', updatedAt: Date.now(),
+          };
+          importedRooms.push(withRoomStatus(room, current.minimumJudgesPerRoom ?? 1));
+        }
+      }
       const imported: Tournament = {
         ...current,
         tournamentName: tab.name,
-        rounds,
-        teams: tab.teams.map((team) => ({
+        rounds: [...archivedRounds, ...importedRounds],
+        teams: [...archivedTeams, ...tab.teams.map((team) => ({
           id: teamMap.get(team.id)!, name: team.name, institution: team.institution, active: team.active,
-          incompatibleJudgeIds: team.incompatibleJudgeIds.filter((id) => judgeIds.has(id)),
-        })),
-        speakers: tab.speakers.map((speaker) => ({ id: speaker.id, teamId: teamMap.get(speaker.teamId) ?? '', name: speaker.name })),
-        judges: tab.judges.map((judge) => ({
+          incompatibleJudgeIds: team.incompatibleJudgeIds.map((judgeId) => judgeMap.get(judgeId)).filter((value): value is string => Boolean(value)),
+        }))],
+        speakers: [...(current.speakers ?? []), ...tab.speakers.map((speaker) => ({
+          id: makeId('speaker'), teamId: teamMap.get(speaker.teamId)!, name: speaker.name,
+        }))],
+        judges: [...archivedJudges, ...tab.judges.map((judge) => ({
           id: judgeMap.get(judge.id)!, name: judge.name, institution: judge.institution, active: judge.active,
-          incompatibleJudgeIds: judge.incompatibleJudgeIds.filter((id) => judgeIds.has(id)),
-        })),
+          incompatibleJudgeIds: judge.incompatibleJudgeIds.map((otherId) => judgeMap.get(otherId)).filter((value): value is string => Boolean(value)),
+        }))],
         physicalRooms,
-        rooms: current.rooms.filter((room) => validRoomIds.has(room.physicalRoomId))
-          .filter((room) => !tab.rounds.some((round) => round.id === room.roundId)),
+        rooms: [...current.rooms, ...importedRooms],
         activeRoundId: '',
-        activationRevision: current.activationRevision,
-        activatedAt: current.activatedAt,
         revision: current.revision,
         updatedAt: Date.now(),
       };
       const issues = validateAssignments(imported);
-      if (issues.length) throw new Error('El snapshot no se puede importar en Gestión: ' + issues.slice(0, 4).join(' '));
+      if (issues.length) throw new Error('El snapshot no se puede importar en Gestión: ' + issues.slice(0, 5).join(' '));
       const saved = await saveTournament(session.token, current.revision, imported);
       writeCanonicalManager(saved);
       setData(saved);
@@ -296,8 +320,9 @@ export default function App() {
       setConnected(true);
       setLastSyncedAt(Date.now());
       setServerError('');
-      setTabulationNotice('Se ha importado «' + published.tournamentName + '» desde Tabulación, revisión ' + published.revision +
-        '. La publicación maestra se conserva separada del estado operativo de salas y cronómetros.');
+      setTabulationNotice('Importado «' + published.tournamentName + '» · revisión ' + published.revision +
+        '. Se han creado ' + importedRounds.length + ' rondas y ' + importedRooms.length +
+        ' asignaciones. El historial anterior se conserva como inactivo; las actas maestras siguen en Tabulación.');
       await refreshTabulationPublications();
     } catch (error) {
       setServerError(error instanceof Error ? error.message : 'No se pudo importar el snapshot autoritativo.');
