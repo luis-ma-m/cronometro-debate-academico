@@ -6,12 +6,18 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId, type PanelEntityIdMap } from './types';
-import { apiConfigured } from '../api';
+import { apiConfigured, getTabulationPublishedRounds, getTabulationSettings, getTournament, saveTabulationSettings, saveTournament } from '../api';
 import { MANAGER_SESSION_STORAGE_KEY, readManagerSession } from '../contracts/managerSession';
+import { createApplicationBootstrap } from '../contracts/applicationBootstrap';
+import { participantSnapshotFromTabulation } from '../contracts/participantSnapshot';
+import { mergePublishedTabulationRounds } from '../contracts/tabulationPublishedRounds';
+import { persistTabulationParticipantSnapshot } from '../contracts/tabulationParticipantSync';
+import { activeTournamentContext } from '../contracts/activeTournamentContext';
 import { createIndexedDbSyncOutboxRepository, createSyncOutbox } from './syncOutbox';
 import type { PendingSyncOperation } from './syncOutbox';
 import { createSyncOutboxWorker } from './syncOutboxWorker';
 import { createTabulationSyncDispatcher, notifyTabulationSyncAcknowledged } from './syncDispatcher';
+import { buildPanelHandoff, mergeHandoff, tournamentFromHandoff } from './panelBridge';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 
@@ -72,9 +78,45 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
   const tabSettingsSyncTimer = useRef<number | null>(null);
   const remoteParticipantRefreshInFlight = useRef(false);
   const tournament = state.tournament;
-  const activeTournament = null;
-  const tabulationParticipants = null;
-  const applicationBootstrap = { session: managerSession, activeTournament: null, participants: null };
+  const activeTournament = useMemo(() => {
+    const remoteId = tournament?.panelLink?.remoteId;
+    if (!remoteId || !tournament) return null;
+    try {
+      return activeTournamentContext(
+        remoteId,
+        tournament.panelLink?.remoteRevision ?? 0,
+        'server',
+        tournament.panelLink?.remoteUpdatedAt ?? tournament.updatedAt,
+      );
+    } catch {
+      return null;
+    }
+  }, [tournament?.panelLink?.remoteId, tournament?.panelLink?.remoteRevision, tournament?.panelLink?.remoteUpdatedAt, tournament?.updatedAt]);
+  const tabulationParticipants = useMemo(() => {
+    if (!tournament || !activeTournament || !tournament.panelLink?.idMap) return null;
+    const stored = tournament.panelLink.idMap;
+    const idMap: PanelEntityIdMap = tournament.panelLink.identityMode === 'local-canonical' ? {
+      teams: { ...stored.teams, ...Object.fromEntries(tournament.teams.map((item) => [item.id, item.id])) },
+      speakers: { ...stored.speakers, ...Object.fromEntries(tournament.speakers.map((item) => [item.id, item.id])) },
+      judges: { ...stored.judges, ...Object.fromEntries(tournament.judges.map((item) => [item.id, item.id])) },
+      venues: { ...stored.venues, ...Object.fromEntries(tournament.venues.map((item) => [item.id, item.id])) },
+    } : stored;
+    try {
+      return participantSnapshotFromTabulation(activeTournament, {
+        teams: tournament.teams,
+        speakers: tournament.speakers,
+        judges: tournament.judges,
+        venues: tournament.venues,
+      }, idMap);
+    } catch {
+      return null;
+    }
+  }, [tournament, activeTournament]);
+  const applicationBootstrap = useMemo(() => createApplicationBootstrap({
+    session: managerSession,
+    activeTournament,
+    participants: tabulationParticipants,
+  }), [managerSession, activeTournament, tabulationParticipants]);
 
   useEffect(() => {
     const refreshSession = () => {
@@ -266,7 +308,258 @@ function TabulationShell({ embedded }: { embedded: boolean }) {
     setNotice(null);
   }, []);
   const notify = useCallback((message: string, kind: NoticeKind = 'success') => setNotice({ message, kind }), []);
-  const syncParticipantDomain = useCallback(async (): Promise<boolean> => true, []);
+  const syncParticipantDomain = useCallback(async (): Promise<boolean> => {
+    const token = managerSession?.token;
+    const local = store.getState().tournament;
+    const remoteId = local?.panelLink?.remoteId;
+    const storedIdMap = local?.panelLink?.idMap;
+    if (!apiConfigured || !token || !local || !remoteId || !storedIdMap || participantSyncBlocked.current) return false;
+    if (participantSyncInFlight.current) return participantSyncPromise.current ?? false;
+    const idMap: PanelEntityIdMap = local.panelLink?.identityMode === 'local-canonical' ? {
+      teams: { ...storedIdMap.teams, ...Object.fromEntries(local.teams.map((item) => [item.id, item.id])) },
+      speakers: { ...storedIdMap.speakers, ...Object.fromEntries(local.speakers.map((item) => [item.id, item.id])) },
+      judges: { ...storedIdMap.judges, ...Object.fromEntries(local.judges.map((item) => [item.id, item.id])) },
+      venues: { ...storedIdMap.venues, ...Object.fromEntries(local.venues.map((item) => [item.id, item.id])) },
+    } : storedIdMap;
+    participantSyncInFlight.current = true;
+    const run = (async () => {
+      try {
+        const context = activeTournamentContext(remoteId, local.panelLink?.remoteRevision ?? 0, 'server', local.panelLink?.remoteUpdatedAt ?? local.updatedAt);
+        const snapshot = participantSnapshotFromTabulation(context, {
+          teams: local.teams, speakers: local.speakers, judges: local.judges, venues: local.venues,
+        }, idMap);
+        const result = await persistTabulationParticipantSnapshot(token, snapshot, local.panelLink?.remoteRevision, {
+          getTournament,
+          saveTournament,
+        });
+        const saved = result.tournament;
+        window.localStorage.removeItem('ledu-tabulation-participant-sync-pending:' + remoteId);
+        setParticipantSyncPending(false);
+        store.update((current) => ({
+          ...current,
+          panelLink: current.panelLink ? { ...current.panelLink, remoteRevision: saved.revision, remoteUpdatedAt: saved.updatedAt } : current.panelLink,
+        }), { type: 'sync.ack', message: result.changed ? 'Participantes confirmados en Neon' : 'Participantes ya sincronizados', details: { revision: saved.revision } });
+        if (result.changed) store.log({ type: 'sync.ack', message: 'Participantes, oradores, jueces e incompatibilidades confirmados en Neon', details: { revision: saved.revision, tournamentId: remoteId } });
+        setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
+        return true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'No se han podido sincronizar los participantes con Neon.';
+        if (message.startsWith('Conflicto de sincronización:')) participantSyncBlocked.current = true;
+        store.logError(message);
+        notify(message + ' Los cambios locales siguen guardados en este navegador.', 'error');
+        return false;
+      } finally {
+        participantSyncInFlight.current = false;
+      }
+    })();
+    participantSyncPromise.current = run;
+    try { return await run; }
+    finally { if (participantSyncPromise.current === run) participantSyncPromise.current = null; }
+  }, [managerSession?.token, store, notify]);
+  const syncTabulationSettings = useCallback(async () => {
+    const token = managerSession?.token;
+    const local = store.getState().tournament;
+    const remoteId = local?.panelLink?.remoteId;
+    if (!apiConfigured || !token || !remoteId || !tabSettingsHydrated.current
+      || tabSettingsRevision.current === null || tabSettingsSyncInFlight.current || tabSettingsSyncBlocked.current) return;
+    tabSettingsSyncInFlight.current = true;
+    const settings = local.settings;
+    try {
+      const saved = await saveTabulationSettings(token, tabSettingsRevision.current, settings, makeTabId('settings-op'));
+      if (saved.tournamentId !== remoteId) throw new Error('Las reglas confirmadas pertenecen a otro torneo.');
+      tabSettingsRevision.current = saved.revision;
+      tabSettingsPending.current = false;
+      setManagerConnection((current) => ({ ...current, connected: true, checkedAt: Date.now(), lastSuccessAt: Date.now() }));
+      store.log({ type: 'sync.ack', message: 'Reglas de Tabulación confirmadas en Neon', details: { revision: saved.revision } });
+      const latest = store.getState().tournament;
+      if (latest && JSON.stringify(latest.settings) !== JSON.stringify(settings)) {
+        tabSettingsPending.current = true;
+        if (tabSettingsSyncTimer.current !== null) window.clearTimeout(tabSettingsSyncTimer.current);
+        tabSettingsSyncTimer.current = window.setTimeout(() => {
+          tabSettingsSyncTimer.current = null;
+          void syncTabulationSettings();
+        }, 250);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se han podido sincronizar las reglas con Neon.';
+      tabSettingsPending.current = true;
+      if (message.startsWith('Las reglas han cambiado') || message.includes('REVISION_CONFLICT')) tabSettingsSyncBlocked.current = true;
+      store.logError(message);
+      notify(message + ' No se ha sobrescrito la versión remota.', 'error');
+    } finally {
+      tabSettingsSyncInFlight.current = false;
+    }
+  }, [managerSession?.token, store, notify]);
+  useEffect(() => {
+    const token = managerSession?.token;
+    const remoteId = activeTournament?.tournamentId;
+    if (!apiConfigured || !token || !remoteId) {
+      tabSettingsHydrated.current = false;
+      tabSettingsRevision.current = null;
+      return;
+    }
+    let disposed = false;
+    const hydrate = async () => {
+      try {
+        const remote = await getTabulationSettings(token);
+        if (disposed) return;
+        if (remote.tournamentId !== remoteId) throw new Error('Las reglas remotas pertenecen a otro torneo.');
+        const local = store.getState().tournament;
+        if (!local) return;
+        tabSettingsRevision.current = remote.revision;
+        if (JSON.stringify(local.settings) !== JSON.stringify(remote.settings)) {
+          if (store.getState().status === 'dirty') {
+            tabSettingsSyncBlocked.current = true;
+            notify('Hay reglas locales pendientes y una versión remota distinta. No he sobrescrito ninguna; exporta una copia y resuelve el conflicto.', 'error');
+            return;
+          }
+          store.backup('Antes de recuperar las reglas oficiales de Neon');
+          store.update((current) => ({ ...current, settings: remote.settings }), {
+            type: 'sync.remote', message: 'Reglas oficiales recuperadas desde Neon', details: { revision: remote.revision },
+          });
+        }
+        tabSettingsSyncBlocked.current = false;
+        tabSettingsHydrated.current = true;
+      } catch (error) {
+        if (!disposed) {
+          store.logError(error instanceof Error ? error.message : 'No se pudieron recuperar las reglas de Neon.');
+          notify('No se han podido recuperar las reglas oficiales. No edites reglas hasta restablecer la conexión.', 'error');
+        }
+      }
+    };
+    void hydrate();
+    return () => { disposed = true; };
+  }, [managerSession?.token, activeTournament?.tournamentId, store, notify]);
+  useEffect(() => {
+    const retry = () => {
+      if (tabSettingsPending.current && tabSettingsHydrated.current && !tabSettingsSyncBlocked.current) {
+        void syncTabulationSettings();
+      }
+    };
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+    };
+  }, [syncTabulationSettings]);
+  const refreshRemoteParticipants = useCallback(async () => {
+    const token = managerSession?.token;
+    if (!apiConfigured || !token || remoteParticipantRefreshInFlight.current || participantSyncInFlight.current) return;
+    remoteParticipantRefreshInFlight.current = true;
+    try {
+      const remote = await getTournament(token);
+      if (!remote.remoteId) return;
+      const handoff = buildPanelHandoff(remote);
+      const publishedRounds = await getTabulationPublishedRounds(token, remote.remoteId);
+      const local = store.getState().tournament;
+      if (!local) {
+        const created = mergePublishedTabulationRounds(tournamentFromHandoff(handoff, 'ledu-groups'), publishedRounds);
+        store.create(created);
+        return;
+      }
+      if (local.panelLink?.remoteId !== remote.remoteId) return;
+      if (local.panelLink.remoteRevision === remote.revision
+        && local.panelLink.remoteUpdatedAt === remote.updatedAt) return;
+      const pendingKey = 'ledu-tabulation-participant-sync-pending:' + remote.remoteId;
+      if (window.localStorage.getItem(pendingKey)) {
+        setParticipantSyncPending(true);
+        participantSyncBlocked.current = true;
+        notify('Neon contiene una revisión más reciente mientras hay cambios locales pendientes. No he fusionado ni sobrescrito ninguna versión; resuelve el conflicto antes de continuar.', 'error');
+        return;
+      }
+      const merged = mergeHandoff(local, handoff);
+      if (merged.issues.length) {
+        notify(merged.issues.join(' '), 'error');
+        return;
+      }
+      const withPublishedRounds = mergePublishedTabulationRounds(merged.tournament, publishedRounds);
+      const roundsChanged = JSON.stringify(local.rounds) !== JSON.stringify(withPublishedRounds.rounds);
+      if (merged.added || merged.updated || local.panelLink?.remoteRevision !== remote.revision || roundsChanged) {
+        store.update(() => ({
+          ...withPublishedRounds,
+          panelLink: withPublishedRounds.panelLink ? {
+            ...withPublishedRounds.panelLink, remoteRevision: remote.revision, remoteUpdatedAt: remote.updatedAt,
+          } : withPublishedRounds.panelLink,
+        }), {
+          type: 'sync.remote',
+          message: roundsChanged ? 'Rondas, asignaciones y actas oficiales actualizadas desde Neon' : 'Participantes actualizados desde Neon',
+          details: { revision: remote.revision, added: merged.added, updated: merged.updated, rounds: publishedRounds.length },
+        });
+        store.log({ type: 'sync.remote', message: 'Snapshot canónico recibido desde Neon', details: { revision: remote.revision, added: merged.added, updated: merged.updated, rounds: publishedRounds.length } });
+      }
+    } catch (error) {
+      store.logError(error instanceof Error ? error.message : 'No se pudo actualizar el snapshot remoto de participantes.');
+    } finally {
+      remoteParticipantRefreshInFlight.current = false;
+    }
+  }, [managerSession?.token, store, notify]);
+  useEffect(() => {
+    if (!apiConfigured || !managerSession?.token) return;
+    let disposed = false;
+    const refresh = () => {
+      if (!disposed && document.visibilityState !== 'hidden') void refreshRemoteParticipants();
+    };
+    refresh();
+    const interval = window.setInterval(refresh, 15000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('online', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [managerSession?.token, refreshRemoteParticipants]);
+  const update = useCallback<ViewProps['update']>((mutator, meta) => {
+    const before = store.getState().tournament;
+    const applied = store.update(mutator, meta);
+    if (!applied) {
+      const current = store.getState();
+      notify(current.readOnly ? 'Esta pestaña es de solo lectura: pulsa «Tomar el control» para hacer cambios.'
+        : current.status === 'conflict' ? 'Resuelve antes el conflicto con la otra pestaña.'
+          : current.error ?? 'No se ha podido aplicar el cambio.', 'error');
+    } else {
+      const after = store.getState().tournament;
+      const participantsChanged = Boolean(before && after && (
+        before.teams !== after.teams || before.speakers !== after.speakers
+        || before.judges !== after.judges || before.venues !== after.venues
+      ));
+      const tabSettingsChanged = Boolean(before && after && before.settings !== after.settings);
+      if (tabSettingsChanged && after?.panelLink?.remoteId && tabSettingsHydrated.current && !tabSettingsSyncBlocked.current) {
+        tabSettingsPending.current = true;
+        if (tabSettingsSyncTimer.current !== null) window.clearTimeout(tabSettingsSyncTimer.current);
+        tabSettingsSyncTimer.current = window.setTimeout(() => {
+          tabSettingsSyncTimer.current = null;
+          void syncTabulationSettings();
+        }, 700);
+      }
+      if (participantsChanged && after?.panelLink?.remoteId) {
+        participantSyncBlocked.current = false;
+        try { window.localStorage.setItem('ledu-tabulation-participant-sync-pending:' + after.panelLink.remoteId, String(Date.now())); } catch { /* IndexedDB remains the local data store. */ }
+        setParticipantSyncPending(true);
+        if (participantSyncTimer.current !== null) window.clearTimeout(participantSyncTimer.current);
+        participantSyncTimer.current = window.setTimeout(() => { participantSyncTimer.current = null; void syncParticipantDomain(); }, 800);
+      }
+    }
+    return applied;
+  }, [store, notify, syncParticipantDomain, syncTabulationSettings]);
+  useEffect(() => {
+    const remoteId = store.getState().tournament?.panelLink?.remoteId;
+    if (!remoteId || !window.localStorage.getItem('ledu-tabulation-participant-sync-pending:' + remoteId)) return;
+    setParticipantSyncPending(true);
+    void syncParticipantDomain();
+    const retry = () => { participantSyncBlocked.current = false; void syncParticipantDomain(); };
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+      if (participantSyncTimer.current !== null) window.clearTimeout(participantSyncTimer.current);
+    };
+  }, [store, syncParticipantDomain]);
   const onViewError = useCallback((error: Error, info: ErrorInfo) => {
     store.logError('Fallo de la pantalla: ' + error.message, { stack: (info.componentStack ?? '').slice(0, 2000) });
   }, [store]);
