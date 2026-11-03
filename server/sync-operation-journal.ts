@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type { PoolClient } from "@neondatabase/serverless";
 import { ApiError } from "./core.js";
 import { getPool } from "./db.js";
