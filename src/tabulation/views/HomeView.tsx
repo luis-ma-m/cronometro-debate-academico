@@ -165,6 +165,16 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           const belongsToAnotherTournament = Boolean(
             tournament.panelLink?.remoteId && tournament.panelLink.remoteId !== manager.remoteId,
           );
+          if (hasProgress && !tournament.panelLink) {
+            // Keep an active local tournament intact and offer the reviewed
+            // identity-linking flow instead of asking to replace it with a
+            // fresh manager snapshot. This is the recovery path for drafts
+            // that must be published without losing local round history.
+            setManualHandoff(snapshot);
+            setShowLinkReview(true);
+            setSyncStatus('El torneo local contiene actividad y no está vinculado. Revisa las correspondencias para vincularlo con Gestión sin sustituir sus rondas ni borradores.');
+            return;
+          }
           if (hasProgress) {
             const reason = belongsToAnotherTournament
               ? 'El torneo abierto está vinculado a otra identidad de Gestión.'
