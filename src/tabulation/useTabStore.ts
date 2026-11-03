@@ -9,9 +9,11 @@ let browserStore: TabStore | null = null;
  * One store per page, created outside React so StrictMode double renders never create two writers. Only one tab
  * of the browser writes; the others stay read-only until they take control.
  */
-export function getBrowserTabStore(): TabStore {\n  browserStore ??= createTabStore({ storage: createCanonicalTabulationStorage(window.localStorage), lock: createWriterLock({ name: 'ledu-tabulacion' }) });\n  return browserStore;\n}
 export function getBrowserTabStore(): TabStore {
-  browserStore ??= createTabStore({ storage: createSharedStorage(), lock: createWriterLock({ name: 'ledu-tabulacion' }) });
+  browserStore ??= createTabStore({
+    storage: createCanonicalTabulationStorage(window.localStorage),
+    lock: createWriterLock({ name: 'ledu-tabulacion' }),
+  });
   return browserStore;
 }
 
