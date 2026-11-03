@@ -87,7 +87,7 @@ function restoreActaResult(sourcePayload: unknown, ids: {
     ballots: ballots as TabDebateResult['ballots'],
     penalties: penalties as TabDebateResult['penalties'],
     ...(override ? { override: override as TabDebateResult['override'] } : {}),
-    ...(joint ? { joint: joint as TabDebateResult['joint'] } : {}),
+    ...(joint ? { joint: joint as unknown as NonNullable<TabDebateResult['joint']> } : {}),
     notes: result.notes,
     updatedAt: result.updatedAt,
   };
