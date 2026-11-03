@@ -103,13 +103,16 @@ export function mergePublishedTabulationRounds(
   // so a second device must hydrate rows even when its local TabTournament id differs from the publishing device.
   const relevant = snapshotRows;
   if (!relevant.length) return tournament;
-  const firstMap = parseRecord(relevant[0].entityIdMap) as unknown as PanelEntityIdMap | null;
-  if (!firstMap || !record(firstMap.teams) || !record(firstMap.speakers) || !record(firstMap.judges) || !record(firstMap.venues)) {
+  const snapshotMap = parseRecord(relevant[0].entityIdMap) as unknown as PanelEntityIdMap | null;
+  // The snapshot map contains the publishing browser's local IDs. A receiving browser
+  // must translate canonical IDs through its own reviewed map, not reuse those foreign IDs.
+  const localMap = tournament.panelLink?.idMap ?? snapshotMap;
+  if (!localMap || !record(localMap.teams) || !record(localMap.speakers) || !record(localMap.judges) || !record(localMap.venues)) {
     throw new Error('El snapshot remoto no contiene un mapa de identidades completo.');
   }
   const ids = {
-    teams: inverse(firstMap.teams), speakers: inverse(firstMap.speakers),
-    judges: inverse(firstMap.judges), venues: inverse(firstMap.venues),
+    teams: inverse(localMap.teams), speakers: inverse(localMap.speakers),
+    judges: inverse(localMap.judges), venues: inverse(localMap.venues),
   };
   const grouped = new Map<string, { first: TabulationPublishedRoundRow; debates: TabRound['debates'] }>();
   for (const row of relevant) {
@@ -149,7 +152,7 @@ export function mergePublishedTabulationRounds(
   const metadata = rows(relevant[0].teamMetadata);
   const metadataById = new Map(metadata.filter((item) => typeof item.teamId === 'string').map((item) => [String(item.teamId), item]));
   const teams = tournament.teams.map((item) => {
-    const remoteId = firstMap.teams[item.id];
+    const remoteId = localMap.teams[item.id];
     const meta = remoteId ? metadataById.get(remoteId) : undefined;
     return meta ? {
       ...item,
