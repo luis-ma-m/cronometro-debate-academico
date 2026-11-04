@@ -430,7 +430,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     setConfig(configRows, "formatPhases", JSON.stringify(phases));
     setConfig(configRows, "institutions", JSON.stringify(tournament.institutions ?? []));
     setConfig(configRows, "speakers", JSON.stringify(tournament.speakers ?? []));
-    setConfig(configRows, "scoring", JSON.stringify(current.scoring ?? emptyScoringConfig()));
+    setConfig(configRows, "scoring", JSON.stringify(tournament.scoring ?? current.scoring ?? emptyScoringConfig()));
     setConfig(configRows, "roundTypes", JSON.stringify(Object.fromEntries(
       tournament.rounds.map((round) => [round.id, round.scoreType ?? current.rounds.find((item) => item.id === round.id)?.scoreType ?? "qualifying"]),
     )));
@@ -542,9 +542,14 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
 
     const newPhysicalIds = new Set(tournament.physicalRooms.map((room) => room.id));
     const removedPhysicalIds = data.rows.SalasFisicas.map((row) => str(row.id)).filter((id) => id && !newPhysicalIds.has(id));
-    await Promise.all(removedPhysicalIds.map((id) =>
-      redisCommand(["DEL", "ledu:room-control:" + sha256(id)]).catch(() => undefined)
-    ));
+    await Promise.all(removedPhysicalIds.map((id) => {
+      const hash = sha256(id);
+      return redisCommand(["DEL",
+        "ledu:room-control:" + hash,
+        "ledu:room-heartbeat:" + hash + ":online",
+        "ledu:room-heartbeat:" + hash + ":last",
+      ]).catch(() => undefined);
+    }));
 
     return response;
   });

@@ -135,18 +135,20 @@ export default function App() {
         if (typeof fresh.serverTime === 'number') setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
         setData((current) => {
           if (!hasUnsavedRef.current) return fresh;
-          const refreshedRooms = fresh.rooms.map((remote) => {
+          const retainedPhysicalRoomIds = new Set(current.physicalRooms.map((physical) => physical.id));
+          const refreshedRooms = fresh.rooms.filter((room) => retainedPhysicalRoomIds.has(room.physicalRoomId)).map((remote) => {
             const local = current.rooms.find((room) => room.id === remote.id);
             if (!local) return remote;
             const merged = { ...remote, name: local.name, roundId: local.roundId, teamFavorId: local.teamFavorId,
               teamContraId: local.teamContraId, judgeIds: local.judgeIds, phases: local.phases, notes: local.notes };
             return { ...withRoomStatus({ ...merged, timer: remote.timer }, fresh.minimumJudgesPerRoom ?? 1), updatedAt: remote.updatedAt };
           });
-          const addedLocally = current.rooms.filter((room) => !fresh.rooms.some((remote) => remote.id === room.id));
+          const addedLocally = current.rooms.filter((room) =>
+            retainedPhysicalRoomIds.has(room.physicalRoomId) && !fresh.rooms.some((remote) => remote.id === room.id));
           return { ...fresh, tournamentName: current.tournamentName, rounds: current.rounds, teams: current.teams,
             judges: current.judges, speakers: current.speakers ?? fresh.speakers, rooms: [...refreshedRooms, ...addedLocally], formatPhases: current.formatPhases,
-            institutions: current.institutions ?? fresh.institutions,
-            formats: current.formats ?? fresh.formats, physicalRooms: current.physicalRooms ?? fresh.physicalRooms,
+            institutions: current.institutions ?? fresh.institutions, scoring: current.scoring ?? fresh.scoring,
+            formats: current.formats ?? fresh.formats, physicalRooms: current.physicalRooms,
             revision: current.revision, updatedAt: current.updatedAt };
         });
         setConnected(true);
@@ -261,6 +263,14 @@ export default function App() {
       }
       catch (error) {
         const pending = readPendingTimer(roomId);
+        const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : '';
+        if (errorCode === 'ROOM_NOT_FOUND') {
+          try { localStorage.removeItem(pendingTimerKey(roomId)); } catch { /* best-effort removal of a stale room queue */ }
+          setSnapshot(null);
+          setConnected(false);
+          setServerError('Esta sala física ha sido eliminada del torneo. El enlace permanente ya no es válido.');
+          return;
+        }
         if (pending?.actions.length) setSnapshot(pending.snapshot);
         setConnected(false);
         setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.');
@@ -896,8 +906,45 @@ export default function App() {
   const removeRoom = (room: Room) => {
     const active = room.timer.status === 'running' || room.timer.status === 'paused';
     const detail = active ? ' El cronómetro está iniciado o pausado.' : '';
-    if (!window.confirm('¿Eliminar la asignación de "' + room.name + '" para esta ronda?' + detail + ' El enlace permanente de la sala física seguirá existiendo y podrá reutilizarse en otras rondas.')) return;
-    updateData((current) => ({ ...current, rooms: current.rooms.filter((item) => item.id !== room.id) }));
+    const hasScorecard = (data.scoring?.scorecards ?? []).some((card) => card.roomId === room.id);
+    if (!window.confirm('¿Eliminar únicamente la asignación de "' + room.name + '" para esta ronda?' + detail +
+      (hasScorecard ? ' Se eliminará también el acta y sus puntuaciones.' : '') +
+      ' El enlace permanente de la sala física seguirá existiendo y podrá reutilizarse en otras rondas.')) return;
+    updateData((current) => ({
+      ...current,
+      rooms: current.rooms.filter((item) => item.id !== room.id),
+      scoring: current.scoring ? { ...current.scoring, scorecards: current.scoring.scorecards.filter((card) => card.roomId !== room.id) } : current.scoring,
+    }));
+  };
+  const removePhysicalRoom = (physicalRoomId: string) => {
+    const physical = data.physicalRooms.find((item) => item.id === physicalRoomId);
+    if (!physical) return;
+    const assignments = data.rooms.filter((room) => room.physicalRoomId === physicalRoomId);
+    const scorecards = (data.scoring?.scorecards ?? []).filter((card) => assignments.some((room) => room.id === card.roomId));
+    const activeTimers = assignments.filter((room) => room.timer.status === 'running' || room.timer.status === 'paused');
+    const affectedRounds = [...new Set(assignments.map((room) => data.rounds.find((round) => round.id === room.roundId)?.name ?? 'Ronda eliminada'))];
+    const consequences = [
+      assignments.length ? 'Se eliminarán ' + assignments.length + ' asignación(es) de ' + affectedRounds.length + ' ronda(s) (' + affectedRounds.join(', ') + ').' : 'No hay asignaciones de ronda vinculadas.',
+      scorecards.length ? 'Se eliminarán definitivamente ' + scorecards.length + ' acta(s), sus puntuaciones de equipos y oradores, y dejarán de contar en las clasificaciones e historiales.' : 'No hay actas asociadas.',
+      activeTimers.length ? 'Hay ' + activeTimers.length + ' cronómetro(s) iniciado(s) o pausado(s): dejarán de poder controlarse.' : '',
+      'El enlace permanente /sala/' + physical.slug + ' dejará de funcionar y los cronómetros que lo tengan abierto mostrarán que la sala ya no existe al sincronizar.',
+      'Esta acción no se puede deshacer. Los eventos del registro de actividad se conservarán cuando sea posible, pero perderán la referencia a la asignación eliminada.',
+    ].filter(Boolean).join('\n\n');
+    if (!window.confirm('¿Eliminar definitivamente la sala física "' + physical.name + '"?\n\n' + consequences)) return;
+    updateData((current) => {
+      const removedAssignmentIds = new Set(current.rooms.filter((room) => room.physicalRoomId === physicalRoomId).map((room) => room.id));
+      return {
+        ...current,
+        physicalRooms: current.physicalRooms.filter((item) => item.id !== physicalRoomId),
+        rooms: current.rooms.filter((room) => room.physicalRoomId !== physicalRoomId),
+        scoring: current.scoring ? { ...current.scoring, scorecards: current.scoring.scorecards.filter((card) => !removedAssignmentIds.has(card.roomId)) } : current.scoring,
+      };
+    });
+    delete preparedRoomLinksRef.current[physicalRoomId];
+    if (preparedRoomLink?.href.includes('/sala/' + physical.slug)) setPreparedRoomLink(null);
+    try { localStorage.removeItem(pendingTimerKey(physical.slug)); } catch { /* local timer queue is best-effort cleanup */ }
+    setServerError('');
+    setTabulationNotice('Sala física "' + physical.name + '" eliminada junto con sus asignaciones e historial de actas asociado.');
   };
   const removeSelectedRound = () => {
     const round = data.rounds.find((item) => item.id === activeRound);
@@ -1219,7 +1266,14 @@ export default function App() {
         saving={savingScores}
       />}
 
-      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div><div className="managed-rooms">{rooms.map((room) => {
+      {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div>
+      <section className="panel physical-room-catalog"><div className="panel-title"><div><h3>Catálogo de salas físicas ({data.physicalRooms.length})</h3><p>Estas salas conservan su identidad y enlace permanente entre rondas. Elimina desde aquí también las que ya no tengan asignación en la ronda seleccionada.</p></div></div><div className="room-list">{data.physicalRooms.map((physical) => {
+        const assignments = data.rooms.filter((room) => room.physicalRoomId === physical.id);
+        const scored = (data.scoring?.scorecards ?? []).filter((card) => assignments.some((room) => room.id === card.roomId));
+        const online = roomConnectionStatuses[physical.id]?.connected;
+        return <article className="room-row" key={physical.id}><div><b>{physical.name}</b><p><span className="state-pill unassigned">{assignments.length} asignación(es)</span> <span className="muted">{scored.length} acta(s)</span> {online ? <span className="state-pill ready">Cronómetro conectado</span> : null}</p><small className="muted">Enlace permanente: /sala/{physical.slug}</small></div><button type="button" className="icon-button danger-action" title="Eliminar sala física y todas sus asignaciones" aria-label={'Eliminar sala física ' + physical.name} onClick={() => removePhysicalRoom(physical.id)}><Trash2 size={15} /></button></article>;
+      })}{data.physicalRooms.length === 0 && <p className="muted">No hay salas físicas registradas. Añade una sala o importa una ronda desde Tabulación.</p>}</div></section>
+      <div className="managed-rooms">{rooms.map((room) => {
         const expanded = expandedRoomIds.includes(room.id);
         return <section className={'panel room-editor room-card' + (expanded ? ' expanded' : '')} key={room.id}>
           <div className="room-card-header">
@@ -1231,7 +1285,7 @@ export default function App() {
             <div className="room-open-actions">
               <button type="button" className="icon-button" title="Abrir cronómetro" aria-label={'Abrir cronómetro de ' + room.name} onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button>
               <button type="button" className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button>
-              <button type="button" className="icon-button danger-action" title="Eliminar sala" aria-label={'Eliminar sala ' + room.name} onClick={() => removeRoom(room)}><Trash2 size={15} /></button>
+              <button type="button" className="icon-button danger-action" title="Eliminar asignación de esta ronda" aria-label={'Eliminar asignación de ' + room.name} onClick={() => removeRoom(room)}><Trash2 size={15} /></button>
             </div>
           </div>
           <div id={'room-config-' + room.id} className="room-card-disclosure" aria-hidden={!expanded} ref={(node) => { if (node) node.inert = !expanded; }}>
