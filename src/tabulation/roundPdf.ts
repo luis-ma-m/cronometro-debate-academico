@@ -113,7 +113,7 @@ function eliminationBracketPdf(tournament: TabTournament, selectedRound: TabRoun
     return { count, round, debates, title: round?.name ?? (count === 1 ? 'Final' : count === 2 ? 'Semifinales' : count === 4 ? 'Cuartos de final' : count === 8 ? 'Octavos de final' : 'Eliminatoria') };
   });
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape', compress: true });
-  const width = 297, height = 210, margin = 12, usable = width - margin * 2;
+  const width = 297, margin = 12, usable = width - margin * 2;
   const top = 49, bottom = 190, available = bottom - top;
   const gap = stages.length >= 4 ? 7 : 12;
   const colWidth = (usable - gap * (stages.length - 1)) / stages.length;
@@ -194,7 +194,7 @@ function eliminationBracketPdf(tournament: TabTournament, selectedRound: TabRoun
         const previous = stages[stageIndex - 1];
         const previousDebates = previous.debates;
         const source = [previousDebates[matchIndex * 2], previousDebates[matchIndex * 2 + 1]];
-        teamIds = source.map((item, sourceIndex) => {
+        teamIds = source.map((item) => {
           const id = item ? outcomes.get(item.id)?.winnerTeamId : undefined;
           return id ?? '';
         });
