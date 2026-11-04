@@ -211,7 +211,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
               <input inputMode="numeric" aria-label={(field === 'warnings' ? 'Avisos' : field === 'minors' ? 'Faltas leves' : 'Faltas graves') + ' de ' + team.name} value={penalty[field]} onChange={(event) => set(field, event.target.value)} placeholder="0" /></label>)}
           </div>
           <small className="muted">Cuentan como {effective.minors} leve(s) y {effective.majors} grave(s){effective.deduction ? ': −' + formatNumber(effective.deduction) + ' ítems' : ''}. Neto: <b>{formatNumber(check.totals[team.id]?.net ?? null)}</b></small>
-          <label className="acta-inline"><span>Total escrito en el papel</span><input inputMode="decimal" value={draft.writtenTotals[team.id] ?? ''} onChange={(event) => edit((current) => ({ ...current, writtenTotals: { ...current.writtenTotals, [team.id]: event.target.value } }))} /></label>
+          <label className="acta-inline"><span>Total de items escritos en el acta en papel</span><input inputMode="decimal" value={draft.writtenTotals[team.id] ?? ''} onChange={(event) => edit((current) => ({ ...current, writtenTotals: { ...current.writtenTotals, [team.id]: event.target.value } }))} /></label>
         </div>;
       })}
     </section>}
