@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { penaltyConversionWarning } from '../results';
+import { LEDU_PHASES } from '../../timer';
+import type { Phase } from '../../domain';
 import { presetSettings, PRESET_OPTIONS } from '../presets';
 import { TIEBREAK_LABELS, type PresetId, type TabSettings, type TabTournament, type TiebreakKey } from '../types';
 import { whatsAppNumber } from '../whatsapp';
@@ -40,7 +42,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
   const [presetChoice, setPresetChoice] = useState<Exclude<PresetId, 'custom'>>(settings.presetId === 'custom' ? 'ledu-groups' : settings.presetId);
   const hasRounds = tournament.rounds.length > 0;
   const set = <K extends keyof TabSettings>(key: K, value: TabSettings[K]) =>
-    update((current) => ({ ...current, settings: { ...current.settings, [key]: value, presetId: 'custom' } }));
+    update((current) => ({ ...current, settings: { ...current.settings, [key]: value, presetId: key === 'timerPhases' ? current.settings.presetId : 'custom' } }));
   const conversionWarning = penaltyConversionWarning(settings);
   // Not a rule: changing it keeps the regulation preset.
   const setWhatsApp = (patch: Partial<NonNullable<TabTournament['whatsapp']>>) =>
@@ -61,7 +63,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
     }
     if (!window.confirm('¿Aplicar el reglamento «' + PRESET_OPTIONS.find((option) => option.id === presetChoice)?.label + '»? Se sustituirán todos los criterios de esta página.')) return;
     store.backup('Antes de aplicar un reglamento');
-    update((current) => ({ ...current, settings: next }), { type: 'settings.preset', message: 'Aplicado el reglamento «' + PRESET_OPTIONS.find((option) => option.id === presetChoice)?.label + '».' });
+    update((current) => ({ ...current, settings: { ...next, timerPhases: current.settings.timerPhases } }), { type: 'settings.preset', message: 'Aplicado el reglamento «' + PRESET_OPTIONS.find((option) => option.id === presetChoice)?.label + '».' });
     notify('Reglamento aplicado. Las clasificaciones se recalculan con los nuevos criterios.');
   };
 
@@ -77,6 +79,31 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
         </Field>
       </div>
       <div className="tab-actions"><button type="button" className="button secondary" onClick={applyPreset}>Aplicar reglamento</button></div>
+    </section>
+
+    <section className="panel">
+      <div className="panel-title"><div><h3>Formato del cronómetro</h3><p>Una única secuencia compartida por LEDU, sistema suizo y ADUMA. Se copia en cada ronda al generarla; los cambios posteriores solo afectan a rondas nuevas.</p></div></div>
+      <div className="tab-phase-editor">
+        {settings.timerPhases.map((phase, index) => <div className="tab-phase-row" key={phase.id}>
+          <div className="tab-form-grid">
+            <Field label={'Intervención ' + (index + 1)}><input value={phase.name} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, name: event.target.value } : item))} /></Field>
+            <Field label="Equipo"><select value={phase.side} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, side: event.target.value as Phase['side'] } : item))}><option value="favor">A favor</option><option value="contra">En contra</option></select></Field>
+            <Field label="Quién interviene"><input value={phase.speaker} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, speaker: event.target.value } : item))} /></Field>
+            <NumberField label="Duración (segundos)" value={phase.durationSeconds} min={1} max={7200} onChange={(value) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, durationSeconds: Math.max(1, Math.round(value)) } : item))} />
+            <Field label="Avisos (segundos, separados por comas)" hint="Ejemplo: 60, 30, 10"><input value={(phase.warningThresholdsSeconds ?? []).join(', ')} onChange={(event) => { const values = event.target.value.split(',').map((value) => Number(value.trim())).filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => b - a); set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, warningThresholdsSeconds: values } : item)); }} /></Field>
+            <Toggle label="Mostrar tiempo extra" checked={phase.allowOvertimeDisplay !== false} onChange={(value) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, allowOvertimeDisplay: value } : item))} />
+          </div>
+          <div className="tab-actions">
+            <button type="button" className="button ghost" disabled={index === 0} onClick={() => { const next = [...settings.timerPhases]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; set('timerPhases', next); }}>Subir</button>
+            <button type="button" className="button ghost" disabled={index === settings.timerPhases.length - 1} onClick={() => { const next = [...settings.timerPhases]; [next[index + 1], next[index]] = [next[index], next[index + 1]]; set('timerPhases', next); }}>Bajar</button>
+            <button type="button" className="button ghost danger-action" disabled={settings.timerPhases.length <= 1} onClick={() => set('timerPhases', settings.timerPhases.filter((_, i) => i !== index))}>Eliminar intervención</button>
+          </div>
+        </div>)}
+      </div>
+      <div className="tab-actions">
+        <button type="button" className="button secondary" onClick={() => set('timerPhases', [...settings.timerPhases, { id: 'custom-' + Date.now(), name: 'Nueva intervención', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'other', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true }])}>Añadir intervención</button>
+        <button type="button" className="button ghost" onClick={() => { if (window.confirm('¿Restaurar la secuencia LEDU original de 12 intervenciones?')) set('timerPhases', LEDU_PHASES.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }))); }}>Restaurar secuencia LEDU</button>
+      </div>
     </section>
 
     <section className="panel">

@@ -42,7 +42,7 @@ export function createRoundDraft(tournament: TabTournament, seed: number, now = 
     if (!eliminations.length) breakSeeds = generated.breakSeeds;
   }
   const allocation = allocateJudgesForRound(tournament, round, { replace: true, seed: hashSeed(seed, 'jueces') });
-  round = { ...round, debates: allocation.debates };
+  round = { ...round, debates: allocation.debates, timerPhases: settings.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })) };
   warnings.push(...allocation.warnings);
   const draft: TabRoundDraft = {
     round, generated: round, seed, kind, ...(breakSeeds ? { breakSeeds } : {}), fingerprint: draftFingerprint(tournament), createdAt: now, editHistory: [],

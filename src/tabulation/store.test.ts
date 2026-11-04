@@ -79,7 +79,7 @@ describe('tabulation store', () => {
   it('frees backups when the quota is exhausted and reports when it still does not fit', () => {
     // Venues inflate the tournament without growing the index, which only stores the name.
     const venues = (count: number) => Array.from({ length: count }, (_, i) => ({ id: 'v' + i, name: 'Aula ' + i, active: true }));
-    const { store, runTimers } = harness(memoryStorage({}, 20_000));
+    const { store, runTimers } = harness(memoryStorage({}, 25_000));
     store.create({ ...makeTournament('ledu-groups', ['a']), venues: venues(100) });
     expect(store.backup('Copia 1')).toBe(true);
     store.update((t) => ({ ...t, venues: venues(340) }));

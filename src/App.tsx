@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import TabulationApp, { type TabulationViewId } from './tabulation/TabulationApp';
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Settings, ShieldCheck, Shuffle, SlidersHorizontal, Trophy, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
-import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
+import { Activity, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Settings, ShieldCheck, Shuffle, SlidersHorizontal, Trophy, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import type { Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
 import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
 import type { RoundActivationPreview, RoomConnectionStatus } from './api';
@@ -116,10 +116,7 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [roomConnectionStatuses, setRoomConnectionStatuses] = useState<Record<string, RoomConnectionStatus>>({});
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
-  const [formatDirty, setFormatDirty] = useState(false);
-  const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
   const [institutionDraft, setInstitutionDraft] = useState('');
-  const [selectedFormatId, setSelectedFormatId] = useState('');
   const [scoreCategoryDraft, setScoreCategoryDraft] = useState('');
   const [savingScores, setSavingScores] = useState(false);
   const [activationPreview, setActivationPreview] = useState<RoundActivationPreview | null>(null);
@@ -347,11 +344,7 @@ export default function App() {
   useEffect(() => {
     if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
   }, [data.rounds, selectedRound]);
-  useEffect(() => {
-    if (!selectedFormatId || !data.formats.some((format) => format.id === selectedFormatId)) {
-      setSelectedFormatId(data.formats[0]?.id ?? '');
-    }
-  }, [data.formats, selectedFormatId]);
+
 
   const updateData = (updater: (current: Tournament) => Tournament) => {
     setPreparedRoomLink(null);
@@ -394,7 +387,6 @@ export default function App() {
       setData(saved);
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
-      setFormatDirty(false);
       setConnected(true);
       setLastSyncedAt(Date.now());
       setServerError('');
@@ -499,7 +491,7 @@ export default function App() {
   const openRoom = async (id: string, rotate = false) => {
     if (preparingRoomId) return;
 
-    const hasPendingChanges = hasUnsavedRef.current || hasUnsavedChanges || formatDirty;
+    const hasPendingChanges = hasUnsavedRef.current || hasUnsavedChanges;
     if (hasPendingChanges && !window.confirm(
       'Tienes cambios locales sin guardar. ¿Quieres guardarlos antes de abrir el cronómetro? Pulsa «Aceptar» para guardar y continuar; «Cancelar» para cancelar la apertura y seguir editando.'
     )) return;
@@ -973,101 +965,6 @@ export default function App() {
     }));
   };
 
-  const selectedPreset = data.formats.find((format) => format.id === selectedFormatId) ?? data.formats[0];
-  const editingFormatId = selectedPreset?.id ?? '';
-  const configuredPhases = selectedPreset?.phases?.length ? selectedPreset.phases : resolvePhases(data.formatPhases, data.rooms);
-  const updatePhase = (id: string, patch: Partial<Phase>) => {
-    setFormatDirty(true);
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.map((format) => format.id === editingFormatId
-        ? { ...format, phases: format.phases.map((phase) => phase.id === id ? { ...phase, ...patch } : phase), version: format.version + 1, updatedAt: Date.now() }
-        : format),
-    }));
-  };
-  const movePhase = (index: number, offset: number) => {
-    const nextIndex = index + offset;
-    if (nextIndex < 0 || nextIndex >= configuredPhases.length || !selectedPreset) return;
-    setFormatDirty(true);
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.map((format) => {
-        if (format.id !== editingFormatId) return format;
-        const phases = [...format.phases];
-        [phases[index], phases[nextIndex]] = [phases[nextIndex], phases[index]];
-        return { ...format, phases, version: format.version + 1, updatedAt: Date.now() };
-      }),
-    }));
-  };
-  const addPhase = () => {
-    if (!selectedPreset) return;
-    setFormatDirty(true);
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.map((format) => format.id === editingFormatId
-        ? { ...format, phases: [...format.phases, { id: makeId('p'), name: 'Nueva intervención', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'other', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true }], version: format.version + 1, updatedAt: Date.now() }
-        : format),
-    }));
-  };
-  const removePhase = (id: string) => {
-    if (configuredPhases.length <= 1) { setServerError('El formato debe tener al menos una intervención.'); return; }
-    setFormatDirty(true);
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.map((format) => format.id === editingFormatId
-        ? { ...format, phases: format.phases.filter((phase) => phase.id !== id), version: format.version + 1, updatedAt: Date.now() }
-        : format),
-    }));
-  };
-  const addFormat = () => {
-    const name = window.prompt('Nombre del nuevo formato de debate', 'Nuevo formato');
-    if (!name?.trim()) return;
-    if (data.formats.some((format) => format.name.trim().toLocaleLowerCase('es-ES') === name.trim().toLocaleLowerCase('es-ES'))) {
-      setServerError('Ya existe un formato con ese nombre.');
-      return;
-    }
-    const timestamp = Date.now();
-    const format: FormatPreset = {
-      id: makeId('format'), name: name.trim(), phases: configuredPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
-      version: 1, createdAt: timestamp, updatedAt: timestamp,
-    };
-    updateData((current) => ({ ...current, formats: [...current.formats, format] }));
-    setSelectedFormatId(format.id);
-    setFormatDirty(false);
-    setThresholdDrafts({});
-    setServerError('');
-  };
-  const renameSelectedFormat = () => {
-    if (!selectedPreset) return;
-    const name = window.prompt('Nombre del formato', selectedPreset.name);
-    if (!name?.trim()) return;
-    if (data.formats.some((format) => format.id !== selectedPreset.id && format.name.trim().toLocaleLowerCase('es-ES') === name.trim().toLocaleLowerCase('es-ES'))) {
-      setServerError('Ya existe otro formato con ese nombre.');
-      return;
-    }
-    updateData((current) => ({ ...current, formats: current.formats.map((format) => format.id === selectedPreset.id ? { ...format, name: name.trim(), version: format.version + 1, updatedAt: Date.now() } : format) }));
-    setServerError('');
-  };
-  const removeSelectedFormat = () => {
-    if (!selectedPreset) return;
-    if (data.formats.length <= 1) { setServerError('El torneo debe conservar al menos un formato.'); return; }
-    const fallback = data.formats.find((format) => format.id !== selectedPreset.id);
-    if (!fallback) return;
-    const referenceCount = data.rounds.filter((round) => round.defaultFormatId === selectedPreset.id).length
-      + data.rooms.filter((room) => room.formatId === selectedPreset.id).length;
-    if (!window.confirm('¿Eliminar el formato "' + selectedPreset.name + '"?' + (referenceCount ? ' Se sustituirán ' + referenceCount + ' referencia(s) por el formato "' + fallback.name + '". Los debates ya configurados conservarán su copia de fases hasta la próxima activación.' : ' Los debates ya configurados conservarán su copia de fases.') )) return;
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.filter((format) => format.id !== selectedPreset.id),
-      rounds: current.rounds.map((round) => round.defaultFormatId === selectedPreset.id ? { ...round, defaultFormatId: fallback.id } : round),
-      rooms: current.rooms.map((room) => room.formatId === selectedPreset.id ? { ...room, formatId: '' } : room),
-      formatPhases: current.formatPhases,
-    }));
-    setSelectedFormatId(fallback.id);
-    setFormatDirty(false);
-    setThresholdDrafts({});
-    setServerError('');
-  };
   const setRoundFormat = (roundId: string, formatId: string) => {
     updateData((current) => ({ ...current, rounds: current.rounds.map((round) => round.id === roundId ? { ...round, defaultFormatId: formatId } : round) }));
   };
@@ -1147,8 +1044,7 @@ export default function App() {
             setData(latest);
             hasUnsavedRef.current = false;
             setHasUnsavedChanges(false);
-            setFormatDirty(false);
-            setSelectedRound(refreshedPreview.targetRoundId);
+                  setSelectedRound(refreshedPreview.targetRoundId);
             setActivationPreview(null);
             setLastSyncedAt(Date.now());
             setConnected(true);
@@ -1196,7 +1092,6 @@ export default function App() {
       setData(saved);
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
-      setFormatDirty(false);
       setSelectedRound(effectivePreview.targetRoundId);
       setActivationPreview(null);
       setLastSyncedAt(Date.now());
@@ -1238,13 +1133,13 @@ export default function App() {
     if (!result.changed) { setTabulationNotice(round.name + ' ya coincide con «' + outbox.roundName + '» de la tabulación.'); return; }
     const otherTournament = outbox.panelTournamentName && outbox.panelTournamentName !== data.tournamentName
       ? '\n\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».' : '';
-    const overwriteWarning = '\n\n⚠️ SOBRESCRITURA TOTAL: se sustituirán todas las asignaciones de esta ronda. Se reiniciarán ' + result.resetTimers + ' cronómetros que estén iniciados o finalizados y se eliminarán ' + result.removedScorecards + ' actas/puntuaciones existentes. Las salas que no aparezcan en Tabulación quedarán vacías. Esta operación no se puede deshacer.';
+    const overwriteWarning = '\n\n⚠️ SOBRESCRITURA TOTAL: se sustituirán todas las asignaciones de esta ronda. Se reiniciarán ' + result.resetTimers + ' cronómetros que no estén en su estado inicial y se eliminarán ' + result.removedScorecards + ' actas/puntuaciones existentes. Las salas que no aparezcan en Tabulación quedarán vacías. Esta operación no se puede deshacer.';
     if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament + overwriteWarning
       + (result.addedTeams || result.addedJudges || result.addedPhysicalRooms ? '\n\nSe añadirán al panel: ' + result.addedTeams + ' equipos, ' + result.addedJudges + ' jueces y ' + result.addedPhysicalRooms + ' aulas.' : '')
       + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
     const rooms = result.rooms;
     const replacedRoomIds = new Set(data.rooms.filter((room) => room.roundId === round.id).map((room) => room.id));
-    updateData((current) => ({ ...current, physicalRooms: result.physicalRooms, teams: result.teams, judges: result.judges, institutions: result.institutions, rooms,
+    updateData((current) => ({ ...current, physicalRooms: result.physicalRooms, teams: result.teams, judges: result.judges, institutions: result.institutions, rooms, rounds: result.rounds, formats: result.formats,
       scoring: current.scoring ? { ...current.scoring, scorecards: (current.scoring.scorecards ?? []).filter((card) => !replacedRoomIds.has(card.roomId)) } : current.scoring }));
     setServerError('');
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
@@ -1275,12 +1170,12 @@ export default function App() {
       logout={logout}
     />
     <div className="manager-workspace" hidden={view === 'tabulation'}>
-    <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : formatDirty ? 'Guardar cambios de formato' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
+    <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
       {serverError && <div className="notice error-notice"><CircleHelp size={17} /><span>{serverError}</span><button onClick={() => setServerError('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
       {preparingRoomId && <div className="notice warning-notice"><RefreshCw size={17} /><span>Guardando los cambios y preparando el enlace de la sala…</span></div>}
       {preparedRoomLink && <div className="notice warning-notice room-link-ready"><Check size={17} /><span>Enlace listo para <b>{preparedRoomLink.roomName}</b>. Puedes abrir el cronómetro desde aquí; el enlace se reutilizará en las próximas aperturas de esta sesión.</span><a className="button primary" href={preparedRoomLink.href} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} /> Abrir cronómetro</a><button className="text-button" onClick={() => setPreparedRoomLink(null)} aria-label="Cerrar enlace preparado"><X size={16} /></button></div>}
       {tabulationNotice && <div className="success-notice"><Check size={17} /><span>{tabulationNotice}</span><button className="text-button" onClick={() => setTabulationNotice('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
-      {hasUnsavedChanges && <div className="notice warning-notice"><CircleHelp size={17} /><span>Tienes cambios locales sin guardar. El panel seguirá actualizando los cronómetros sin descartar estas ediciones.</span><button className="text-button" onClick={() => { if (window.confirm('¿Descartar todos los cambios locales y volver a cargar los datos guardados?')) { hasUnsavedRef.current = false; setHasUnsavedChanges(false); setFormatDirty(false); void reloadAdmin(); } }}>Descartar y recargar</button></div>}
+      {hasUnsavedChanges && <div className="notice warning-notice"><CircleHelp size={17} /><span>Tienes cambios locales sin guardar. El panel seguirá actualizando los cronómetros sin descartar estas ediciones.</span><button className="text-button" onClick={() => { if (window.confirm('¿Descartar todos los cambios locales y volver a cargar los datos guardados?')) { hasUnsavedRef.current = false; setHasUnsavedChanges(false); void reloadAdmin(); } }}>Descartar y recargar</button></div>}
       {(assignmentWarnings.length > 0 || incompatibilityIncidents.length > 0) && view !== 'settings' && <div className="notice warning-notice"><CircleHelp size={17} /><span>Hay incidencias en las asignaciones: {[...assignmentWarnings, ...incompatibilityIncidents.map((issue) => issue.roomName + ': ' + issue.message)].slice(0,3).join(' ')}{assignmentWarnings.length + incompatibilityIncidents.length > 3 ? ' +' + (assignmentWarnings.length + incompatibilityIncidents.length - 3) + ' más.' : ''}</span></div>}
       {activationPreview && <div className="activation-backdrop" role="presentation">
         <section className="activation-dialog" role="dialog" aria-modal="true" aria-labelledby="activate-round-title">
@@ -1423,10 +1318,8 @@ export default function App() {
         </section>;
       })}{data.judges.length === 0 && <section className="panel"><p className="muted">Todavía no hay jueces. Añade uno para empezar.</p></section>}</div></>}
 
-      {view === 'settings' && <><div className="page-heading"><div><p className="eyebrow">CONFIGURACIÓN</p><h2>Formatos y torneo</h2><p className="muted">Administra presets independientes. Las asignaciones existentes conservan su copia de fases hasta que se active su ronda.</p></div><button className="button secondary" onClick={() => { if (!selectedPreset) return; setFormatDirty(true); updateData((current) => ({ ...current, formats: current.formats.map((format) => format.id === selectedPreset.id ? { ...format, phases: LEDU_PHASES.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })), version: format.version + 1, updatedAt: Date.now() } : format) })); }} disabled={!selectedPreset}><RotateCcw size={16} /> Restaurar fases LEDU</button></div>
-      <section className="panel settings-panel"><label className="settings-name">Nombre del torneo<input className="table-input" value={data.tournamentName} onChange={(event) => updateData((current) => ({ ...current, tournamentName: event.target.value }))} /></label><label className="settings-name">Mínimo de jueces por sala<input className="table-input" type="number" min={1} max={25} step={1} value={data.minimumJudgesPerRoom ?? 1} onChange={(event) => updateData((current) => ({ ...current, minimumJudgesPerRoom: Math.max(1, Math.min(25, Math.trunc(Number(event.target.value) || 1))) }))} /></label><div className="format-catalog-toolbar"><label>Formato que estás editando<select className="format-select" value={editingFormatId} onChange={(event) => { setSelectedFormatId(event.target.value); setFormatDirty(false); setThresholdDrafts({}); }} disabled={!data.formats.length}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><div className="format-catalog-actions"><button className="button secondary" onClick={addFormat}><Plus size={15} /> Crear formato</button><button className="button secondary" onClick={renameSelectedFormat} disabled={!selectedPreset}>Renombrar</button><button className="button ghost danger-action" onClick={removeSelectedFormat} disabled={!selectedPreset || data.formats.length <= 1}><Trash2 size={15} /> Eliminar</button></div></div><div className="format-summary"><div><b>{configuredPhases.length} intervenciones</b><span>Duración teórica total: {formatTime(configuredPhases.reduce((total, phase) => total + phase.durationSeconds, 0))}</span></div><span className={formatDirty ? 'state-pill paused' : 'state-pill ready'}>{formatDirty ? 'Formato modificado' : 'Formato guardado'}</span></div>
-      
-      <div className="format-table-wrap"><table className="format-table"><thead><tr><th>#</th><th>Intervención</th><th>Tipo</th><th>Postura</th><th>Quién interviene</th><th>Segundos</th><th>Avisos</th><th>Exceso</th><th>Orden</th></tr></thead><tbody>{configuredPhases.map((phase, index) => <tr key={phase.id}><td>{index + 1}</td><td><input className="table-input" aria-label={'Nombre intervención ' + (index + 1)} value={phase.name} onChange={(event) => updatePhase(phase.id, { name: event.target.value })} /></td><td><select className="format-select" aria-label="Tipo de intervención" value={phase.type ?? 'other'} onChange={(event) => updatePhase(phase.id, { type: event.target.value as Phase['type'] })}><option value="opening">Exposición inicial</option><option value="cross-examination">Examen cruzado</option><option value="rebuttal">Refutación</option><option value="cross-rebuttal">Refutación cruzada</option><option value="conclusion">Conclusión</option><option value="other">Otro</option></select></td><td><select className="format-select" aria-label="Postura" value={phase.side} onChange={(event) => updatePhase(phase.id, { side: event.target.value as Phase['side'] })}><option value="favor">A favor</option><option value="contra">En contra</option></select></td><td><input className="table-input" aria-label="Interviniente" value={phase.speaker} onChange={(event) => updatePhase(phase.id, { speaker: event.target.value })} /></td><td><div className="duration-input"><input type="number" min={1} max={7200} value={phase.durationSeconds} aria-label="Duración en segundos" onChange={(event) => updatePhase(phase.id, { durationSeconds: Math.max(1, Math.min(7200, Number(event.target.value) || 1)) })} /><small>{formatTime(phase.durationSeconds)}</small></div></td><td><input className="threshold-input" aria-label="Umbrales de aviso en segundos" title="Segundos respecto al final; admite negativos para el exceso" value={thresholdDrafts[phase.id] ?? (phase.warningThresholdsSeconds ?? []).join(', ')} onChange={(event) => { const value = event.target.value; setThresholdDrafts((drafts) => ({ ...drafts, [phase.id]: value })); if (/^\s*$|^\s*-?\d+\s*(,\s*-?\d+\s*)*$/.test(value)) updatePhase(phase.id, { warningThresholdsSeconds: value.trim() ? [...new Set(value.split(',').map((item) => Number(item.trim())))].sort((a, b) => Math.abs(b) - Math.abs(a)) : [] }); }} onBlur={() => { const value = thresholdDrafts[phase.id] ?? (phase.warningThresholdsSeconds ?? []).join(', '); updatePhase(phase.id, { warningThresholdsSeconds: [...new Set(value.split(',').map((item) => Number(item.trim())).filter(Number.isFinite))].sort((a, b) => Math.abs(b) - Math.abs(a)) }); setThresholdDrafts((drafts) => { const next = { ...drafts }; delete next[phase.id]; return next; }); }} /></td><td><label className="overtime-toggle"><input type="checkbox" checked={phase.allowOvertimeDisplay !== false} onChange={(event) => updatePhase(phase.id, { allowOvertimeDisplay: event.target.checked })} />Sí</label></td><td><div className="phase-order"><button className="icon-button" title="Subir intervención" aria-label="Subir intervención" disabled={index === 0} onClick={() => movePhase(index, -1)}><ArrowUp size={14} /></button><button className="icon-button" title="Bajar intervención" aria-label="Bajar intervención" disabled={index === configuredPhases.length - 1} onClick={() => movePhase(index, 1)}><ArrowDown size={14} /></button><button className="icon-button danger-action" title="Eliminar intervención" aria-label="Eliminar intervención" disabled={configuredPhases.length <= 1} onClick={() => removePhase(phase.id)}><Trash2 size={14} /></button></div></td></tr>)}</tbody></table></div><div className="settings-actions"><button className="button secondary" onClick={addPhase}><Plus size={16} /> Añadir intervención</button><p className="muted">Este preset es una plantilla. Las asignaciones conservarán sus fases actuales hasta que el organizador active la ronda que las contiene.</p></div></section></>}
+      {view === 'settings' && <><div className="page-heading"><div><p className="eyebrow">CONFIGURACIÓN</p><h2>Gestión del torneo</h2><p className="muted">Gestión recibe los formatos y las secuencias de cronómetro desde las rondas generadas en Tabulación. Aquí no se crean ni editan formatos.</p></div></div>
+      <section className="panel settings-panel"><label className="settings-name">Nombre del torneo<input className="table-input" value={data.tournamentName} onChange={(event) => updateData((current) => ({ ...current, tournamentName: event.target.value }))} /></label><label className="settings-name">Mínimo de jueces por sala<input className="table-input" type="number" min={1} max={25} step={1} value={data.minimumJudgesPerRoom ?? 1} onChange={(event) => updateData((current) => ({ ...current, minimumJudgesPerRoom: Math.max(1, Math.min(25, Math.trunc(Number(event.target.value) || 1))) }))} /></label><div className="format-summary"><div><b>Formatos recibidos desde Tabulación</b><span>{data.formats.map((format) => format.name).join(' · ') || 'Todavía no se ha importado ningún formato'}</span></div><span className="state-pill ready">Solo lectura</span></div></section></>}
 
       <footer className="footer"><span>Debate Control · Herramienta de organización</span><span>{connected ? 'Conectado' : 'Conexión no confirmada'} · {lastSyncedAt ? 'Última sincronización: ' + new Date(lastSyncedAt).toLocaleTimeString('es-ES') : 'Sin sincronización confirmada'} · {apiConfigured ? 'Neon PostgreSQL' : 'Demo local'}</span></footer>
     </main>

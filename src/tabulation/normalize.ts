@@ -1,4 +1,5 @@
 import { presetSettings } from './presets';
+import type { Phase } from '../domain';
 import {
   SPEAKER_ROLES,
   TAB_SCHEMA_VERSION,
@@ -105,6 +106,7 @@ function normalizeSettings(raw: unknown): TabSettings {
     blindQualifying: flag(value.blindQualifying, base.blindQualifying),
     expectedTeams: int(value.expectedTeams, base.expectedTeams),
     bracketSeedOrder: seedOrder,
+    timerPhases: Array.isArray(value.timerPhases) && value.timerPhases.length ? value.timerPhases.filter((phase) => isObject(phase) && isText(phase.id) && isText(phase.name) && isFiniteNumber(phase.durationSeconds) && phase.durationSeconds > 0).map((phase) => ({ id: phase.id as string, name: phase.name as string, side: oneOf(phase.side, ['favor', 'contra'], 'favor'), speaker: text(phase.speaker), durationSeconds: phase.durationSeconds as number, type: oneOf(phase.type, ['opening', 'cross-examination', 'rebuttal', 'cross-rebuttal', 'conclusion', 'other'], 'other') as Phase['type'], warningThresholdsSeconds: Array.isArray(phase.warningThresholdsSeconds) ? phase.warningThresholdsSeconds.filter((n: unknown): n is number => isFiniteNumber(n) && n > 0) : [], allowOvertimeDisplay: flag(phase.allowOvertimeDisplay, true) } as Phase)) : base.timerPhases,
   };
 }
 
@@ -206,6 +208,7 @@ function normalizeRound(round: Json, references: References): { round: TabRound;
       seed: int(round.seed, 1),
       silent: flag(round.silent, false),
       debates,
+      ...(Array.isArray(round.timerPhases) && round.timerPhases.length ? { timerPhases: round.timerPhases.filter((phase) => isObject(phase) && isText(phase.id) && isText(phase.name) && isFiniteNumber(phase.durationSeconds) && phase.durationSeconds > 0).map((phase) => ({ id: phase.id as string, name: phase.name as string, side: oneOf(phase.side, ['favor', 'contra'], 'favor'), speaker: text(phase.speaker), durationSeconds: phase.durationSeconds as number, type: oneOf(phase.type, ['opening', 'cross-examination', 'rebuttal', 'cross-rebuttal', 'conclusion', 'other'], 'other') as Phase['type'], warningThresholdsSeconds: Array.isArray(phase.warningThresholdsSeconds) ? phase.warningThresholdsSeconds.filter((n: unknown): n is number => isFiniteNumber(n) && n > 0) : [], allowOvertimeDisplay: flag(phase.allowOvertimeDisplay, true) })) } : {}),
       createdAt: num(round.createdAt, 0),
       ...(typeof round.pushedAt === 'number' ? { pushedAt: round.pushedAt } : {}),
     },

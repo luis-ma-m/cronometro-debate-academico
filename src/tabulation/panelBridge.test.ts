@@ -88,9 +88,28 @@ describe('tabulation → panel', () => {
       ['physical-a2', 't2', 't4', ['j3'], 'ready'],
     ]);
     expect(applied.summary[1]).toContain('postura provisional');
-    const candidate = structuredClone({ ...source, rooms: applied.rooms! });
+    const candidate = structuredClone({ ...source, rooms: applied.rooms!, rounds: applied.rounds, formats: applied.formats });
     expect(() => validateTournamentInput(candidate)).not.toThrow();
-    expect(applyOutboxToPanel({ ...source, rooms: applied.rooms! }, 'r2', outbox!, { makeId, now })).toMatchObject({ issues: [], changed: 0 });
+    expect(applyOutboxToPanel(candidate, 'r2', outbox!, { makeId, now })).toMatchObject({ issues: [], changed: 0 });
+  });
+
+  it('transfers the round timer snapshot and makes it authoritative over Management formats', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'aduma', now, 1));
+    tab.settings.timerPhases = [{ id: 'custom-1', name: 'Intervención común', side: 'favor', speaker: 'A favor', durationSeconds: 75, type: 'opening', warningThresholdsSeconds: [15], allowOvertimeDisplay: false }];
+    tab.rounds[0].timerPhases = tab.settings.timerPhases.map((phase) => ({ ...phase }));
+    const outbox = buildOutbox(tab, 'r1', now).outbox!;
+    expect(outbox.version).toBe(2);
+    expect(outbox.presetId).toBe('aduma');
+    const applied = applyOutboxToPanel(source, 'r1', outbox, { makeId, now });
+    expect(applied.issues).toEqual([]);
+    expect(applied.rounds.find((item) => item.id === 'r1')).toMatchObject({ defaultFormatId: 'tabulation-aduma', scoreType: 'qualifying' });
+    expect(applied.formats.find((item) => item.id === 'tabulation-aduma')?.phases).toEqual(tab.settings.timerPhases);
+    expect(applied.rooms!.find((room) => room.id === 'a1')).toMatchObject({
+      formatId: 'tabulation-aduma',
+      phases: tab.settings.timerPhases,
+      timer: { status: 'idle', remainingSeconds: 75 },
+    });
   });
 
   it('creates missing teams and judges from the tabulation round snapshot', () => {
