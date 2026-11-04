@@ -530,7 +530,7 @@ export default function App() {
     try {
       // Never persist a clean tournament just to open a room.
       const saved = hasPendingChanges ? await persist() : data;
-      if (!saved) return;
+      if (!saved) { targetWindow?.close(); return; }
 
       const assignment = saved.rooms.find((room) => room.id === id);
       if (!assignment) throw new Error('La asignación ya no existe. Actualiza el panel.');
