@@ -1136,7 +1136,7 @@ export default function App() {
     if (!result.changed) { setTabulationNotice(round.name + ' ya coincide con «' + outbox.roundName + '» de la tabulación.'); return; }
     const otherTournament = outbox.panelTournamentName && outbox.panelTournamentName !== data.tournamentName
       ? '\n\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».' : '';
-    const overwriteWarning = '\n\n⚠️ SOBRESCRITURA TOTAL: se sustituirán todas las asignaciones de esta ronda. Se reiniciarán ' + result.resetTimers + ' cronómetros que estén iniciados o finalizados y se eliminarán ' + result.removedScorecards + ' actas/puntuaciones existentes. Las salas que no aparezcan en Tabulación quedarán vacías. Esta operación no se puede deshacer.';
+    const overwriteWarning = '\n\n⚠️ SOBRESCRITURA TOTAL: se sustituirán todas las asignaciones de esta ronda. Se reiniciarán ' + result.resetTimers + ' cronómetros que no estén en su estado inicial y se eliminarán ' + result.removedScorecards + ' actas/puntuaciones existentes. Las salas que no aparezcan en Tabulación quedarán vacías. Esta operación no se puede deshacer.';
     if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament + overwriteWarning
       + (result.addedTeams || result.addedJudges || result.addedPhysicalRooms ? '\n\nSe añadirán al panel: ' + result.addedTeams + ' equipos, ' + result.addedJudges + ' jueces y ' + result.addedPhysicalRooms + ' aulas.' : '')
       + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
