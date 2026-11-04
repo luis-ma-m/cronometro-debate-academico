@@ -102,7 +102,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           store.backup('Antes de recuperar el snapshot de Neon r' + remote.revision);
           store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Snapshot recuperado desde Neon', details: { revision: remote.revision, sha256: remote.snapshotSha256 } });
           store.flush();
-          remoteCursor.current.localRevision = remote.snapshot.revision;
+          remoteCursor.current.localRevision = store.getState().tournament?.revision ?? remote.snapshot.revision;
           setRemoteSync('synced');
         } else {
           setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
@@ -169,7 +169,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           store.backup('Antes de sincronizar cambios de otro dispositivo');
           store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Cambios recuperados desde otro dispositivo', details: { revision: remote.revision } });
           store.flush();
-          remoteCursor.current = { id: tournament.id, revision: remote.revision, localRevision: remote.snapshot.revision, inFlight: false };
+          remoteCursor.current = { id: tournament.id, revision: remote.revision, localRevision: store.getState().tournament?.revision ?? remote.snapshot.revision, inFlight: false };
           setRemoteSync('synced');
         } else {
           setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
@@ -207,7 +207,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     store.backup('Antes de sustituir por la versión remota de Neon');
     store.update(() => remoteConflict.remote.snapshot, { type: 'sync.remote', message: 'Versión de Neon recuperada manualmente' });
     store.flush();
-    remoteCursor.current = { id: tournament.id, revision: remoteConflict.remote.revision, localRevision: remoteConflict.remote.snapshot.revision, inFlight: false };
+    remoteCursor.current = { id: tournament.id, revision: remoteConflict.remote.revision, localRevision: store.getState().tournament?.revision ?? remoteConflict.remote.snapshot.revision, inFlight: false };
     setRemoteConflict(null); setRemoteSync('synced');
   };
   const publishLocalVersion = async () => {
@@ -308,7 +308,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   };
 
   const exportCopy = () => {
-    if (exportTournamentCopy(store) !== null) notify('Copia exportada con el registro. Guárdala fuera del navegador: es la única forma de recuperar el torneo si se borran los datos del sitio.');
+    if (exportTournamentCopy(store) !== null) notify('Copia exportada con el registro. Guárdala fuera del navegador como respaldo adicional a la sincronización con Neon.');
   };
 
   const saveLabel = remoteSync === 'synced' ? 'Sincronizado con Neon' : remoteSync === 'checking' ? 'Sincronizando…' : remoteSync === 'conflict' ? 'Conflicto entre dispositivos' : remoteSync === 'offline' ? 'Sin conexión con Neon' : remoteSync === 'error' ? 'Error de sincronización' : state.readOnly ? 'Solo lectura'
@@ -323,7 +323,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   return <div className={'tab-shell' + (projection ? ' tab-projection' : '') + (embedded ? ' tab-embedded' : ' app-shell')}>
     {!embedded && <aside className="sidebar">
       <div className="brand"><span className="brand-mark">T</span><span>Debate <b>Tabulación</b></span></div>
-      <div className="sidebar-section">TABULACIÓN LOCAL</div>
+      <div className="sidebar-section">TABULACIÓN</div>
       <nav>{VIEWS.map((item) => {
         const Icon = item.icon;
         const badge = badges[item.id];
@@ -388,7 +388,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           <button type="button" className="button primary" onClick={() => setView('inicio')}>Ir a Inicio</button>
         </section>}
       </ErrorBoundary>
-      <footer className="footer tab-no-project"><span>Debate Control · Tabulación local · {BUILD_INFO}</span><span>Los datos se guardan solo en este navegador. Exporta copias con regularidad.</span></footer>
+      <footer className="footer tab-no-project"><span>Debate Control · Tabulación local · {BUILD_INFO}</span><span>Neon conserva la copia sincronizada; el navegador mantiene una copia local para trabajar sin conexión.</span></footer>
     </main>
 
     {operatorMissing && <div className="activation-backdrop operator-required-backdrop">
