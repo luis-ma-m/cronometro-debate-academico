@@ -1214,7 +1214,7 @@ export default function App() {
     ? incompatibilityIncidents.filter((incident) => data.rooms.some((room) => room.id === incident.roomId && room.roundId === activeTournamentRoundId))
     : [];
 
-  return <div className="app-shell unified-shell">
+  return <div className={overviewProjected && view === "overview" ? "app-shell unified-shell overview-projection" : "app-shell unified-shell"}>
     <UnifiedSidebar
       view={view}
       tabulationView={tabulationView}
