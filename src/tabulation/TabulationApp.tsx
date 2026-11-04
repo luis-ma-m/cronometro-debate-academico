@@ -120,7 +120,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   }, [apiConfigured, remoteToken, tournament?.id, store]);
 
   useEffect(() => {
-    if (!apiConfigured || !remoteToken || !tournament || state.readOnly || state.status !== 'saved' || remoteSync === 'conflict') return;
+    if (!apiConfigured || !remoteToken || !tournament || state.readOnly || state.status !== 'saved' || remoteSync === 'conflict' || remoteSync === 'error' || remoteSync === 'offline') return;
     const cursor = remoteCursor.current;
     if (!cursor || cursor.id !== tournament.id || cursor.inFlight || cursor.localRevision === tournament.revision) return;
     let cancelled = false;
@@ -142,6 +142,11 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       if (cancelled) return;
       cursor.inFlight = false;
       const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+      if (code === 'REVISION_CONFLICT') {
+        void getTabulationSnapshot(remoteToken, tournament.id).then((remote) => {
+          if (remote) setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
+        }).catch(() => undefined);
+      }
       setRemoteSync(code === 'REVISION_CONFLICT' ? 'conflict' : 'error');
       store.logError(error instanceof Error ? error.message : 'No se pudo publicar Tabulación en Neon.');
     });
@@ -155,7 +160,11 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       try {
         const remote = await getTabulationSnapshot(remoteToken, tournament.id);
         const cursor = remoteCursor.current;
-        if (!remote || !cursor || remote.revision <= cursor.revision) return;
+        if (!remote || !cursor) return;
+        if (remote.revision <= cursor.revision) {
+          if (cursor.localRevision !== tournament.revision) setRemoteSync('checking');
+          return;
+        }
         if (cursor.localRevision === tournament.revision && store.getState().status === 'saved') {
           store.backup('Antes de sincronizar cambios de otro dispositivo');
           store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Cambios recuperados desde otro dispositivo', details: { revision: remote.revision } });
