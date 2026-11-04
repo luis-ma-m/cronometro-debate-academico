@@ -243,7 +243,8 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   if (outbox.version !== 2 || !Array.isArray(outbox.timerPhases) || !outbox.timerPhases.length || outbox.timerPhases.some((phase) => !phase.id || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) return { ...empty, rooms: null, issues: ['La ronda no contiene un formato de cronómetro válido. Vuelve a generarla desde Tabulación.'] };
 
   const importedPhases = outbox.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
-  const formatId = 'tabulation-' + outbox.presetId;\n  const physicalRooms = [...panel.physicalRooms];
+  const formatId = 'tabulation-' + outbox.presetId;
+  const physicalRooms = [...panel.physicalRooms];
   const byId = new Map(physicalRooms.map((physical) => [physical.id, physical]));
   const byName = new Map(physicalRooms.map((physical) => [normalizeVenueName(physical.name), physical]));
   const resolved = new Map<string, Tournament['physicalRooms'][number]>();
