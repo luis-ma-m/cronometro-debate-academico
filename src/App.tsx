@@ -116,10 +116,7 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const [roomConnectionStatuses, setRoomConnectionStatuses] = useState<Record<string, RoomConnectionStatus>>({});
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
-  const [formatDirty, setFormatDirty] = useState(false);
-  const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
   const [institutionDraft, setInstitutionDraft] = useState('');
-  const [selectedFormatId, setSelectedFormatId] = useState('');
   const [scoreCategoryDraft, setScoreCategoryDraft] = useState('');
   const [savingScores, setSavingScores] = useState(false);
   const [activationPreview, setActivationPreview] = useState<RoundActivationPreview | null>(null);
@@ -973,101 +970,6 @@ export default function App() {
     }));
   };
 
-  const selectedPreset = data.formats.find((format) => format.id === selectedFormatId) ?? data.formats[0];
-  const editingFormatId = selectedPreset?.id ?? '';
-  const configuredPhases = selectedPreset?.phases?.length ? selectedPreset.phases : resolvePhases(data.formatPhases, data.rooms);
-  const updatePhase = (id: string, patch: Partial<Phase>) => {
-    setFormatDirty(true);
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.map((format) => format.id === editingFormatId
-        ? { ...format, phases: format.phases.map((phase) => phase.id === id ? { ...phase, ...patch } : phase), version: format.version + 1, updatedAt: Date.now() }
-        : format),
-    }));
-  };
-  const movePhase = (index: number, offset: number) => {
-    const nextIndex = index + offset;
-    if (nextIndex < 0 || nextIndex >= configuredPhases.length || !selectedPreset) return;
-    setFormatDirty(true);
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.map((format) => {
-        if (format.id !== editingFormatId) return format;
-        const phases = [...format.phases];
-        [phases[index], phases[nextIndex]] = [phases[nextIndex], phases[index]];
-        return { ...format, phases, version: format.version + 1, updatedAt: Date.now() };
-      }),
-    }));
-  };
-  const addPhase = () => {
-    if (!selectedPreset) return;
-    setFormatDirty(true);
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.map((format) => format.id === editingFormatId
-        ? { ...format, phases: [...format.phases, { id: makeId('p'), name: 'Nueva intervención', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'other', warningThresholdsSeconds: [30, 10], allowOvertimeDisplay: true }], version: format.version + 1, updatedAt: Date.now() }
-        : format),
-    }));
-  };
-  const removePhase = (id: string) => {
-    if (configuredPhases.length <= 1) { setServerError('El formato debe tener al menos una intervención.'); return; }
-    setFormatDirty(true);
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.map((format) => format.id === editingFormatId
-        ? { ...format, phases: format.phases.filter((phase) => phase.id !== id), version: format.version + 1, updatedAt: Date.now() }
-        : format),
-    }));
-  };
-  const addFormat = () => {
-    const name = window.prompt('Nombre del nuevo formato de debate', 'Nuevo formato');
-    if (!name?.trim()) return;
-    if (data.formats.some((format) => format.name.trim().toLocaleLowerCase('es-ES') === name.trim().toLocaleLowerCase('es-ES'))) {
-      setServerError('Ya existe un formato con ese nombre.');
-      return;
-    }
-    const timestamp = Date.now();
-    const format: FormatPreset = {
-      id: makeId('format'), name: name.trim(), phases: configuredPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
-      version: 1, createdAt: timestamp, updatedAt: timestamp,
-    };
-    updateData((current) => ({ ...current, formats: [...current.formats, format] }));
-    setSelectedFormatId(format.id);
-    setFormatDirty(false);
-    setThresholdDrafts({});
-    setServerError('');
-  };
-  const renameSelectedFormat = () => {
-    if (!selectedPreset) return;
-    const name = window.prompt('Nombre del formato', selectedPreset.name);
-    if (!name?.trim()) return;
-    if (data.formats.some((format) => format.id !== selectedPreset.id && format.name.trim().toLocaleLowerCase('es-ES') === name.trim().toLocaleLowerCase('es-ES'))) {
-      setServerError('Ya existe otro formato con ese nombre.');
-      return;
-    }
-    updateData((current) => ({ ...current, formats: current.formats.map((format) => format.id === selectedPreset.id ? { ...format, name: name.trim(), version: format.version + 1, updatedAt: Date.now() } : format) }));
-    setServerError('');
-  };
-  const removeSelectedFormat = () => {
-    if (!selectedPreset) return;
-    if (data.formats.length <= 1) { setServerError('El torneo debe conservar al menos un formato.'); return; }
-    const fallback = data.formats.find((format) => format.id !== selectedPreset.id);
-    if (!fallback) return;
-    const referenceCount = data.rounds.filter((round) => round.defaultFormatId === selectedPreset.id).length
-      + data.rooms.filter((room) => room.formatId === selectedPreset.id).length;
-    if (!window.confirm('¿Eliminar el formato "' + selectedPreset.name + '"?' + (referenceCount ? ' Se sustituirán ' + referenceCount + ' referencia(s) por el formato "' + fallback.name + '". Los debates ya configurados conservarán su copia de fases hasta la próxima activación.' : ' Los debates ya configurados conservarán su copia de fases.') )) return;
-    updateData((current) => ({
-      ...current,
-      formats: current.formats.filter((format) => format.id !== selectedPreset.id),
-      rounds: current.rounds.map((round) => round.defaultFormatId === selectedPreset.id ? { ...round, defaultFormatId: fallback.id } : round),
-      rooms: current.rooms.map((room) => room.formatId === selectedPreset.id ? { ...room, formatId: '' } : room),
-      formatPhases: current.formatPhases,
-    }));
-    setSelectedFormatId(fallback.id);
-    setFormatDirty(false);
-    setThresholdDrafts({});
-    setServerError('');
-  };
   const setRoundFormat = (roundId: string, formatId: string) => {
     updateData((current) => ({ ...current, rounds: current.rounds.map((round) => round.id === roundId ? { ...round, defaultFormatId: formatId } : round) }));
   };
