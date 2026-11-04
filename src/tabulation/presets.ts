@@ -1,4 +1,5 @@
 import { randomSeed } from './random';
+import { LEDU_PHASES } from '../timer';
 import { makeTabId, TAB_SCHEMA_VERSION, type PresetId, type TabRubricItem, type TabSettings, type TabTournament } from './types';
 
 export const PRESET_OPTIONS: Array<{ id: Exclude<PresetId, 'custom'>; label: string; description: string }> = [
@@ -37,7 +38,7 @@ export const ADUMA_RUBRIC: TabRubricItem[] = [
 ];
 
 /** Settings shared by the presets that predate ADUMA, so their behaviour does not change. */
-const CLASSIC_DEFAULTS: Pick<TabSettings, 'ballotMode' | 'rubric' | 'itemMin' | 'itemMax' | 'minorEscalation' | 'oddPanels' | 'conflictPolicy' | 'blindQualifying' | 'expectedTeams' | 'bracketSeedOrder'> = {
+const CLASSIC_DEFAULTS: Pick<TabSettings, 'ballotMode' | 'rubric' | 'itemMin' | 'itemMax' | 'minorEscalation' | 'oddPanels' | 'conflictPolicy' | 'blindQualifying' | 'expectedTeams' | 'bracketSeedOrder' | 'timerPhases'> = {
   ballotMode: 'judges',
   rubric: [],
   itemMin: 0,
@@ -48,6 +49,7 @@ const CLASSIC_DEFAULTS: Pick<TabSettings, 'ballotMode' | 'rubric' | 'itemMin' | 
   blindQualifying: false,
   expectedTeams: 0,
   bracketSeedOrder: [],
+  timerPhases: LEDU_PHASES.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
 };
 
 /** Defaults taken from the LEDU 2024 regulations (arts. 26–36). */
@@ -159,6 +161,7 @@ const ADUMA_SETTINGS: TabSettings = {
   conflictPolicy: 'lastResort',
   blindQualifying: true,
   expectedTeams: 20,
+  timerPhases: LEDU_PHASES.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
 };
 
 export function presetSettings(presetId: PresetId): TabSettings {
@@ -168,6 +171,7 @@ export function presetSettings(presetId: PresetId): TabSettings {
     tiebreaks: [...source.tiebreaks],
     rubric: source.rubric.map((item) => ({ ...item })),
     bracketSeedOrder: [...source.bracketSeedOrder],
+    timerPhases: source.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
   };
 }
 

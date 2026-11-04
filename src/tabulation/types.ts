@@ -1,4 +1,5 @@
 import type { SpeakerPosition } from '../scoring';
+import type { Phase } from '../domain';
 
 /** Local, frontend-only tabulation model. Nothing derived (standings, byes, outcomes) is stored. */
 export const TAB_SCHEMA_VERSION = 2;
@@ -96,6 +97,8 @@ export interface TabSettings {
   expectedTeams: number;
   /** Seed order of the first elimination round when it differs from the standard bracket (empty = standard). */
   bracketSeedOrder: number[];
+  /** Shared, editable timer sequence; copied into every generated round. */
+  timerPhases: Phase[];
 }
 
 export interface TabTeam {
@@ -200,6 +203,8 @@ export interface TabRound {
   /** Closed round: results are kept out of projected standings. */
   silent: boolean;
   debates: TabDebate[];
+  /** Immutable timer sequence snapshot captured when the round is generated. */
+  timerPhases?: Phase[];
   createdAt: number;
   pushedAt?: number;
 }

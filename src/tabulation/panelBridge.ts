@@ -1,5 +1,5 @@
 import type { Judge, Room, Speaker, Team, Tournament } from '../domain';
-import { createTimer, resolvePhases, validateAssignments, withRoomStatus } from '../timer';
+import { createTimer, validateAssignments, withRoomStatus } from '../timer';
 import { pickChair } from './adjudication';
 import { createTabTournament } from './presets';
 import { randomSeed } from './random';
@@ -38,8 +38,11 @@ export interface PanelOutboxDebate {
 
 export interface PanelOutbox {
   format: 'ledu-tabulacion-outbox';
-  version: 1;
+  version: 2;
   createdAt: number;
+  presetId: PresetId;
+  roundKind: 'qualifying' | 'elimination';
+  timerPhases: import('../domain').Phase[];
   tabTournamentName: string;
   panelTournamentName: string | null;
   roundName: string;
@@ -52,7 +55,7 @@ export interface PanelOutbox {
 function readJson<T>(storage: SimpleStorage, key: string, format: string): T | null {
   try {
     const value = JSON.parse(storage.getItem(key) ?? 'null') as { format?: string; version?: number } | null;
-    return value && value.format === format && value.version === 1 ? (value as T) : null;
+    return value && value.format === format && (value.version === 1 || value.version === 2) ? (value as T) : null;
   } catch {
     return null;
   }
@@ -137,6 +140,10 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   if (!round) return { outbox: null, issues: ['La ronda no existe.'], warnings: [] };
   const issues: string[] = [];
   const warnings: string[] = [];
+  const timerPhases = round.timerPhases?.length ? round.timerPhases : tournament.settings.timerPhases;
+  if (!timerPhases.length || timerPhases.some((phase) => !phase.id.trim() || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) {
+    return { outbox: null, issues: ['Configura al menos una intervención con nombre y duración válida en Reglas del torneo antes de enviar la ronda.'], warnings };
+  }
   const venues = new Map(tournament.venues.map((venue) => [venue.id, venue.name]));
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
   const debates: PanelOutboxDebate[] = [];
@@ -171,8 +178,11 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   return {
     outbox: {
       format: 'ledu-tabulacion-outbox',
-      version: 1,
+      version: 2,
       createdAt: now,
+      presetId: tournament.settings.presetId,
+      roundKind: round.kind,
+      timerPhases: timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
       tabTournamentName: tournament.name,
       panelTournamentName: tournament.panelLink?.tournamentName ?? null,
       roundName: round.name,
@@ -215,7 +225,7 @@ function panelAcceptedJudges(tournament: TabTournament, debate: TabDebate, venue
   return { judgeIds, chairId: judgeIds.includes(debate.chairId) ? debate.chairId : pickChair(judgeIds, judges) };
 }
 
-export interface ApplyOutboxResult { rooms: Room[] | null; physicalRooms: Tournament['physicalRooms']; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; addedPhysicalRooms: number; overwrittenRooms: number; resetTimers: number; removedScorecards: number; issues: string[]; summary: string[]; changed: number }
+export interface ApplyOutboxResult { rooms: Room[] | null; rounds: Tournament['rounds']; formats: Tournament['formats']; physicalRooms: Tournament['physicalRooms']; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; addedPhysicalRooms: number; overwrittenRooms: number; resetTimers: number; removedScorecards: number; issues: string[]; summary: string[]; changed: number }
 
 const sameSet = (left: string[], right: string[]) => left.length === right.length && [...left].sort().join('|') === [...right].sort().join('|');
 const normalizeVenueName = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es');
@@ -231,9 +241,13 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const now = options.now ?? Date.now();
   const issues: string[] = [];
   const round = panel.rounds.find((item) => item.id === panelRoundId);
-  const empty = { physicalRooms: panel.physicalRooms, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, addedPhysicalRooms: 0, overwrittenRooms: 0, resetTimers: 0, removedScorecards: 0, issues: [] as string[], summary: [] as string[], changed: 0 };
+  const empty = { rounds: panel.rounds, formats: panel.formats, physicalRooms: panel.physicalRooms, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, addedPhysicalRooms: 0, overwrittenRooms: 0, resetTimers: 0, removedScorecards: 0, issues: [] as string[], summary: [] as string[], changed: 0 };
   if (!round) return { ...empty, rooms: null, issues: ['Selecciona una ronda del panel.'] };
 
+  if (outbox.version !== 2 || !Array.isArray(outbox.timerPhases) || !outbox.timerPhases.length || outbox.timerPhases.some((phase) => !phase.id || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) return { ...empty, rooms: null, issues: ['La ronda no contiene un formato de cronómetro válido. Vuelve a generarla desde Tabulación.'] };
+
+  const importedPhases = outbox.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
+  const formatId = 'tabulation-' + outbox.presetId;
   const physicalRooms = [...panel.physicalRooms];
   const byId = new Map(physicalRooms.map((physical) => [physical.id, physical]));
   const byName = new Map(physicalRooms.map((physical) => [normalizeVenueName(physical.name), physical]));
@@ -276,7 +290,7 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const scored = new Set((panel.scoring?.scorecards ?? []).map((card) => card.roomId));
   const addedTeams = teams.size - panel.teams.length;
   const addedJudges = judgesById.size - panel.judges.length;
-  let changed = addedTeams + addedJudges + addedPhysicalRooms;
+  let changed = addedTeams + addedJudges + addedPhysicalRooms + Number(round.defaultFormatId !== formatId || round.scoreType !== outbox.roundKind || JSON.stringify(panel.formats.find((item) => item.id === formatId)?.phases ?? []) !== JSON.stringify(importedPhases));
   let overwrittenRooms = 0;
   let resetTimers = 0;
   let removedScorecards = 0;
@@ -287,22 +301,25 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     const teamContraId = target?.teamContraId ?? '';
     const judgeIds = target?.judgeIds ?? [];
     const assignmentChanged = room.teamFavorId !== teamFavorId || room.teamContraId !== teamContraId || !sameSet(room.judgeIds, judgeIds);
+    const formatChanged = room.formatId !== formatId || JSON.stringify(room.phases) !== JSON.stringify(importedPhases);
+    const timerChanged = room.timer.status !== 'idle' || room.timer.phaseIndex !== 0 || room.timer.remainingSeconds !== importedPhases[0].durationSeconds || room.timer.startedAt !== null || room.timer.lastResumedAt !== null;
     const hasScorecard = scored.has(room.id);
     if (assignmentChanged && (room.teamFavorId || room.teamContraId || room.judgeIds.length)) overwrittenRooms++;
-    if (room.timer.status !== 'idle') resetTimers++;
+    if (timerChanged) resetTimers++;
     if (hasScorecard) removedScorecards++;
-    changed += Number(assignmentChanged || room.timer.status !== 'idle' || hasScorecard);
-    const phases = room.phases.map((phase) => ({ ...phase }));
-    const reset = { ...room, teamFavorId, teamContraId, judgeIds: [...judgeIds], status: 'unassigned' as const, timer: { ...createTimer(phases), updatedAt: now }, updatedAt: now };
+    changed += Number(assignmentChanged || formatChanged || timerChanged || hasScorecard);
+    const phases = importedPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
+    const reset = { ...room, formatId, phases, teamFavorId, teamContraId, judgeIds: [...judgeIds], status: 'unassigned' as const, timer: { ...createTimer(phases), updatedAt: now }, updatedAt: now };
     return withRoomStatus(reset, minimumJudges);
   });
-  const format = panel.formats.find((item) => item.id === round.defaultFormatId) ?? panel.formats[0];
+  const formats = [...panel.formats.filter((item) => item.id !== formatId), { id: formatId, name: 'Tabulación · ' + (outbox.presetId === 'aduma' ? 'V Torneo Nacional ADUMA' : outbox.presetId === 'uc3m-swiss' ? 'Sistema suizo' : 'LEDU · liguilla de equipos'), phases: importedPhases, version: (panel.formats.find((item) => item.id === formatId)?.version ?? 0) + 1, createdAt: panel.formats.find((item) => item.id === formatId)?.createdAt ?? now, updatedAt: now }];
+  const rounds = panel.rounds.map((item) => item.id === panelRoundId ? { ...item, defaultFormatId: formatId, scoreType: outbox.roundKind } : item);
   for (const [physicalId, debate] of targets) {
     if (rooms.some((room) => room.roundId === panelRoundId && room.physicalRoomId === physicalId)) continue;
     const physical = physicalRooms.find((item) => item.id === physicalId)!;
-    const phases = (format?.phases?.length ? format.phases : resolvePhases(panel.formatPhases, panel.rooms)).map((phase) => ({ ...phase }));
+    const phases = importedPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
     rooms.push(withRoomStatus({
-      id: options.makeId('assignment'), name: physical.name, roundId: panelRoundId, physicalRoomId: physical.id, formatId: '',
+      id: options.makeId('assignment'), name: physical.name, roundId: panelRoundId, physicalRoomId: physical.id, formatId,
       teamFavorId: debate.teamFavorId, teamContraId: debate.teamContraId, judgeIds: [...debate.judgeIds], status: 'unassigned',
       phases, timer: { ...createTimer(phases), updatedAt: now }, notes: '', updatedAt: now,
     }, minimumJudges));
@@ -316,5 +333,5 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const name = (id: string) => teams.get(id)?.name ?? id;
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
     + debate.judgeIds.length + (debate.judgeIds.length === 1 ? ' juez' : ' jueces') + (debate.sidesProvisional ? ' · postura provisional' : ''));
-  return { rooms, physicalRooms, teams: mergedTeams, judges: mergedJudges, institutions, addedTeams, addedJudges, addedPhysicalRooms, overwrittenRooms, resetTimers, removedScorecards, issues: [], summary, changed };
+  return { rooms, rounds, formats, physicalRooms, teams: mergedTeams, judges: mergedJudges, institutions, addedTeams, addedJudges, addedPhysicalRooms, overwrittenRooms, resetTimers, removedScorecards, issues: [], summary, changed };
 }

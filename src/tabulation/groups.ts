@@ -101,6 +101,7 @@ export function generateGroupStage(tournament: TabTournament, seed: number, now 
       seed: hashSeed(seed, index),
       silent: false,
       debates,
+      timerPhases: tournament.settings.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
       createdAt: now,
     });
   }
