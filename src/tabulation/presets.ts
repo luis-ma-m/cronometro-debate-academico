@@ -1,4 +1,5 @@
 import { randomSeed } from './random';
+import { LEDU_PHASES } from '../timer';
 import { makeTabId, TAB_SCHEMA_VERSION, type PresetId, type TabRubricItem, type TabSettings, type TabTournament } from './types';
 
 export const PRESET_OPTIONS: Array<{ id: Exclude<PresetId, 'custom'>; label: string; description: string }> = [
@@ -48,6 +49,7 @@ const CLASSIC_DEFAULTS: Pick<TabSettings, 'ballotMode' | 'rubric' | 'itemMin' | 
   blindQualifying: false,
   expectedTeams: 0,
   bracketSeedOrder: [],
+  timerPhases: LEDU_PHASES.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
 };
 
 /** Defaults taken from the LEDU 2024 regulations (arts. 26–36). */
@@ -168,6 +170,7 @@ export function presetSettings(presetId: PresetId): TabSettings {
     tiebreaks: [...source.tiebreaks],
     rubric: source.rubric.map((item) => ({ ...item })),
     bracketSeedOrder: [...source.bracketSeedOrder],
+    timerPhases: source.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
   };
 }
 
