@@ -161,6 +161,7 @@ const ADUMA_SETTINGS: TabSettings = {
   conflictPolicy: 'lastResort',
   blindQualifying: true,
   expectedTeams: 20,
+  timerPhases: LEDU_PHASES.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
 };
 
 export function presetSettings(presetId: PresetId): TabSettings {
