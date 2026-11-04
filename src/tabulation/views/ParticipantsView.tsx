@@ -290,8 +290,8 @@ function JudgesSection({ tournament, update, notify, usedJudges }: EditProps & {
               <button type="submit" className="button secondary" disabled={!plannedRoundName.trim()}>Bloquear nombre</button>
             </form>
             {((judge.unavailableRoundNumbers ?? []).length > 0 || (judge.unavailableRoundNames ?? []).length > 0) && <div className="check-grid">
-              {(judge.unavailableRoundNumbers ?? []).map((number) => <label key={'number-' + number} className="check-item"><input type="checkbox" checked={false} onChange={() => setJudge(judge.id, { unavailableRoundNumbers: (judge.unavailableRoundNumbers ?? []).filter((item) => item !== number) })} />No disponible · Ronda {number}</label>)}
-              {(judge.unavailableRoundNames ?? []).map((name) => <label key={'name-' + name} className="check-item"><input type="checkbox" checked={false} onChange={() => setJudge(judge.id, { unavailableRoundNames: (judge.unavailableRoundNames ?? []).filter((item) => item !== name) })} />No disponible · {name}</label>)}
+              {(judge.unavailableRoundNumbers ?? []).map((number) => <span key={'number-' + number} className="check-item">No disponible · Ronda {number} <button type="button" className="text-button" onClick={() => setJudge(judge.id, { unavailableRoundNumbers: (judge.unavailableRoundNumbers ?? []).filter((item) => item !== number) })}>Quitar</button></span>)}
+              {(judge.unavailableRoundNames ?? []).map((name) => <span key={'name-' + name} className="check-item">No disponible · {name} <button type="button" className="text-button" onClick={() => setJudge(judge.id, { unavailableRoundNames: (judge.unavailableRoundNames ?? []).filter((item) => item !== name) })}>Quitar</button></span>)}
             </div>}
           </div>
           <SearchableEntityPicker label="Equipos con incompatibilidad objetiva" multiple options={tournament.teams.map((team) => ({ id: team.id, name: team.name, active: team.active }))} value={teamConflicts}
