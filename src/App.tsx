@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import TabulationApp, { type TabulationViewId } from './tabulation/TabulationApp';
-import { Activity, ArrowDown, ArrowRight, ArrowUp, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Settings, ShieldCheck, Shuffle, SlidersHorizontal, Trophy, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
-import type { FormatPreset, Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
+import { Activity, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Settings, ShieldCheck, Shuffle, SlidersHorizontal, Trophy, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import type { Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
 import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
 import type { RoundActivationPreview, RoomConnectionStatus } from './api';
@@ -344,11 +344,7 @@ export default function App() {
   useEffect(() => {
     if (!selectedRound && data.rounds.length) setSelectedRound(data.rounds.find((round) => round.active)?.id ?? data.rounds[0].id);
   }, [data.rounds, selectedRound]);
-  useEffect(() => {
-    if (!selectedFormatId || !data.formats.some((format) => format.id === selectedFormatId)) {
-      setSelectedFormatId(data.formats[0]?.id ?? '');
-    }
-  }, [data.formats, selectedFormatId]);
+
 
   const updateData = (updater: (current: Tournament) => Tournament) => {
     setPreparedRoomLink(null);
@@ -496,7 +492,7 @@ export default function App() {
   const openRoom = async (id: string, rotate = false) => {
     if (preparingRoomId) return;
 
-    const hasPendingChanges = hasUnsavedRef.current || hasUnsavedChanges || formatDirty;
+    const hasPendingChanges = hasUnsavedRef.current || hasUnsavedChanges;
     if (hasPendingChanges && !window.confirm(
       'Tienes cambios locales sin guardar. ¿Quieres guardarlos antes de abrir el cronómetro? Pulsa «Aceptar» para guardar y continuar; «Cancelar» para cancelar la apertura y seguir editando.'
     )) return;
