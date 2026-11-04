@@ -42,7 +42,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
   const [presetChoice, setPresetChoice] = useState<Exclude<PresetId, 'custom'>>(settings.presetId === 'custom' ? 'ledu-groups' : settings.presetId);
   const hasRounds = tournament.rounds.length > 0;
   const set = <K extends keyof TabSettings>(key: K, value: TabSettings[K]) =>
-    update((current) => ({ ...current, settings: { ...current.settings, [key]: value, presetId: 'custom' } }));
+    update((current) => ({ ...current, settings: { ...current.settings, [key]: value, presetId: key === 'timerPhases' ? current.settings.presetId : 'custom' } }));
   const conversionWarning = penaltyConversionWarning(settings);
   // Not a rule: changing it keeps the regulation preset.
   const setWhatsApp = (patch: Partial<NonNullable<TabTournament['whatsapp']>>) =>
@@ -63,7 +63,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
     }
     if (!window.confirm('¿Aplicar el reglamento «' + PRESET_OPTIONS.find((option) => option.id === presetChoice)?.label + '»? Se sustituirán todos los criterios de esta página.')) return;
     store.backup('Antes de aplicar un reglamento');
-    update((current) => ({ ...current, settings: next }), { type: 'settings.preset', message: 'Aplicado el reglamento «' + PRESET_OPTIONS.find((option) => option.id === presetChoice)?.label + '».' });
+    update((current) => ({ ...current, settings: { ...next, timerPhases: current.settings.timerPhases } }), { type: 'settings.preset', message: 'Aplicado el reglamento «' + PRESET_OPTIONS.find((option) => option.id === presetChoice)?.label + '».' });
     notify('Reglamento aplicado. Las clasificaciones se recalculan con los nuevos criterios.');
   };
 
