@@ -88,9 +88,9 @@ describe('tabulation → panel', () => {
       ['physical-a2', 't2', 't4', ['j3'], 'ready'],
     ]);
     expect(applied.summary[1]).toContain('postura provisional');
-    const candidate = structuredClone({ ...source, rooms: applied.rooms! });
+    const candidate = structuredClone({ ...source, rooms: applied.rooms!, rounds: applied.rounds, formats: applied.formats });
     expect(() => validateTournamentInput(candidate)).not.toThrow();
-    expect(applyOutboxToPanel({ ...source, rooms: applied.rooms! }, 'r2', outbox!, { makeId, now })).toMatchObject({ issues: [], changed: 0 });
+    expect(applyOutboxToPanel(candidate, 'r2', outbox!, { makeId, now })).toMatchObject({ issues: [], changed: 0 });
   });
 
   it('transfers the round timer snapshot and makes it authoritative over Management formats', () => {
