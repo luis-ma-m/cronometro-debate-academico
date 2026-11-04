@@ -312,7 +312,7 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     const physical = physicalRooms.find((item) => item.id === physicalId)!;
     const phases = importedPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
     rooms.push(withRoomStatus({
-      id: options.makeId('assignment'), name: physical.name, roundId: panelRoundId, physicalRoomId: physical.id, formatId: '',
+      id: options.makeId('assignment'), name: physical.name, roundId: panelRoundId, physicalRoomId: physical.id, formatId,
       teamFavorId: debate.teamFavorId, teamContraId: debate.teamContraId, judgeIds: [...debate.judgeIds], status: 'unassigned',
       phases, timer: { ...createTimer(phases), updatedAt: now }, notes: '', updatedAt: now,
     }, minimumJudges));
