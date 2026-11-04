@@ -126,6 +126,10 @@ export interface TabJudge {
   canChair: boolean;
   incompatibleJudgeIds: string[];
   unavailableRoundIds: string[];
+  /** Planned round numbers blocked before the round has been generated. */
+  unavailableRoundNumbers?: number[];
+  /** Planned named rounds (e.g. Semifinal) blocked before generation. Compared accent-insensitively. */
+  unavailableRoundNames?: string[];
   /** Mobile number for WhatsApp (international digits), to send the acta link to the chair. */
   phone?: string;
 }
