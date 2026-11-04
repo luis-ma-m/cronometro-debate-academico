@@ -281,8 +281,8 @@ function JudgesSection({ tournament, update, notify, usedJudges }: EditProps & {
               event.preventDefault();
               const name = plannedRoundName.trim();
               if (!name) return;
-              const key = name.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLocaleLowerCase('es-ES');
-              const exists = (judge.unavailableRoundNames ?? []).some((item) => item.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLocaleLowerCase('es-ES') === key);
+              const key = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-ES');
+              const exists = (judge.unavailableRoundNames ?? []).some((item) => item.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es-ES') === key);
               if (!exists) setJudge(judge.id, { unavailableRoundNames: [...(judge.unavailableRoundNames ?? []), name] });
               setPlannedRoundName('');
             }}>
