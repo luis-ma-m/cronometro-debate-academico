@@ -105,8 +105,16 @@ export function judgesConflict(a: TabJudge, b: TabJudge): boolean {
   return a.incompatibleJudgeIds.includes(b.id) || b.incompatibleJudgeIds.includes(a.id);
 }
 
+function roundNameKey(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('es-ES');
+}
+
 export function availableJudges(tournament: TabTournament, round: TabRound): TabJudge[] {
-  return tournament.judges.filter((judge) => judge.active && !judge.unavailableRoundIds.includes(round.id));
+  const name = roundNameKey(round.name);
+  return tournament.judges.filter((judge) => judge.active
+    && !judge.unavailableRoundIds.includes(round.id)
+    && !(judge.unavailableRoundNumbers ?? []).includes(round.number)
+    && !(judge.unavailableRoundNames ?? []).some((blocked) => roundNameKey(blocked) === name));
 }
 
 /** Conflict penalty of a judge in a debate: 0 when clean, otherwise the tier of each conflict. */
