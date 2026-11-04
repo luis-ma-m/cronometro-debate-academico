@@ -302,11 +302,12 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     const judgeIds = target?.judgeIds ?? [];
     const assignmentChanged = room.teamFavorId !== teamFavorId || room.teamContraId !== teamContraId || !sameSet(room.judgeIds, judgeIds);
     const formatChanged = room.formatId !== formatId || JSON.stringify(room.phases) !== JSON.stringify(importedPhases);
+    const timerChanged = room.timer.status !== 'idle' || room.timer.phaseIndex !== 0 || room.timer.remainingSeconds !== importedPhases[0].durationSeconds || room.timer.startedAt !== null || room.timer.lastResumedAt !== null;
     const hasScorecard = scored.has(room.id);
     if (assignmentChanged && (room.teamFavorId || room.teamContraId || room.judgeIds.length)) overwrittenRooms++;
-    if (room.timer.status !== 'idle') resetTimers++;
+    if (timerChanged) resetTimers++;
     if (hasScorecard) removedScorecards++;
-    changed += Number(assignmentChanged || formatChanged || room.timer.status !== 'idle' || hasScorecard);
+    changed += Number(assignmentChanged || formatChanged || timerChanged || hasScorecard);
     const phases = importedPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
     const reset = { ...room, formatId, phases, teamFavorId, teamContraId, judgeIds: [...judgeIds], status: 'unassigned' as const, timer: { ...createTimer(phases), updatedAt: now }, updatedAt: now };
     return withRoomStatus(reset, minimumJudges);
