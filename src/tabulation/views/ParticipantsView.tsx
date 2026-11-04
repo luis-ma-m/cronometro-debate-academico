@@ -212,6 +212,8 @@ function JudgesSection({ tournament, update, notify, usedJudges }: EditProps & {
   const [name, setName] = useState('');
   const [institution, setInstitution] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [plannedRoundNumber, setPlannedRoundNumber] = useState('');
+  const [plannedRoundName, setPlannedRoundName] = useState('');
   const setJudge = (id: string, patch: Partial<TabJudge>) => update((current) => ({ ...current, judges: current.judges.map((judge) => (judge.id === id ? { ...judge, ...patch } : judge)) }));
   const add = (event: FormEvent) => {
     event.preventDefault();
@@ -257,12 +259,40 @@ function JudgesSection({ tournament, update, notify, usedJudges }: EditProps & {
         </div>
         {open && <div className="tab-entity-details">
           <div>
-            <h4 className="tab-subtitle">Disponible en las rondas ya generadas</h4>
+            <h4 className="tab-subtitle">Disponibilidad en rondas generadas</h4>
             {tournament.rounds.length ? <div className="check-grid">{tournament.rounds.map((round) => <label key={round.id} className="check-item">
               <input type="checkbox" checked={!judge.unavailableRoundIds.includes(round.id)} onChange={(event) => setJudge(judge.id, {
                 unavailableRoundIds: event.target.checked ? judge.unavailableRoundIds.filter((id) => id !== round.id) : [...judge.unavailableRoundIds, round.id],
               })} />{round.name}
-            </label>)}</div> : <p className="muted">Las rondas aparecerán aquí cuando se generen.</p>}
+            </label>)}</div> : <p className="muted">Todavía no hay rondas generadas.</p>}
+            <h4 className="tab-subtitle">Bloqueos preventivos (rondas futuras)</h4>
+            <p className="muted">Añade números de ronda o nombres previstos, aunque todavía no existan. Se aplicarán automáticamente al generar la ronda.</p>
+            <form className="tab-inline-form" onSubmit={(event) => {
+              event.preventDefault();
+              const number = Number(plannedRoundNumber);
+              if (!Number.isInteger(number) || number < 1) return;
+              setJudge(judge.id, { unavailableRoundNumbers: [...new Set([...(judge.unavailableRoundNumbers ?? []), number])].sort((a, b) => a - b) });
+              setPlannedRoundNumber('');
+            }}>
+              <Field label="Número de ronda"><input type="number" min="1" step="1" value={plannedRoundNumber} onChange={(event) => setPlannedRoundNumber(event.target.value)} placeholder="3" /></Field>
+              <button type="submit" className="button secondary" disabled={!plannedRoundNumber}>Bloquear ronda</button>
+            </form>
+            <form className="tab-inline-form" onSubmit={(event) => {
+              event.preventDefault();
+              const name = plannedRoundName.trim();
+              if (!name) return;
+              const key = name.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLocaleLowerCase('es-ES');
+              const exists = (judge.unavailableRoundNames ?? []).some((item) => item.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLocaleLowerCase('es-ES') === key);
+              if (!exists) setJudge(judge.id, { unavailableRoundNames: [...(judge.unavailableRoundNames ?? []), name] });
+              setPlannedRoundName('');
+            }}>
+              <Field label="Nombre de ronda"><input value={plannedRoundName} onChange={(event) => setPlannedRoundName(event.target.value)} placeholder="Semifinal" /></Field>
+              <button type="submit" className="button secondary" disabled={!plannedRoundName.trim()}>Bloquear nombre</button>
+            </form>
+            {((judge.unavailableRoundNumbers ?? []).length > 0 || (judge.unavailableRoundNames ?? []).length > 0) && <div className="check-grid">
+              {(judge.unavailableRoundNumbers ?? []).map((number) => <label key={'number-' + number} className="check-item"><input type="checkbox" checked={false} onChange={() => setJudge(judge.id, { unavailableRoundNumbers: (judge.unavailableRoundNumbers ?? []).filter((item) => item !== number) })} />No disponible · Ronda {number}</label>)}
+              {(judge.unavailableRoundNames ?? []).map((name) => <label key={'name-' + name} className="check-item"><input type="checkbox" checked={false} onChange={() => setJudge(judge.id, { unavailableRoundNames: (judge.unavailableRoundNames ?? []).filter((item) => item !== name) })} />No disponible · {name}</label>)}
+            </div>}
           </div>
           <SearchableEntityPicker label="Equipos con incompatibilidad objetiva" multiple options={tournament.teams.map((team) => ({ id: team.id, name: team.name, active: team.active }))} value={teamConflicts}
             onChange={(value) => {
