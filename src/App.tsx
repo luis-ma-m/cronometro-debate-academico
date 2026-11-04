@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import TabulationApp, { type TabulationViewId } from './tabulation/TabulationApp';
-import { Activity, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Settings, ShieldCheck, Shuffle, SlidersHorizontal, Trophy, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, ArrowRight, BookOpen, Check, ChevronRight, CircleHelp, ClipboardList, Clock3, ExternalLink, Gavel, LayoutDashboard, LogOut, Maximize2, Minimize2, Monitor, Pause, Play, Plus, RefreshCw, RotateCcw, Save, ScrollText, Settings, ShieldCheck, Shuffle, SlidersHorizontal, Trophy, Trash2, Users, Volume2, VolumeX, X } from 'lucide-react';
 import type { Judge, Phase, PhysicalRoom, PublicRoom, Room, Round, Speaker, Team, Tournament } from './domain';
 import { DATA_REFRESH_INTERVAL_MS } from './config';
 import { activateRound as apiActivateRound, apiConfigured, getPublicRoom, getRoomControllerToken, getRoundActivationPreview, getTournament, login, logout as apiLogout, saveScoreConfig as apiSaveScoreConfig, saveTournament, updateTimer, sendRoomHeartbeat, getRoomConnectionStatuses } from './api';
@@ -97,6 +97,7 @@ export default function App() {
   const [view, setView] = useState<View>(() => window.location.pathname === '/tabulacion' ? 'tabulation' : 'overview');
   const [managementNavExpanded, setManagementNavExpanded] = useState(true);
   const [physicalCatalogExpanded, setPhysicalCatalogExpanded] = useState(false);
+  const [overviewProjected, setOverviewProjected] = useState(false);
   const [tabulationView, setTabulationView] = useState<TabulationViewId>(() => { const value = window.location.hash.replace(/^#/, '').split('/')[0]; return ['inicio','reglas','participantes','rondas','actas','clasificacion','registro'].includes(value) ? value as TabulationViewId : 'inicio'; });
   const [selectedRound, setSelectedRound] = useState('');
   const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
@@ -125,6 +126,13 @@ export default function App() {
   const [activatingRound, setActivatingRound] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => { try { return localStorage.getItem('debate-control-timer-sound') === 'true'; } catch { return false; } });
   const controllerToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('control') ?? '';
+  useEffect(() => {
+    if (!overviewProjected) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOverviewProjected(false); };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [overviewProjected]);
+
 
   const reloadAdmin = useCallback(async () => {
     if (demoMode) return;
@@ -1256,7 +1264,7 @@ export default function App() {
       {overviewIncompatibilityIncidents.length > 0 && <section className="panel warning-notice" role="status" aria-live="polite"><div className="panel-title"><div><h3>Incompatibilidades detectadas ({overviewIncompatibilityIncidents.length})</h3><p>Estas asignaciones existentes requieren revisión. No se han eliminado automáticamente.</p></div></div><div className="pending-debates-list">{overviewIncompatibilityIncidents.map((incident) => <article className="pending-debate-item" key={[incident.type, incident.roomId, ...incident.teamIds, ...incident.judgeIds].join(':')}><div className="pending-debate-heading"><b>{incident.roomName}</b><span className="state-pill issue">{incident.type === 'institution' ? 'Institución' : incident.type === 'team-judge' ? 'Equipo–juez' : 'Juez–juez'}</span></div><p>{incident.message}</p><div className="pending-debate-meta"><span>{incident.teamIds.map((id) => data.teams.find((team) => team.id === id)?.name ?? id).join(' · ') || 'Sin equipo afectado'}</span><span>{incident.judgeIds.map((id) => data.judges.find((judge) => judge.id === id)?.name ?? id).join(' · ')}</span><button className="text-button" onClick={() => { setSelectedRound(data.rooms.find((room) => room.id === incident.roomId)?.roundId ?? activeRound); setView('rooms'); }}>Revisar asignación <ChevronRight size={14} /></button></div></article>)}</div></section>}
       <div className="stat-grid"><Stat label="Salas de la ronda" value={overviewCounts.total} icon={<Monitor />} /><Stat label="En debate" value={overviewCounts.running} icon={<Activity />} /><Stat label="Preparadas" value={overviewCounts.ready} icon={<Check />} /><Stat label="Pendientes" value={overviewCounts.unassigned} icon={<Clock3 />} /></div>
       {(data.rounds.find((round) => round.id === activeTournamentRoundId)?.scoreType ?? 'qualifying') === 'qualifying' && overviewPendingScoreRooms.length > 0 && <div className="notice warning-notice scoring-pending-banner"><Clock3 size={17} /><span><b>{overviewPendingScoreRooms.length} sala(s) pendiente(s) de puntuación</b>. Solo cuenta debates finalizados sin acta.</span><button className="text-button" onClick={() => setView('scoring')}>Introducir puntuaciones <ChevronRight size={14} /></button></div>}
-      <section className="panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button></div><div className="room-list">{overviewRooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} connectionStatus={roomConnectionStatuses[room.physicalRoomId]} onOpen={() => void openRoom(room.id)} />)}</div>{!activeTournamentRoundId ? <Empty text="No hay una ronda activa." /> : overviewRooms.length === 0 && <Empty text="No hay salas creadas para la ronda activa." />}</section></>}
+      <section className="panel overview-room-panel"><div className="panel-title"><div><h3>Estado de las salas</h3><p>Selecciona una sala para abrir su cronómetro público.</p></div><div className="overview-room-actions"><button className="text-button" onClick={() => setView('rooms')}>Gestionar salas <ArrowRight size={15} /></button><button className="button secondary" onClick={() => setOverviewProjected((projected) => !projected)}>{overviewProjected ? <Minimize2 size={15} /> : <Maximize2 size={15} />}{overviewProjected ? "Salir de proyección" : "Proyectar"}</button></div></div><div className="room-list overview-room-grid">{overviewRooms.map((room) => <RoomRow key={room.id} room={room} data={data} now={now + serverOffsetMs} connectionStatus={roomConnectionStatuses[room.physicalRoomId]} onOpen={() => void openRoom(room.id)} />)}</div>{!activeTournamentRoundId ? <Empty text="No hay una ronda activa." /> : overviewRooms.length === 0 && <Empty text="No hay salas creadas para la ronda activa." />}</section></>}
 
       {view === 'tournament' && <TournamentView data={data} onSendToTabulation={sendToTabulation} />}
 
