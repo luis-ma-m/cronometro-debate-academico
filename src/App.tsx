@@ -1238,14 +1238,14 @@ export default function App() {
     if (!result.changed) { setTabulationNotice(round.name + ' ya coincide con «' + outbox.roundName + '» de la tabulación.'); return; }
     const otherTournament = outbox.panelTournamentName && outbox.panelTournamentName !== data.tournamentName
       ? '\n\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».' : '';
-    const overwriteWarning = result.overwrittenRooms
-      ? '\n\n⚠️ Se sobrescribirán las asignaciones existentes de ' + result.overwrittenRooms + (result.overwrittenRooms === 1 ? ' sala.' : ' salas.') + ' Los equipos y jueces actuales de esas salas serán sustituidos por los de la tabulación.'
-      : '';
+    const overwriteWarning = '\n\n⚠️ SOBRESCRITURA TOTAL: se sustituirán todas las asignaciones de esta ronda. Se reiniciarán ' + result.resetTimers + ' cronómetros que estén iniciados o finalizados y se eliminarán ' + result.removedScorecards + ' actas/puntuaciones existentes. Las salas que no aparezcan en Tabulación quedarán vacías. Esta operación no se puede deshacer.';
     if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament + overwriteWarning
       + (result.addedTeams || result.addedJudges || result.addedPhysicalRooms ? '\n\nSe añadirán al panel: ' + result.addedTeams + ' equipos, ' + result.addedJudges + ' jueces y ' + result.addedPhysicalRooms + ' aulas.' : '')
       + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
     const rooms = result.rooms;
-    updateData((current) => ({ ...current, physicalRooms: result.physicalRooms, teams: result.teams, judges: result.judges, institutions: result.institutions, rooms }));
+    const replacedRoomIds = new Set(data.rooms.filter((room) => room.roundId === round.id).map((room) => room.id));
+    updateData((current) => ({ ...current, physicalRooms: result.physicalRooms, teams: result.teams, judges: result.judges, institutions: result.institutions, rooms,
+      scoring: current.scoring ? { ...current.scoring, scorecards: (current.scoring.scorecards ?? []).filter((card) => !replacedRoomIds.has(card.roomId)) } : current.scoring }));
     setServerError('');
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
   };

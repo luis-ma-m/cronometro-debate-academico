@@ -133,13 +133,16 @@ describe('tabulation → panel', () => {
     expect(rounds.find((room) => room.physicalRoomId === 'physical-a2')).toMatchObject({ teamFavorId: 't2', teamContraId: 't4' });
   });
 
-  it('refuses the whole push when a started or scored room would change', () => {
+  it('overwrites started and finished rooms and resets their timers instead of blocking import', () => {
     const source = panel();
-    source.rooms[0].timer = { ...source.rooms[0].timer, status: 'finished' };
+    source.rooms[0].timer = { ...source.rooms[0].timer, status: 'finished', remainingSeconds: 0 };
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
     const applied = applyOutboxToPanel(source, 'r1', buildOutbox(tab, 'r1', now).outbox!, { makeId, now });
-    expect(applied.rooms).toBeNull();
-    expect(applied.issues[0]).toContain('cronómetro');
+    expect(applied.issues).toEqual([]);
+    expect(applied.resetTimers).toBe(1);
+    expect(applied.rooms!.find((room) => room.id === 'a1')).toMatchObject({
+      teamFavorId: 't1', teamContraId: 't3', judgeIds: ['j2'], timer: { status: 'idle' },
+    });
   });
 
   it('creates missing physical rooms and rejects assignment conflicts', () => {
