@@ -286,7 +286,7 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const scored = new Set((panel.scoring?.scorecards ?? []).map((card) => card.roomId));
   const addedTeams = teams.size - panel.teams.length;
   const addedJudges = judgesById.size - panel.judges.length;
-  let changed = addedTeams + addedJudges + addedPhysicalRooms;
+  let changed = addedTeams + addedJudges + addedPhysicalRooms + Number(round.defaultFormatId !== formatId || round.scoreType !== outbox.roundKind || JSON.stringify(panel.formats.find((item) => item.id === formatId)?.phases ?? []) !== JSON.stringify(importedPhases));
   let overwrittenRooms = 0;
   let resetTimers = 0;
   let removedScorecards = 0;
