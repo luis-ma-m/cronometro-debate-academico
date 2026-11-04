@@ -290,7 +290,11 @@ export function roundPdf(tournament: TabTournament, round: TabRound, stamp: LogS
       doc.text(lines, x + 2, y);
       x += COLUMNS[cellIndex].width;
     });
-    y += height + 1.5;
+    y += height;
+    doc.setDrawColor(220, 228, 235);
+    doc.setLineWidth(0.2);
+    doc.line(PAGE.margin + 1.5, y - 3.5, PAGE.margin + TABLE_WIDTH - 1.5, y - 3.5);
+    y += 1.5;
   }
 
   const pages = doc.getNumberOfPages();
