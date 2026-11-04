@@ -10,6 +10,11 @@ test('smoke: crear torneo, generar y confirmar una ronda', async ({ page }) => {
   });
   await page.goto('/tabulacion');
   await expect(page.getByRole('heading', { level: 2, name: 'Tabulación del torneo' })).toBeVisible();
+  // A new browser session must identify its operator before any tournament action is available.
+  await expect(page.getByRole('dialog', { name: '¿Quién está operando?' })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Nombre del operador' }).fill('Operador de pruebas');
+  await page.getByRole('button', { name: 'Continuar' }).click();
+  await expect(page.getByRole('dialog', { name: '¿Quién está operando?' })).toHaveCount(0);
   const createSample = page.getByRole('button', { name: /Crear ensayo ADUMA/ });
   await expect(createSample).toBeVisible();
   await createSample.click();

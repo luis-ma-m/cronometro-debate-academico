@@ -50,7 +50,10 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const [projection, setProjection] = useState(false);
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [operatorDraft, setOperatorDraft] = useState(state.operator);
   const tournament = state.tournament;
+  const operatorMissing = !state.operator.trim();
+  useEffect(() => { if (state.operator.trim()) setOperatorDraft(state.operator); }, [state.operator]);
 
   useEffect(() => {
     const onHashChange = () => { const next = readHashView(); setViewState(next); onViewChange?.(next); };
@@ -209,5 +212,18 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       </ErrorBoundary>
       <footer className="footer tab-no-project"><span>Debate Control · Tabulación local · {BUILD_INFO}</span><span>Los datos se guardan solo en este navegador. Exporta copias con regularidad.</span></footer>
     </main>
+
+    {operatorMissing && <div className="activation-backdrop operator-required-backdrop">
+      <form className="activation-dialog operator-required-dialog" role="dialog" aria-modal="true" aria-labelledby="operator-required-title"
+        onSubmit={(event) => { event.preventDefault(); const name = operatorDraft.trim(); if (name) store.setOperator(name); }}>
+        <div className="activation-dialog-top"><span className="eyebrow">IDENTIFICACIÓN DE SESIÓN</span><span className="workspace-tag">OBLIGATORIO</span></div>
+        <h2 id="operator-required-title">¿Quién está operando?</h2>
+        <p>Antes de utilizar la aplicación, identifica a la persona responsable de esta sesión. El nombre quedará asociado a las acciones del registro de tabulación.</p>
+        <label className="operator-required-label">Nombre del operador
+          <input autoFocus required maxLength={60} value={operatorDraft} onChange={(event) => setOperatorDraft(event.target.value)} placeholder="Introduce tu nombre" />
+        </label>
+        <div className="activation-dialog-actions"><button className="button primary" type="submit" disabled={!operatorDraft.trim()}>Continuar</button></div>
+      </form>
+    </div>}
   </div>;
 }
