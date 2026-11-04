@@ -996,3 +996,39 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .operator-required-dialog h2 { margin-top: 18px; }
 .operator-required-label { display: grid; gap: 8px; margin-top: 22px; font-size: 13px; font-weight: 700; color: var(--text, #1f2937); }
 .operator-required-label input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border, #d8dee8); border-radius: 9px; background: var(--surface, #fff); color: var(--text, #1f2937); font: inherit; }
+
+/* Overview room wall: two-column monitoring and focused projection mode. */
+.overview-room-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.overview-room-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:28px;align-items:start}
+.overview-room-grid .room-row{min-width:0;padding:13px 8px;gap:10px;border-top:1px solid #e7edf3}
+.overview-room-grid .room-row-main{min-width:0}
+.overview-room-grid .room-row-main>b,.overview-room-grid .room-row-main p{overflow-wrap:anywhere}
+.overview-room-grid .room-row-end{flex-shrink:0}
+.overview-projection .sidebar{display:none!important}
+.overview-projection .main-area{margin:0!important;max-width:none!important;padding:18px 28px 24px!important}
+.overview-projection .main-area>*:not(.overview-room-panel){display:none!important}
+.overview-projection .overview-room-panel{position:fixed;inset:0;margin:0;padding:28px 34px 24px;border:0;border-radius:0;overflow:hidden;display:flex;flex-direction:column;z-index:40}
+.overview-projection .overview-room-panel>.panel-title{flex-shrink:0;margin-bottom:18px;padding-bottom:16px;border-bottom:2px solid #1474BD}
+.overview-projection .overview-room-panel>.panel-title h3{font-size:25px;color:#172033}
+.overview-projection .overview-room-panel>.panel-title p{font-size:13px}
+.overview-projection .overview-room-grid{flex:1;min-height:0;overflow:auto;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:min-content;column-gap:38px;row-gap:0;padding-right:8px}
+.overview-projection .overview-room-grid .room-row{padding:18px 12px;min-height:112px;gap:16px}
+.overview-projection .overview-room-grid .room-icon{width:48px;height:48px}
+.overview-projection .overview-room-grid .room-row-main>b{font-size:16px}
+.overview-projection .overview-room-grid .room-row-main p{font-size:14px;margin:8px 0}
+.overview-projection .overview-room-grid .room-row-main small{font-size:12px}
+.overview-projection .overview-room-grid .room-row-end strong{font-size:19px}
+.overview-projection .overview-room-grid .state-pill{font-size:11px;padding:6px 10px}
+@media(max-width:900px){
+ .overview-room-grid{column-gap:14px}
+ .overview-projection .overview-room-panel{padding:18px}
+ .overview-projection .overview-room-grid{column-gap:16px}
+ .overview-projection .overview-room-grid .room-row{padding:14px 6px}
+}
+@media(max-width:640px){
+ .overview-room-grid{grid-template-columns:1fr}
+ .overview-projection .overview-room-panel{padding:16px 12px}
+ .overview-projection .overview-room-grid{grid-template-columns:1fr}
+ .overview-projection .overview-room-grid .room-row{min-height:88px}
+ .overview-room-actions{gap:6px}
+}
