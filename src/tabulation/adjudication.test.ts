@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocateJudges, hungarian, roundIssues } from './adjudication';
+import { allocateJudges, availableJudges, hungarian, roundIssues } from './adjudication';
 import { createRng } from './random';
 import { debate, decided, judge, makeTournament, qualifyingRound } from './test-fixtures';
 
@@ -33,6 +33,17 @@ function roundWith(debates: number, judges: number) {
 }
 
 describe('judge allocation', () => {
+  it('excludes judges from planned future rounds by number or accent-insensitive name', () => {
+    const { tournament, round } = roundWith(1, 4);
+    round.number = 3;
+    round.name = 'Semifinal';
+    tournament.judges[0] = judge('j0', { unavailableRoundNumbers: [3] });
+    tournament.judges[1] = judge('j1', { unavailableRoundNames: ['SEMIFINAL'] });
+    tournament.judges[2] = judge('j2', { unavailableRoundNames: ['Final'] });
+    tournament.judges[3] = judge('j3', { unavailableRoundIds: [round.id] });
+    expect(availableJudges(tournament, round).map((item) => item.id)).toEqual(['j2']);
+  });
+
   it('fills odd panels with a chair and never seats a conflicted judge', () => {
     const { tournament, round } = roundWith(3, 9);
     tournament.judges[0] = judge('j0', { institution: 'Inst t0' });
