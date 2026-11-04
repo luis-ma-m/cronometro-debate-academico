@@ -106,7 +106,7 @@ export function judgesConflict(a: TabJudge, b: TabJudge): boolean {
 }
 
 function roundNameKey(value: string): string {
-  return value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').trim().toLocaleLowerCase('es-ES');
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLocaleLowerCase('es-ES');
 }
 
 export function availableJudges(tournament: TabTournament, round: TabRound): TabJudge[] {
