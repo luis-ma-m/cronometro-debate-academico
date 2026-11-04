@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type ErrorInfo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo } from 'react';
 import { ChevronRight, ClipboardList, Download, ExternalLink, House, Lock, Projector, ScrollText, Shuffle, SlidersHorizontal, Trophy, Users, X } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { tournamentProgress } from './progress';
 import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
-import { isFallenAt } from './types';
+import { isFallenAt, makeTabId } from './types';
+import { apiConfigured, getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from '../api';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 import { BallotsView } from './views/BallotsView';
@@ -51,6 +52,154 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [operatorDraft, setOperatorDraft] = useState(state.operator);
+  const [remoteSync, setRemoteSync] = useState<'checking' | 'synced' | 'offline' | 'conflict' | 'error'>('checking');
+  const [remoteConflict, setRemoteConflict] = useState<{ remote: import('../api').AuthoritativeTabulationSnapshot; localUpdatedAt: number } | null>(null);
+  const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
+  const initialRecovery = useRef(false);
+  const remoteToken = useMemo(() => {
+    try {
+      const session = JSON.parse(localStorage.getItem('ledu-admin-session') || 'null') as { token?: string; expiresAt?: number } | null;
+      return session?.token && (session.expiresAt ?? 0) > Date.now() ? session.token : null;
+    } catch { return null; }
+  }, []);
+  const tournament = state.tournament;
+  const operatorMissing = !state.operator.trim();
+  useEffect(() => { if (state.operator.trim()) setOperatorDraft(state.operator); }, [state.operator]);
+
+  // Neon is the durable source of truth. localStorage remains an offline cache and recovery copy.
+  useEffect(() => {
+    if (!apiConfigured || !remoteToken || initialRecovery.current) {
+      if (!apiConfigured || !remoteToken) setRemoteSync('offline');
+      return;
+    }
+    initialRecovery.current = true;
+    let cancelled = false;
+    const recover = async () => {
+      try {
+        if (!tournament) {
+          const available = await listTabulationSnapshots(remoteToken);
+          if (cancelled) return;
+          if (!available.length) { setRemoteSync('synced'); return; }
+          const latest = await getTabulationSnapshot(remoteToken, available[0]!.tabTournamentId);
+          if (cancelled || !latest) return;
+          store.create(latest.snapshot);
+          remoteCursor.current = { id: latest.tabTournamentId, revision: latest.revision, localRevision: latest.snapshot.revision, inFlight: false };
+          setRemoteSync('synced');
+          return;
+        }
+        const remote = await getTabulationSnapshot(remoteToken, tournament.id);
+        if (cancelled) return;
+        if (!remote) {
+          remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
+          setRemoteSync('synced');
+          return;
+        }
+        if (remote.revision < 1 || remote.snapshot.id !== tournament.id || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256)) {
+          throw new Error('La copia de Neon no supera la validación de identidad e integridad.');
+        }
+        remoteCursor.current = { id: remote.tabTournamentId, revision: remote.revision, localRevision: -1, inFlight: false };
+        if (remote.updatedAt >= tournament.updatedAt) {
+          store.backup('Antes de recuperar el snapshot de Neon r' + remote.revision);
+          store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Snapshot recuperado desde Neon', details: { revision: remote.revision, sha256: remote.snapshotSha256 } });
+          store.flush();
+          remoteCursor.current.localRevision = remote.snapshot.revision;
+          setRemoteSync('synced');
+        } else {
+          setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
+          setRemoteSync('conflict');
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setRemoteSync('error');
+          store.logError(error instanceof Error ? error.message : 'No se pudo recuperar Tabulación desde Neon.');
+        }
+      }
+    };
+    void recover();
+    return () => { cancelled = true; };
+  }, [apiConfigured, remoteToken, tournament?.id, store]);
+
+  useEffect(() => {
+    if (!apiConfigured || !remoteToken || !tournament || state.readOnly || state.status !== 'saved' || remoteSync === 'conflict') return;
+    const cursor = remoteCursor.current;
+    if (!cursor || cursor.id !== tournament.id || cursor.inFlight || cursor.localRevision === tournament.revision) return;
+    let cancelled = false;
+    cursor.inFlight = true;
+    setRemoteSync('checking');
+    void publishTabulationSnapshot(remoteToken, {
+      tabTournamentId: tournament.id,
+      expectedRevision: cursor.revision,
+      operationId: makeTabId('tabpub'),
+      snapshot: tournament,
+    }).then((result) => {
+      if (cancelled) return;
+      if (result.tabTournamentId !== tournament.id || result.snapshot.id !== tournament.id || result.revision !== cursor.revision + 1) {
+        throw new Error('Neon devolvió una confirmación de publicación incoherente.');
+      }
+      remoteCursor.current = { id: tournament.id, revision: result.revision, localRevision: tournament.revision, inFlight: false };
+      setRemoteSync('synced');
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      cursor.inFlight = false;
+      const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+      setRemoteSync(code === 'REVISION_CONFLICT' ? 'conflict' : 'error');
+      store.logError(error instanceof Error ? error.message : 'No se pudo publicar Tabulación en Neon.');
+    });
+    return () => { cancelled = true; cursor.inFlight = false; };
+  }, [apiConfigured, remoteToken, tournament?.id, tournament?.revision, state.status, state.readOnly, remoteSync, store]);
+
+  useEffect(() => {
+    if (!apiConfigured || !remoteToken || !tournament || remoteSync === 'conflict') return;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const remote = await getTabulationSnapshot(remoteToken, tournament.id);
+        const cursor = remoteCursor.current;
+        if (!remote || !cursor || remote.revision <= cursor.revision) return;
+        if (cursor.localRevision === tournament.revision && store.getState().status === 'saved') {
+          store.backup('Antes de sincronizar cambios de otro dispositivo');
+          store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Cambios recuperados desde otro dispositivo', details: { revision: remote.revision } });
+          store.flush();
+          remoteCursor.current = { id: tournament.id, revision: remote.revision, localRevision: remote.snapshot.revision, inFlight: false };
+          setRemoteSync('synced');
+        } else {
+          setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
+          setRemoteSync('conflict');
+        }
+      } catch {
+        setRemoteSync('offline');
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 15000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('online', refresh); };
+  }, [apiConfigured, remoteToken, tournament?.id, tournament?.revision, tournament?.updatedAt, remoteSync, store]);
+
+  const recoverRemoteVersion = () => {
+    if (!remoteConflict || !tournament) return;
+    store.backup('Antes de sustituir por la versión remota de Neon');
+    store.update(() => remoteConflict.remote.snapshot, { type: 'sync.remote', message: 'Versión de Neon recuperada manualmente' });
+    store.flush();
+    remoteCursor.current = { id: tournament.id, revision: remoteConflict.remote.revision, localRevision: remoteConflict.remote.snapshot.revision, inFlight: false };
+    setRemoteConflict(null); setRemoteSync('synced');
+  };
+  const publishLocalVersion = async () => {
+    if (!remoteConflict || !tournament || !remoteToken) return;
+    const cursor = remoteCursor.current;
+    if (!cursor) return;
+    try {
+      const result = await publishTabulationSnapshot(remoteToken, {
+        tabTournamentId: tournament.id, expectedRevision: remoteConflict.remote.revision,
+        operationId: makeTabId('tabpub'), snapshot: tournament,
+      });
+      remoteCursor.current = { id: tournament.id, revision: result.revision, localRevision: tournament.revision, inFlight: false };
+      setRemoteConflict(null); setRemoteSync('synced');
+    } catch (error) {
+      setRemoteSync('conflict');
+      store.logError(error instanceof Error ? error.message : 'No se pudo resolver el conflicto de sincronización.');
+    }
+  };
   const tournament = state.tournament;
   const operatorMissing = !state.operator.trim();
   useEffect(() => { if (state.operator.trim()) setOperatorDraft(state.operator); }, [state.operator]);
@@ -140,7 +289,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     if (exportTournamentCopy(store) !== null) notify('Copia exportada con el registro. Guárdala fuera del navegador: es la única forma de recuperar el torneo si se borran los datos del sitio.');
   };
 
-  const saveLabel = state.readOnly ? 'Solo lectura'
+  const saveLabel = remoteSync === 'synced' ? 'Sincronizado con Neon' : remoteSync === 'checking' ? 'Sincronizando…' : remoteSync === 'conflict' ? 'Conflicto entre dispositivos' : remoteSync === 'offline' ? 'Sin conexión con Neon' : remoteSync === 'error' ? 'Error de sincronización' : state.readOnly ? 'Solo lectura'
     : state.status === 'dirty' ? 'Guardando…'
       : state.status === 'conflict' ? 'Conflicto con otra pestaña'
         : state.status === 'error' ? 'Error al guardar'
@@ -188,6 +337,13 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           <button type="button" className="button secondary" onClick={() => store.reloadFromStorage()}>Cargar la otra versión</button>
           <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Sobrescribir la versión guardada por la otra pestaña con la de esta pestaña?')) store.overwrite(); }}>Mantener esta versión</button>
         </div>}
+        {remoteSync === 'conflict' && remoteConflict && <div className="notice error-notice" role="alert">
+          <span>Hay dos versiones distintas del torneo. La copia local y la de Neon se conservan; elige cuál debe prevalecer antes de seguir sincronizando.</span>
+          <button type="button" className="button secondary" onClick={recoverRemoteVersion}>Recuperar Neon</button>
+          <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Publicar la copia de este dispositivo sobre la revisión remota? La copia remota actual quedará reemplazada, pero se conservará una copia local de seguridad.')) void publishLocalVersion(); }}>Publicar este dispositivo</button>
+        </div>}
+        {remoteSync === 'error' && <Notice kind="error">No se ha podido confirmar el guardado en Neon. La copia local sigue disponible; revisa la conexión y vuelve a intentarlo.</Notice>}
+        {remoteSync === 'offline' && apiConfigured && <Notice kind="warning">Sin conexión con Neon. Los cambios permanecen en el almacenamiento local y se intentarán sincronizar al recuperar la conexión.</Notice>}
         {state.error && <Notice kind="error">{state.error}{state.status === 'error' && <> <button type="button" className="button secondary tab-retry" onClick={() => {
           if (store.flush()) notify('Guardado correctamente.');
         }}>Reintentar el guardado</button></>}</Notice>}
