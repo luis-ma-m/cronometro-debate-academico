@@ -83,7 +83,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           const latest = await getTabulationSnapshot(remoteToken, available[0]!.tabTournamentId);
           if (cancelled || !latest) return;
           store.create(latest.snapshot);
-          remoteCursor.current = { id: latest.tabTournamentId, revision: latest.revision, localRevision: latest.snapshot.revision, inFlight: false };
+          remoteCursor.current = { id: latest.tabTournamentId, revision: latest.revision, localRevision: store.getState().tournament?.revision ?? latest.snapshot.revision, inFlight: false };
           setRemoteSync('synced');
           return;
         }
@@ -110,6 +110,9 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         }
       } catch (error) {
         if (!cancelled) {
+          if (tournament && !remoteCursor.current) {
+            remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
+          }
           setRemoteSync('error');
           store.logError(error instanceof Error ? error.message : 'No se pudo recuperar Tabulación desde Neon.');
         }
@@ -160,7 +163,11 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       try {
         const remote = await getTabulationSnapshot(remoteToken, tournament.id);
         const cursor = remoteCursor.current;
-        if (!remote || !cursor) return;
+        if (!cursor) return;
+        if (!remote) {
+          if (cursor.localRevision !== tournament.revision) setRemoteSync('checking');
+          return;
+        }
         if (remote.revision <= cursor.revision) {
           if (cursor.localRevision !== tournament.revision) setRemoteSync('checking');
           return;
