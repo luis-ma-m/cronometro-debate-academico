@@ -226,10 +226,6 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       store.logError(error instanceof Error ? error.message : 'No se pudo resolver el conflicto de sincronización.');
     }
   };
-  const tournament = state.tournament;
-  const operatorMissing = !state.operator.trim();
-  useEffect(() => { if (state.operator.trim()) setOperatorDraft(state.operator); }, [state.operator]);
-
   useEffect(() => {
     const onHashChange = () => { const next = readHashView(); setViewState(next); onViewChange?.(next); };
     window.addEventListener('hashchange', onHashChange);
