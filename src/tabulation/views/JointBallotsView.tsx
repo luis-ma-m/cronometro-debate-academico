@@ -284,7 +284,7 @@ export function JointBallotsView({ tournament, outcomes, update, notify }: ViewP
                   </div>
                   <small className="muted">Cuentan como {effective.minors} leve(s) y {effective.majors} grave(s){effective.deduction ? ': −' + formatNumber(effective.deduction) + ' ítems' : ''}.</small>
                   <p className="tab-net">Ítems: {formatNumber(total?.gross ?? null)} · faltas −{formatNumber(total?.deduction ?? 0)} · <b>neto {formatNumber(total?.net ?? null)}</b></p>
-                  <label className="tab-field compact"><span>Total escrito en el acta</span><input inputMode="decimal" value={draft.writtenTotals[teamId] ?? ''} onChange={(event) => edit((current) => ({ ...current, writtenTotals: { ...current.writtenTotals, [teamId]: event.target.value } }))} /></label>
+                  <label className="tab-field compact"><span>Total de items escritos en el acta en papel</span><input inputMode="decimal" value={draft.writtenTotals[teamId] ?? ''} onChange={(event) => edit((current) => ({ ...current, writtenTotals: { ...current.writtenTotals, [teamId]: event.target.value } }))} /></label>
                 </div>;
               })}</div>
             </fieldset>}

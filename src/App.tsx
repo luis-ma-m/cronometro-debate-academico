@@ -95,6 +95,8 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
   const [serverError, setServerError] = useState('');
   const [view, setView] = useState<View>(() => window.location.pathname === '/tabulacion' ? 'tabulation' : 'overview');
+  const [managementNavExpanded, setManagementNavExpanded] = useState(true);
+  const [physicalCatalogExpanded, setPhysicalCatalogExpanded] = useState(false);
   const [tabulationView, setTabulationView] = useState<TabulationViewId>(() => { const value = window.location.hash.replace(/^#/, '').split('/')[0]; return ['inicio','reglas','participantes','rondas','actas','clasificacion','registro'].includes(value) ? value as TabulationViewId : 'inicio'; });
   const [selectedRound, setSelectedRound] = useState('');
   const [expandedRoomIds, setExpandedRoomIds] = useState<string[]>([]);
@@ -508,13 +510,16 @@ export default function App() {
     if (rotate && !window.confirm('Regenerar el enlace de control invalida el enlace anterior para esta sala. ¿Continuar?')) return;
 
     const cachedLink = preparedRoomLinksRef.current[id];
+    // Reserve a blank tab during the click gesture so popup blockers do not
+    // prevent opening a link that requires an asynchronous token lookup.
+    const targetWindow = !rotate ? window.open('about:blank', '_blank') : null;
+    if (targetWindow) targetWindow.opener = null;
     // With no pending edits, a link already prepared in this session can be
     // opened immediately: no tournament save and no token API request required.
     if (!hasPendingChanges && !rotate && cachedLink) {
       setPreparedRoomLink(null);
       setServerError('');
-      const opened = window.open(cachedLink.href, '_blank');
-      if (opened) opened.opener = null;
+      if (targetWindow) targetWindow.location.replace(cachedLink.href);
       else setPreparedRoomLink(cachedLink);
       return;
     }
@@ -525,7 +530,7 @@ export default function App() {
     try {
       // Never persist a clean tournament just to open a room.
       const saved = hasPendingChanges ? await persist() : data;
-      if (!saved) return;
+      if (!saved) { targetWindow?.close(); return; }
 
       const assignment = saved.rooms.find((room) => room.id === id);
       if (!assignment) throw new Error('La asignación ya no existe. Actualiza el panel.');
@@ -535,7 +540,8 @@ export default function App() {
       // A cached link remains valid after ordinary edits. Reuse it rather than
       // making another request for a token; rotation is the only exception.
       if (cachedLink && !rotate) {
-        setPreparedRoomLink(cachedLink);
+        if (targetWindow) targetWindow.location.replace(cachedLink.href);
+        else setPreparedRoomLink(cachedLink);
         return;
       }
 
@@ -551,8 +557,10 @@ export default function App() {
         href: window.location.origin + '/sala/' + encodeURIComponent(physical.slug) + hash,
       };
       preparedRoomLinksRef.current[id] = prepared;
-      setPreparedRoomLink(prepared);
+      if (targetWindow) targetWindow.location.replace(prepared.href);
+      else setPreparedRoomLink(prepared);
     } catch (error) {
+      targetWindow?.close();
       setServerError(error instanceof Error ? error.message : 'No se ha podido preparar el enlace de control de la sala.');
     } finally {
       setPreparingRoomId(null);
@@ -1215,6 +1223,8 @@ export default function App() {
       }}
       apiConfigured={apiConfigured}
       logout={logout}
+      managementNavExpanded={managementNavExpanded}
+      setManagementNavExpanded={setManagementNavExpanded}
     />
     <div className="manager-workspace" hidden={view === 'tabulation'}>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
@@ -1267,12 +1277,12 @@ export default function App() {
       />}
 
       {view === 'rooms' && <><div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div>
-      <section className="panel physical-room-catalog"><div className="panel-title"><div><h3>Catálogo de salas físicas ({data.physicalRooms.length})</h3><p>Estas salas conservan su identidad y enlace permanente entre rondas. Elimina desde aquí también las que ya no tengan asignación en la ronda seleccionada.</p></div></div><div className="room-list">{data.physicalRooms.map((physical) => {
+      <section className="panel physical-room-catalog"><button type="button" className="physical-room-catalog-toggle" aria-expanded={physicalCatalogExpanded} onClick={() => setPhysicalCatalogExpanded((expanded) => !expanded)}><span><b>Catálogo de salas físicas</b><small>{data.physicalRooms.length} {data.physicalRooms.length === 1 ? 'sala generada' : 'salas generadas'}</small></span><ChevronRight size={17} className={physicalCatalogExpanded ? 'expanded' : ''} /></button>{physicalCatalogExpanded && <><p className="muted physical-room-catalog-description">Estas salas conservan su identidad y enlace permanente entre rondas. Elimina desde aquí también las que ya no tengan asignación en la ronda seleccionada.</p><div className="room-list">{data.physicalRooms.map((physical) => {
         const assignments = data.rooms.filter((room) => room.physicalRoomId === physical.id);
         const scored = (data.scoring?.scorecards ?? []).filter((card) => assignments.some((room) => room.id === card.roomId));
         const online = roomConnectionStatuses[physical.id]?.connected;
         return <article className="room-row" key={physical.id}><div><b>{physical.name}</b><p><span className="state-pill unassigned">{assignments.length} asignación(es)</span> <span className="muted">{scored.length} acta(s)</span> {online ? <span className="state-pill ready">Cronómetro conectado</span> : null}</p><small className="muted">Enlace permanente: /sala/{physical.slug}</small></div><button type="button" className="icon-button danger-action" title="Eliminar sala física y todas sus asignaciones" aria-label={'Eliminar sala física ' + physical.name} onClick={() => removePhysicalRoom(physical.id)}><Trash2 size={15} /></button></article>;
-      })}{data.physicalRooms.length === 0 && <p className="muted">No hay salas físicas registradas. Añade una sala o importa una ronda desde Tabulación.</p>}</div></section>
+      })}{data.physicalRooms.length === 0 && <p className="muted">No hay salas físicas registradas. Añade una sala o importa una ronda desde Tabulación.</p>}</div></>}</section>
       <div className="managed-rooms">{rooms.map((room) => {
         const expanded = expandedRoomIds.includes(room.id);
         return <section className={'panel room-editor room-card' + (expanded ? ' expanded' : '')} key={room.id}>
@@ -1641,18 +1651,21 @@ function ScoringView({
   </>;
 }
 
-function UnifiedSidebar({ view, tabulationView, setView, setTabulationView, apiConfigured, logout }: { view: View; tabulationView: TabulationViewId; setView: (next: View) => void; setTabulationView: (id: TabulationViewId) => void; apiConfigured: boolean; logout: () => void }) {
+function UnifiedSidebar({ view, tabulationView, setView, setTabulationView, apiConfigured, logout, managementNavExpanded, setManagementNavExpanded }: { view: View; tabulationView: TabulationViewId; setView: (next: View) => void; setTabulationView: (id: TabulationViewId) => void; apiConfigured: boolean; logout: () => void; managementNavExpanded: boolean; setManagementNavExpanded: (expanded: boolean) => void }) {
   return <aside className="sidebar unified-sidebar">
     <div className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></div>
     <div className="sidebar-section">GESTIÓN</div>
     <nav>
       <NavButton icon={<LayoutDashboard size={18} />} label="Resumen" selected={view === 'overview'} onClick={() => setView('overview')} />
       <NavButton icon={<Monitor size={18} />} label="Rondas y salas" selected={view === 'rooms'} onClick={() => setView('rooms')} />
-      <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
-      <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
-      <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
-      <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
-      <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
+      <button type="button" className="sidebar-group-toggle" aria-expanded={managementNavExpanded} onClick={() => setManagementNavExpanded(!managementNavExpanded)}><span>Gestión del torneo</span><ChevronRight size={14} className={managementNavExpanded ? 'expanded' : ''} /></button>
+      {managementNavExpanded && <div className="sidebar-group-items">
+        <NavButton icon={<Users size={18} />} label="Equipos" selected={view === 'teams'} onClick={() => setView('teams')} />
+        <NavButton icon={<Gavel size={18} />} label="Jueces" selected={view === 'judges'} onClick={() => setView('judges')} />
+        <NavButton icon={<BookOpen size={18} />} label="Puntuaciones" selected={view === 'scoring'} onClick={() => setView('scoring')} />
+        <NavButton icon={<Activity size={18} />} label="Torneo" selected={view === 'tournament'} onClick={() => setView('tournament')} />
+        <NavButton icon={<Settings size={18} />} label="Configuración" selected={view === 'settings'} onClick={() => setView('settings')} />
+      </div>}
     </nav>
     <div className="sidebar-section unified-section">TABULACIÓN</div>
     <nav>
