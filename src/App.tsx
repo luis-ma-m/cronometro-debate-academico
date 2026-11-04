@@ -1278,7 +1278,6 @@ export default function App() {
               <button type="button" className="icon-button" title="Abrir cronómetro" aria-label={'Abrir cronómetro de ' + room.name} onClick={() => void openRoom(room.id)}><ExternalLink size={16} /></button>
               <button type="button" className="text-button" title="Invalidar y regenerar el enlace de control" onClick={() => void openRoom(room.id, true)}>Regenerar enlace</button>
               <button type="button" className="icon-button danger-action" title="Eliminar asignación de esta ronda" aria-label={'Eliminar asignación de ' + room.name} onClick={() => removeRoom(room)}><Trash2 size={15} /></button>
-              <button type="button" className="icon-button danger-action" title="Eliminar sala física y todas sus asignaciones" aria-label={'Eliminar sala física ' + (data.physicalRooms.find((physical) => physical.id === room.physicalRoomId)?.name ?? room.name)} onClick={() => removePhysicalRoom(room.physicalRoomId)}><X size={15} /></button>
             </div>
           </div>
           <div id={'room-config-' + room.id} className="room-card-disclosure" aria-hidden={!expanded} ref={(node) => { if (node) node.inert = !expanded; }}>
