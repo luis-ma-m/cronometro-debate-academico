@@ -140,6 +140,10 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   if (!round) return { outbox: null, issues: ['La ronda no existe.'], warnings: [] };
   const issues: string[] = [];
   const warnings: string[] = [];
+  const timerPhases = round.timerPhases?.length ? round.timerPhases : tournament.settings.timerPhases;
+  if (!timerPhases.length || timerPhases.some((phase) => !phase.id.trim() || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) {
+    return { outbox: null, issues: ['Configura al menos una intervención con nombre y duración válida en Reglas del torneo antes de enviar la ronda.'], warnings };
+  }
   const venues = new Map(tournament.venues.map((venue) => [venue.id, venue.name]));
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
   const debates: PanelOutboxDebate[] = [];
@@ -178,7 +182,7 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       createdAt: now,
       presetId: tournament.settings.presetId,
       roundKind: round.kind,
-      timerPhases: (round.timerPhases?.length ? round.timerPhases : tournament.settings.timerPhases).map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
+      timerPhases: timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
       tabTournamentName: tournament.name,
       panelTournamentName: tournament.panelLink?.tournamentName ?? null,
       roundName: round.name,
