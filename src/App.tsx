@@ -263,6 +263,14 @@ export default function App() {
       }
       catch (error) {
         const pending = readPendingTimer(roomId);
+        const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code : '';
+        if (errorCode === 'ROOM_NOT_FOUND') {
+          try { localStorage.removeItem(pendingTimerKey(roomId)); } catch { /* best-effort removal of a stale room queue */ }
+          setSnapshot(null);
+          setConnected(false);
+          setServerError('Esta sala física ha sido eliminada del torneo. El enlace permanente ya no es válido.');
+          return;
+        }
         if (pending?.actions.length) setSnapshot(pending.snapshot);
         setConnected(false);
         setServerError(error instanceof Error ? error.message : 'No se ha podido cargar la sala.');
