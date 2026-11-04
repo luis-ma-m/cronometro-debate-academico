@@ -279,8 +279,14 @@ export function normalizeTabTournament(raw: unknown): NormalizeResult {
     canChair: flag(judge.canChair, true),
     incompatibleJudgeIds: ids(judge.incompatibleJudgeIds),
     unavailableRoundIds: ids(judge.unavailableRoundIds),
-    unavailableRoundNumbers: [...new Set(list(judge.unavailableRoundNumbers).filter((value): value is number => Number.isInteger(value) && value > 0))].sort((a, b) => a - b),
-    unavailableRoundNames: [...new Set(list(judge.unavailableRoundNames).filter(isText).map((value) => value.trim()).filter(Boolean))],
+    ...(() => {
+      const numbers = [...new Set(list(judge.unavailableRoundNumbers).filter((value): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0))].sort((a, b) => a - b);
+      return numbers.length ? { unavailableRoundNumbers: numbers } : {};
+    })(),
+    ...(() => {
+      const names = [...new Set(list(judge.unavailableRoundNames).filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean))];
+      return names.length ? { unavailableRoundNames: names } : {};
+    })(),
     ...(isText(judge.phone) && judge.phone.trim() ? { phone: judge.phone.trim() } : {}),
   })));
   const judgeIds = new Set(judges.map((judge) => judge.id));
