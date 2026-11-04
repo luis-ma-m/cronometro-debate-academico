@@ -176,6 +176,23 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('online', refresh); };
   }, [apiConfigured, remoteToken, tournament?.id, tournament?.revision, tournament?.updatedAt, remoteSync, store]);
 
+  useEffect(() => {
+    if (!tournament || !apiConfigured || !remoteToken || remoteCursor.current) return;
+    let cancelled = false;
+    void getTabulationSnapshot(remoteToken, tournament.id).then((remote) => {
+      if (cancelled) return;
+      if (remote) {
+        remoteCursor.current = { id: tournament.id, revision: remote.revision, localRevision: -1, inFlight: false };
+        setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
+        setRemoteSync('conflict');
+      } else {
+        remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
+        setRemoteSync('checking');
+      }
+    }).catch(() => { if (!cancelled) setRemoteSync('offline'); });
+    return () => { cancelled = true; };
+  }, [tournament?.id, remoteToken, tournament?.updatedAt]);
+
   const recoverRemoteVersion = () => {
     if (!remoteConflict || !tournament) return;
     store.backup('Antes de sustituir por la versión remota de Neon');
