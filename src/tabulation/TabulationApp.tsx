@@ -208,7 +208,12 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
         setRemoteSync('checking');
       }
-    }).catch(() => { if (!cancelled) setRemoteSync('offline'); });
+    }).catch(() => {
+      if (!cancelled) {
+        if (!remoteCursor.current) remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
+        setRemoteSync('offline');
+      }
+    });
     return () => { cancelled = true; };
   }, [tournament?.id, remoteToken, tournament?.updatedAt]);
 
