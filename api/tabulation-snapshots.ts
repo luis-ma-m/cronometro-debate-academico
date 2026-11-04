@@ -85,6 +85,7 @@ function mapRow(row: Record<string, unknown>): SnapshotRow {
   };
 }
 export async function getTabulationSnapshot(id: string): Promise<SnapshotRow | null> {
+  await ensureSnapshotSchema();
   if (!/^[a-zA-Z0-9_-]{1,200}$/.test(id)) throw new ApiError("INVALID_PAYLOAD", "El identificador del torneo no es válido.");
   const result = await getPool().query(
     "SELECT tab_tournament_id,tournament_name,schema_version,revision,snapshot,snapshot_sha256,updated_at FROM tabulation_tournaments WHERE tab_tournament_id=$1",
@@ -93,6 +94,7 @@ export async function getTabulationSnapshot(id: string): Promise<SnapshotRow | n
   return result.rows[0] ? mapRow(result.rows[0] as Record<string, unknown>) : null;
 }
 export async function listTabulationSnapshots() {
+  await ensureSnapshotSchema();
   const result = await getPool().query(
     "SELECT tab_tournament_id,tournament_name,schema_version,revision,snapshot_sha256,updated_at FROM tabulation_tournaments ORDER BY updated_at DESC",
   );
@@ -104,6 +106,7 @@ export async function listTabulationSnapshots() {
   });
 }
 export async function publishTabulationSnapshot(payload: Record<string, unknown>, actor: string) {
+  await ensureSnapshotSchema();
   const input = validateSnapshot(payload);
   const client = await getPool().connect();
   try {
