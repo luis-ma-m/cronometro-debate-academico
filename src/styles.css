@@ -990,3 +990,9 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .sidebar-group-toggle:hover{color:#e5e7eb}
 .sidebar-group-items{display:grid;gap:3px}
 .sidebar-group-items .nav-button{padding-top:10px;padding-bottom:10px;padding-left:18px;font-size:12px}
+
+.operator-required-backdrop { z-index: 3000; }
+.operator-required-dialog { width: min(460px, 100%); }
+.operator-required-dialog h2 { margin-top: 18px; }
+.operator-required-label { display: grid; gap: 8px; margin-top: 22px; font-size: 13px; font-weight: 700; color: var(--text, #1f2937); }
+.operator-required-label input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--border, #d8dee8); border-radius: 9px; background: var(--surface, #fff); color: var(--text, #1f2937); font: inherit; }
