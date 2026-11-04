@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { roundSheet, stampText, type LogStamp } from './exports';
-import type { TabRound, TabTournament } from './types';
+import { eliminationRounds, type TabRound, type TabTournament } from './types';
+import { computeTournamentOutcomes } from './results';
 
 const REPLACEMENTS: Record<string, string> = {
   '\u2010': '-', '\u2011': '-', '\u2012': '-', '\u2013': '-', '\u2014': '-', '\u2015': '-', '\u2212': '-',
@@ -96,8 +97,157 @@ function drawTableHeader(doc: jsPDF, y: number): number {
   return y + 7;
 }
 
+
+/** Draws the complete knockout path, including future placeholders when later rounds have not been generated yet. */
+function eliminationBracketPdf(tournament: TabTournament, selectedRound: TabRound, stamp: LogStamp | null, now: number): Uint8Array {
+  const rounds = eliminationRounds(tournament);
+  const first = rounds[0];
+  const firstCount = first?.debates.length ?? selectedRound.debates.length;
+  const stageCount = Math.max(1, Math.floor(Math.log2(firstCount)) + 1);
+  const outcomes = computeTournamentOutcomes(tournament);
+  const teams = new Map(tournament.teams.map((team) => [team.id, team.name]));
+  const stages = Array.from({ length: stageCount }, (_, index) => {
+    const count = Math.max(1, Math.ceil(firstCount / (2 ** index)));
+    const round = rounds.find((item) => item.debates.length === count) ?? null;
+    const debates = round ? [...round.debates].sort((a, b) => (a.bracketSlot ?? 0) - (b.bracketSlot ?? 0)) : [];
+    return { count, round, debates, title: round?.name ?? (count === 1 ? 'Final' : count === 2 ? 'Semifinales' : count === 4 ? 'Cuartos de final' : count === 8 ? 'Octavos de final' : 'Eliminatoria') };
+  });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape', compress: true });
+  const width = 297, height = 210, margin = 12, usable = width - margin * 2;
+  const top = 49, bottom = 190, available = bottom - top;
+  const gap = stages.length >= 4 ? 7 : 12;
+  const colWidth = (usable - gap * (stages.length - 1)) / stages.length;
+  const leafGap = available / Math.max(1, firstCount);
+  const cardHeight = Math.max(11, Math.min(25, leafGap * 0.72));
+  const centers: number[][] = stages.map((stage, stageIndex) => Array.from({ length: stage.count }, (_, matchIndex) =>
+    top + (matchIndex * (2 ** stageIndex) + (2 ** stageIndex - 1) / 2 + 0.5) * leafGap));
+  doc.setFillColor(...BLUE);
+  doc.rect(0, 0, width, 4, 'F');
+  doc.setFillColor(248, 250, 252);
+  doc.rect(0, 4, width, 38, 'F');
+  doc.addImage(LOGO, 'JPEG', margin, 8, 25, 25, undefined, 'FAST');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(...BLUE);
+  doc.text(pdfText(tournament.name), margin + 31, 16);
+  doc.setFontSize(11);
+  doc.setTextColor(...INK);
+  doc.text(pdfText(selectedRound.name + ' · cuadro de eliminatorias'), margin + 31, 24);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(...MUTED);
+  doc.text(pdfText('Generado el ' + new Date(now).toLocaleString('es-ES') + ' · ' + stampText(stamp, now)), margin + 31, 31);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  stages.forEach((stage, index) => {
+    const x = margin + index * (colWidth + gap);
+    doc.setTextColor(...BLUE);
+    doc.text(pdfText(stage.title.toUpperCase()), x, 46);
+  });
+
+  // Connect each actual winner to the next match by team identity; this also supports reseeded brackets.
+  for (let stageIndex = 0; stageIndex < stages.length - 1; stageIndex++) {
+    const current = stages[stageIndex];
+    const next = stages[stageIndex + 1];
+    current.debates.forEach((debate, matchIndex) => {
+      const winnerId = outcomes.get(debate.id)?.winnerTeamId;
+      let targetIndex = winnerId ? next.debates.findIndex((candidate) => candidate.teamIds.includes(winnerId)) : -1;
+      if (targetIndex < 0) targetIndex = Math.floor(matchIndex / 2);
+      const x1 = margin + stageIndex * (colWidth + gap) + colWidth;
+      const x2 = margin + (stageIndex + 1) * (colWidth + gap);
+      const y1 = centers[stageIndex][matchIndex];
+      const y2 = centers[stageIndex + 1][targetIndex] ?? y1;
+      doc.setDrawColor(165, 190, 210);
+      doc.setLineWidth(0.45);
+      const mid = x1 + (x2 - x1) / 2;
+      doc.line(x1, y1, mid, y1);
+      doc.line(mid, y1, mid, y2);
+      doc.line(mid, y2, x2, y2);
+    });
+    // A stage without a generated successor still shows the route to the expected next matches.
+    if (!next.round) {
+      current.debates.forEach((_, matchIndex) => {
+        const targetIndex = Math.floor(matchIndex / 2);
+        const x1 = margin + stageIndex * (colWidth + gap) + colWidth;
+        const x2 = margin + (stageIndex + 1) * (colWidth + gap);
+        const y1 = centers[stageIndex][matchIndex];
+        const y2 = centers[stageIndex + 1][targetIndex] ?? y1;
+        doc.setDrawColor(190, 207, 221);
+        doc.setLineWidth(0.35);
+        const mid = x1 + (x2 - x1) / 2;
+        doc.line(x1, y1, mid, y1);
+        doc.line(mid, y1, mid, y2);
+        doc.line(mid, y2, x2, y2);
+      });
+    }
+  }
+
+  stages.forEach((stage, stageIndex) => {
+    const x = margin + stageIndex * (colWidth + gap);
+    for (let matchIndex = 0; matchIndex < stage.count; matchIndex++) {
+      const debate = stage.debates[matchIndex];
+      const center = centers[stageIndex][matchIndex];
+      const y = center - cardHeight / 2;
+      const winnerId = debate ? outcomes.get(debate.id)?.winnerTeamId : undefined;
+      let teamIds: string[] = debate ? [...debate.teamIds] : [];
+      if (!debate && stageIndex > 0) {
+        const previous = stages[stageIndex - 1];
+        const previousDebates = previous.debates;
+        const source = [previousDebates[matchIndex * 2], previousDebates[matchIndex * 2 + 1]];
+        teamIds = source.map((item, sourceIndex) => {
+          const id = item ? outcomes.get(item.id)?.winnerTeamId : undefined;
+          return id ?? '';
+        });
+      }
+      const labels = teamIds.map((id, index) => id ? teams.get(id) ?? 'Equipo no disponible' : (debate ? 'Equipo pendiente' : stageIndex === 0 ? 'Clasificado pendiente' : 'Ganador cruce ' + (matchIndex * 2 + index + 1)));
+      const compact = cardHeight < 16;
+      doc.setFillColor(...(winnerId ? [232, 245, 253] as [number, number, number] : [255, 255, 255] as [number, number, number]));
+      doc.setDrawColor(...(winnerId ? BLUE : [205, 218, 228] as [number, number, number]));
+      doc.setLineWidth(winnerId ? 0.65 : 0.35);
+      doc.roundedRect(x, y, colWidth, cardHeight, 1.4, 1.4, 'FD');
+      doc.setFontSize(compact ? 6.2 : 7.2);
+      labels.slice(0, 2).forEach((label, teamIndex) => {
+        const id = teamIds[teamIndex];
+        const isWinner = Boolean(id && id === winnerId);
+        doc.setFont('helvetica', isWinner ? 'bold' : 'normal');
+        doc.setTextColor(...(isWinner ? BLUE : INK));
+        const textY = y + (compact ? 4.2 : 6.2) + teamIndex * (compact ? 4 : 6);
+        doc.text(doc.splitTextToSize(pdfText(label), colWidth - 5).slice(0, 1), x + 2.5, textY);
+      });
+      if (debate && !compact) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.8);
+        doc.setTextColor(...MUTED);
+        const venue = tournament.venues.find((item) => item.id === debate.venueId)?.name;
+        if (venue) doc.text(pdfText(venue), x + 2.5, y + cardHeight - 2);
+      }
+      if (debate && winnerId) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.5);
+        doc.setTextColor(...BLUE);
+        doc.text('CLASIFICADO', x + colWidth - 2.5, y + 3, { align: 'right' });
+      } else if (!debate) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.5);
+        doc.setTextColor(...MUTED);
+        doc.text('PENDIENTE', x + colWidth - 2.5, y + 3, { align: 'right' });
+      }
+    }
+  });
+
+  doc.setDrawColor(...BLUE);
+  doc.setLineWidth(0.4);
+  doc.line(margin, 196, width - margin, 196);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(...MUTED);
+  doc.text(pdfText('Página 1 de 1 · ' + (stamp ? 'registro n.º ' + stamp.seq + ' · huella ' + stamp.hash : 'registro sin entradas')), margin, 201);
+  return new Uint8Array(doc.output('arraybuffer'));
+}
+
 /** Branded A4 public draw. All assets are embedded; no network access is needed to render the PDF. */
 export function roundPdf(tournament: TabTournament, round: TabRound, stamp: LogStamp | null, now: number): Uint8Array {
+  if (round.kind === 'elimination') return eliminationBracketPdf(tournament, round, stamp, now);
   const sheet = roundSheet(tournament, round);
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   let y = drawBrandHeader(doc, sheet.tournament, sheet.title, stampText(stamp, now));
@@ -140,11 +290,7 @@ export function roundPdf(tournament: TabTournament, round: TabRound, stamp: LogS
       doc.text(lines, x + 2, y);
       x += COLUMNS[cellIndex].width;
     });
-    y += height;
-    doc.setDrawColor(220, 228, 235);
-    doc.setLineWidth(0.2);
-    doc.line(PAGE.margin, y - 1, PAGE.margin + TABLE_WIDTH, y - 1);
-    y += 1.5;
+    y += height + 1.5;
   }
 
   const pages = doc.getNumberOfPages();
