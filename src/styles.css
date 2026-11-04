@@ -974,3 +974,19 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
   .unified-shell .tabulation-workspace{width:100%;margin:0;padding:0 16px}
   .unified-shell .tabulation-workspace .tab-embedded .topbar{min-height:82px}
 }
+
+/* Collapsible physical-room catalog and grouped management navigation */
+.physical-room-catalog{padding:0;overflow:hidden}
+.physical-room-catalog-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:18px 21px;border:0;background:transparent;color:#263348;text-align:left}
+.physical-room-catalog-toggle>span{display:grid;gap:4px}
+.physical-room-catalog-toggle b{font-size:14px}
+.physical-room-catalog-toggle small{font-size:11px;color:#7b8799}
+.physical-room-catalog-toggle>svg,.sidebar-group-toggle>svg{transition:transform .18s ease}
+.physical-room-catalog-toggle>svg.expanded,.sidebar-group-toggle>svg.expanded{transform:rotate(90deg)}
+.physical-room-catalog-description{margin:0;padding:0 21px 12px}
+.physical-room-catalog .room-list{padding:0 21px 14px}
+.physical-room-catalog .room-row:first-child{border-top:1px solid #edf0f5}
+.sidebar-group-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px 8px 18px;margin:2px 0;border:0;background:transparent;color:#8997ac;font-size:10px;font-weight:700;letter-spacing:.2px;text-align:left}
+.sidebar-group-toggle:hover{color:#e5e7eb}
+.sidebar-group-items{display:grid;gap:3px}
+.sidebar-group-items .nav-button{padding-top:10px;padding-bottom:10px;padding-left:18px;font-size:12px}
