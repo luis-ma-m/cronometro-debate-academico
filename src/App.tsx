@@ -1223,6 +1223,8 @@ export default function App() {
       }}
       apiConfigured={apiConfigured}
       logout={logout}
+      managementNavExpanded={managementNavExpanded}
+      setManagementNavExpanded={setManagementNavExpanded}
     />
     <div className="manager-workspace" hidden={view === 'tabulation'}>
     <main className="main-area"><header className="topbar"><div><span className="eyebrow">GESTIÓN DEL TORNEO</span><h1>{data.tournamentName}</h1></div><div className="top-actions"><span className="live-status"><i className={connected ? '' : 'disconnected'} /> {connected ? 'Conectado · hace ' + (lastSyncedAt === null ? '—' : Math.floor(Math.max(0, now - lastSyncedAt) / 1000) + ' s') : 'Sin conexión confirmada'}</span><button className="icon-button" title="Actualizar" onClick={() => void reloadAdmin()}><RefreshCw size={17} /></button><button className="button primary" onClick={() => void persist()} disabled={saving}><Save size={16} />{saving ? 'Guardando…' : hasUnsavedChanges ? 'Guardar cambios · pendientes' : 'Guardar cambios'}</button></div></header>
