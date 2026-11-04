@@ -307,7 +307,8 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     const reset = { ...room, formatId, phases, teamFavorId, teamContraId, judgeIds: [...judgeIds], status: 'unassigned' as const, timer: { ...createTimer(phases), updatedAt: now }, updatedAt: now };
     return withRoomStatus(reset, minimumJudges);
   });
-  const formats = [...panel.formats.filter((item) => item.id !== formatId), { id: formatId, name: 'Tabulación · ' + (outbox.presetId === 'aduma' ? 'V Torneo Nacional ADUMA' : outbox.presetId === 'uc3m-swiss' ? 'Sistema suizo' : 'LEDU · liguilla de equipos'), phases: importedPhases, version: (panel.formats.find((item) => item.id === formatId)?.version ?? 0) + 1, createdAt: panel.formats.find((item) => item.id === formatId)?.createdAt ?? now, updatedAt: now }];\n  const rounds = panel.rounds.map((item) => item.id === panelRoundId ? { ...item, defaultFormatId: formatId, scoreType: outbox.roundKind } : item);
+  const formats = [...panel.formats.filter((item) => item.id !== formatId), { id: formatId, name: 'Tabulación · ' + (outbox.presetId === 'aduma' ? 'V Torneo Nacional ADUMA' : outbox.presetId === 'uc3m-swiss' ? 'Sistema suizo' : 'LEDU · liguilla de equipos'), phases: importedPhases, version: (panel.formats.find((item) => item.id === formatId)?.version ?? 0) + 1, createdAt: panel.formats.find((item) => item.id === formatId)?.createdAt ?? now, updatedAt: now }];
+  const rounds = panel.rounds.map((item) => item.id === panelRoundId ? { ...item, defaultFormatId: formatId, scoreType: outbox.roundKind } : item);
   for (const [physicalId, debate] of targets) {
     if (rooms.some((room) => room.roundId === panelRoundId && room.physicalRoomId === physicalId)) continue;
     const physical = physicalRooms.find((item) => item.id === physicalId)!;
