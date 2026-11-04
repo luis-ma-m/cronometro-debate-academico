@@ -135,14 +135,14 @@ export default function App() {
         if (typeof fresh.serverTime === 'number') setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
         setData((current) => {
           if (!hasUnsavedRef.current) return fresh;
-          const refreshedRooms = fresh.rooms.map((remote) => {
+          const retainedPhysicalRoomIds = new Set(current.physicalRooms.map((physical) => physical.id));
+          const refreshedRooms = fresh.rooms.filter((room) => retainedPhysicalRoomIds.has(room.physicalRoomId)).map((remote) => {
             const local = current.rooms.find((room) => room.id === remote.id);
             if (!local) return remote;
             const merged = { ...remote, name: local.name, roundId: local.roundId, teamFavorId: local.teamFavorId,
               teamContraId: local.teamContraId, judgeIds: local.judgeIds, phases: local.phases, notes: local.notes };
             return { ...withRoomStatus({ ...merged, timer: remote.timer }, fresh.minimumJudgesPerRoom ?? 1), updatedAt: remote.updatedAt };
           });
-          const retainedPhysicalRoomIds = new Set(current.physicalRooms.map((physical) => physical.id));
           const addedLocally = current.rooms.filter((room) =>
             retainedPhysicalRoomIds.has(room.physicalRoomId) && !fresh.rooms.some((remote) => remote.id === room.id));
           return { ...fresh, tournamentName: current.tournamentName, rounds: current.rounds, teams: current.teams,
