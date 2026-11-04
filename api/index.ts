@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured } from "./db.js";
+import { getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from "./tabulation-snapshots.js";
 import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
@@ -345,6 +346,15 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "logout":
       if (payload.token) await redisCommand(["DEL", "ledu:session:" + sha256(str(payload.token))]);
       return { loggedOut: true };
+    case "listTabulationSnapshots":
+      await requireSession(payload.token);
+      return listTabulationSnapshots();
+    case "getTabulationSnapshot":
+      await requireSession(payload.token);
+      return getTabulationSnapshot(str(payload.tabTournamentId));
+    case "publishTabulationSnapshot":
+      await requireSession(payload.token);
+      return publishTabulationSnapshot(payload, "authenticated-manager");
     case "getTournament":
       await requireSession(payload.token);
       return tournamentFromData(await loadSheetData());

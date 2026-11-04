@@ -113,3 +113,24 @@ export const updateTimer = (
 ) => apiCall<PublicRoom>('updateRoomTimer', {
   roomId, action, expectedRevision, controlKey, assignmentId, expectedActivationRevision,
 });
+
+
+export type AuthoritativeTabulationSnapshot = {
+  tabTournamentId: string;
+  tournamentName: string;
+  schemaVersion: number;
+  revision: number;
+  snapshot: import('./tabulation/types').TabTournament;
+  snapshotSha256: string;
+  updatedAt: number;
+};
+export type AuthoritativeTabulationListing = Omit<AuthoritativeTabulationSnapshot, 'snapshot'>;
+export type TabulationPublicationResult = AuthoritativeTabulationSnapshot & { created: boolean };
+export const listTabulationSnapshots = (token: string) =>
+  apiCall<AuthoritativeTabulationListing[]>('listTabulationSnapshots', { token });
+export const getTabulationSnapshot = (token: string, tabTournamentId: string) =>
+  apiCall<AuthoritativeTabulationSnapshot | null>('getTabulationSnapshot', { token, tabTournamentId });
+export const publishTabulationSnapshot = (
+  token: string,
+  input: { tabTournamentId: string; expectedRevision: number; operationId: string; snapshot: import('./tabulation/types').TabTournament },
+) => apiCall<TabulationPublicationResult>('publishTabulationSnapshot', { token, ...input });
