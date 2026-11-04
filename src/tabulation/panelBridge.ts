@@ -1,5 +1,5 @@
 import type { Judge, Room, Speaker, Team, Tournament } from '../domain';
-import { createTimer, resolvePhases, validateAssignments, withRoomStatus } from '../timer';
+import { createTimer, validateAssignments, withRoomStatus } from '../timer';
 import { pickChair } from './adjudication';
 import { createTabTournament } from './presets';
 import { randomSeed } from './random';
@@ -240,7 +240,10 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const empty = { rounds: panel.rounds, formats: panel.formats, physicalRooms: panel.physicalRooms, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, addedPhysicalRooms: 0, overwrittenRooms: 0, resetTimers: 0, removedScorecards: 0, issues: [] as string[], summary: [] as string[], changed: 0 };
   if (!round) return { ...empty, rooms: null, issues: ['Selecciona una ronda del panel.'] };
 
-  if (outbox.version !== 2 || !Array.isArray(outbox.timerPhases) || !outbox.timerPhases.length || outbox.timerPhases.some((phase) => !phase.id || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) return { ...empty, rooms: null, issues: ['La ronda no contiene un formato de cronómetro válido. Vuelve a generarla desde Tabulación.'] };\n\n  const importedPhases = outbox.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));\n  const formatId = 'tabulation-' + outbox.presetId;\n  const physicalRooms = [...panel.physicalRooms];
+  if (outbox.version !== 2 || !Array.isArray(outbox.timerPhases) || !outbox.timerPhases.length || outbox.timerPhases.some((phase) => !phase.id || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) return { ...empty, rooms: null, issues: ['La ronda no contiene un formato de cronómetro válido. Vuelve a generarla desde Tabulación.'] };
+
+  const importedPhases = outbox.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
+  const formatId = 'tabulation-' + outbox.presetId;\n  const physicalRooms = [...panel.physicalRooms];
   const byId = new Map(physicalRooms.map((physical) => [physical.id, physical]));
   const byName = new Map(physicalRooms.map((physical) => [normalizeVenueName(physical.name), physical]));
   const resolved = new Map<string, Tournament['physicalRooms'][number]>();
@@ -293,13 +296,14 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     const teamContraId = target?.teamContraId ?? '';
     const judgeIds = target?.judgeIds ?? [];
     const assignmentChanged = room.teamFavorId !== teamFavorId || room.teamContraId !== teamContraId || !sameSet(room.judgeIds, judgeIds);
+    const formatChanged = room.formatId !== formatId || JSON.stringify(room.phases) !== JSON.stringify(importedPhases);
     const hasScorecard = scored.has(room.id);
     if (assignmentChanged && (room.teamFavorId || room.teamContraId || room.judgeIds.length)) overwrittenRooms++;
     if (room.timer.status !== 'idle') resetTimers++;
     if (hasScorecard) removedScorecards++;
-    changed += Number(assignmentChanged || room.timer.status !== 'idle' || hasScorecard);
+    changed += Number(assignmentChanged || formatChanged || room.timer.status !== 'idle' || hasScorecard);
     const phases = importedPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
-    const reset = { ...room, teamFavorId, teamContraId, judgeIds: [...judgeIds], status: 'unassigned' as const, timer: { ...createTimer(phases), updatedAt: now }, updatedAt: now };
+    const reset = { ...room, formatId, phases, teamFavorId, teamContraId, judgeIds: [...judgeIds], status: 'unassigned' as const, timer: { ...createTimer(phases), updatedAt: now }, updatedAt: now };
     return withRoomStatus(reset, minimumJudges);
   });
   const formats = [...panel.formats.filter((item) => item.id !== formatId), { id: formatId, name: 'Tabulación · ' + (outbox.presetId === 'aduma' ? 'V Torneo Nacional ADUMA' : outbox.presetId === 'uc3m-swiss' ? 'Sistema suizo' : 'LEDU · liguilla de equipos'), phases: importedPhases, version: (panel.formats.find((item) => item.id === formatId)?.version ?? 0) + 1, createdAt: panel.formats.find((item) => item.id === formatId)?.createdAt ?? now, updatedAt: now }];\n  const rounds = panel.rounds.map((item) => item.id === panelRoundId ? { ...item, defaultFormatId: formatId, scoreType: outbox.roundKind } : item);
