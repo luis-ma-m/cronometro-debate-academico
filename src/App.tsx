@@ -1244,7 +1244,7 @@ export default function App() {
       + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
     const rooms = result.rooms;
     const replacedRoomIds = new Set(data.rooms.filter((room) => room.roundId === round.id).map((room) => room.id));
-    updateData((current) => ({ ...current, physicalRooms: result.physicalRooms, teams: result.teams, judges: result.judges, institutions: result.institutions, rooms,
+    updateData((current) => ({ ...current, physicalRooms: result.physicalRooms, teams: result.teams, judges: result.judges, institutions: result.institutions, rooms, rounds: result.rounds, formats: result.formats,
       scoring: current.scoring ? { ...current.scoring, scorecards: (current.scoring.scorecards ?? []).filter((card) => !replacedRoomIds.has(card.roomId)) } : current.scoring }));
     setServerError('');
     setTabulationNotice('«' + outbox.roundName + '» cargada en ' + round.name + '. Revisa las salas y pulsa «Guardar cambios». Si una postura era provisional, usa «Intercambiar posturas» tras el sorteo.');
