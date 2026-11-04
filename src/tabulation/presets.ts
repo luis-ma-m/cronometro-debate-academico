@@ -38,7 +38,7 @@ export const ADUMA_RUBRIC: TabRubricItem[] = [
 ];
 
 /** Settings shared by the presets that predate ADUMA, so their behaviour does not change. */
-const CLASSIC_DEFAULTS: Pick<TabSettings, 'ballotMode' | 'rubric' | 'itemMin' | 'itemMax' | 'minorEscalation' | 'oddPanels' | 'conflictPolicy' | 'blindQualifying' | 'expectedTeams' | 'bracketSeedOrder'> = {
+const CLASSIC_DEFAULTS: Pick<TabSettings, 'ballotMode' | 'rubric' | 'itemMin' | 'itemMax' | 'minorEscalation' | 'oddPanels' | 'conflictPolicy' | 'blindQualifying' | 'expectedTeams' | 'bracketSeedOrder' | 'timerPhases'> = {
   ballotMode: 'judges',
   rubric: [],
   itemMin: 0,
