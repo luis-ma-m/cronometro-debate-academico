@@ -215,7 +215,7 @@ function panelAcceptedJudges(tournament: TabTournament, debate: TabDebate, venue
   return { judgeIds, chairId: judgeIds.includes(debate.chairId) ? debate.chairId : pickChair(judgeIds, judges) };
 }
 
-export interface ApplyOutboxResult { rooms: Room[] | null; physicalRooms: Tournament['physicalRooms']; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; addedPhysicalRooms: number; overwrittenRooms: number; issues: string[]; summary: string[]; changed: number }
+export interface ApplyOutboxResult { rooms: Room[] | null; physicalRooms: Tournament['physicalRooms']; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; addedPhysicalRooms: number; overwrittenRooms: number; resetTimers: number; removedScorecards: number; issues: string[]; summary: string[]; changed: number }
 
 const sameSet = (left: string[], right: string[]) => left.length === right.length && [...left].sort().join('|') === [...right].sort().join('|');
 const normalizeVenueName = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es');
@@ -223,14 +223,15 @@ const venueSlug = (value: string) => normalizeVenueName(value).replace(/[^a-z0-9
 
 /**
  * Imports a tabulation round atomically. Physical rooms are resolved by stable ID first and
- * normalized name second; missing rooms are created. Existing round assignments are replaced
- * only when idle and without scorecards. The caller must confirm when overwrittenRooms > 0.
+ * normalized name second; missing rooms are created. This is an explicit destructive replacement:
+ * every room in the selected round is reset to the tabulation assignment, its timer is reset,
+ * and its existing scorecard is removed. The caller must obtain confirmation before applying it.
  */
 export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outbox: PanelOutbox, options: { makeId: (prefix: string) => string; now?: number }): ApplyOutboxResult {
   const now = options.now ?? Date.now();
   const issues: string[] = [];
   const round = panel.rounds.find((item) => item.id === panelRoundId);
-  const empty = { physicalRooms: panel.physicalRooms, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, addedPhysicalRooms: 0, overwrittenRooms: 0, issues: [] as string[], summary: [] as string[], changed: 0 };
+  const empty = { physicalRooms: panel.physicalRooms, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, addedPhysicalRooms: 0, overwrittenRooms: 0, resetTimers: 0, removedScorecards: 0, issues: [] as string[], summary: [] as string[], changed: 0 };
   if (!round) return { ...empty, rooms: null, issues: ['Selecciona una ronda del panel.'] };
 
   const physicalRooms = [...panel.physicalRooms];
@@ -277,20 +278,23 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const addedJudges = judgesById.size - panel.judges.length;
   let changed = addedTeams + addedJudges + addedPhysicalRooms;
   let overwrittenRooms = 0;
+  let resetTimers = 0;
+  let removedScorecards = 0;
   const rooms: Room[] = panel.rooms.map((room) => {
     if (room.roundId !== panelRoundId) return room;
     const target = targets.get(room.physicalRoomId);
     const teamFavorId = target?.teamFavorId ?? '';
     const teamContraId = target?.teamContraId ?? '';
     const judgeIds = target?.judgeIds ?? [];
-    if (room.teamFavorId === teamFavorId && room.teamContraId === teamContraId && sameSet(room.judgeIds, judgeIds)) return room;
-    if (room.timer.status !== 'idle' || scored.has(room.id)) {
-      issues.push(room.name + ' tiene el cronómetro iniciado o finalizado, o un acta: su asignación no se puede cambiar.');
-      return room;
-    }
-    if (room.teamFavorId || room.teamContraId || room.judgeIds.length) overwrittenRooms++;
-    changed++;
-    return withRoomStatus({ ...room, teamFavorId, teamContraId, judgeIds: [...judgeIds], updatedAt: now }, minimumJudges);
+    const assignmentChanged = room.teamFavorId !== teamFavorId || room.teamContraId !== teamContraId || !sameSet(room.judgeIds, judgeIds);
+    const hasScorecard = scored.has(room.id);
+    if (assignmentChanged && (room.teamFavorId || room.teamContraId || room.judgeIds.length)) overwrittenRooms++;
+    if (room.timer.status !== 'idle') resetTimers++;
+    if (hasScorecard) removedScorecards++;
+    changed += Number(assignmentChanged || room.timer.status !== 'idle' || hasScorecard);
+    const phases = room.phases.map((phase) => ({ ...phase }));
+    const reset = { ...room, teamFavorId, teamContraId, judgeIds: [...judgeIds], status: 'unassigned' as const, timer: { ...createTimer(phases), updatedAt: now }, updatedAt: now };
+    return withRoomStatus(reset, minimumJudges);
   });
   const format = panel.formats.find((item) => item.id === round.defaultFormatId) ?? panel.formats[0];
   for (const [physicalId, debate] of targets) {
@@ -312,5 +316,5 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const name = (id: string) => teams.get(id)?.name ?? id;
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
     + debate.judgeIds.length + (debate.judgeIds.length === 1 ? ' juez' : ' jueces') + (debate.sidesProvisional ? ' · postura provisional' : ''));
-  return { rooms, physicalRooms, teams: mergedTeams, judges: mergedJudges, institutions, addedTeams, addedJudges, addedPhysicalRooms, overwrittenRooms, issues: [], summary, changed };
+  return { rooms, physicalRooms, teams: mergedTeams, judges: mergedJudges, institutions, addedTeams, addedJudges, addedPhysicalRooms, overwrittenRooms, resetTimers, removedScorecards, issues: [], summary, changed };
 }
