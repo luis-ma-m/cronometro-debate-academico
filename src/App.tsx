@@ -387,7 +387,6 @@ export default function App() {
       setData(saved);
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
-      setFormatDirty(false);
       setConnected(true);
       setLastSyncedAt(Date.now());
       setServerError('');
@@ -1045,8 +1044,7 @@ export default function App() {
             setData(latest);
             hasUnsavedRef.current = false;
             setHasUnsavedChanges(false);
-            setFormatDirty(false);
-            setSelectedRound(refreshedPreview.targetRoundId);
+                  setSelectedRound(refreshedPreview.targetRoundId);
             setActivationPreview(null);
             setLastSyncedAt(Date.now());
             setConnected(true);
@@ -1094,7 +1092,6 @@ export default function App() {
       setData(saved);
       hasUnsavedRef.current = false;
       setHasUnsavedChanges(false);
-      setFormatDirty(false);
       setSelectedRound(effectivePreview.targetRoundId);
       setActivationPreview(null);
       setLastSyncedAt(Date.now());
@@ -1178,7 +1175,7 @@ export default function App() {
       {preparingRoomId && <div className="notice warning-notice"><RefreshCw size={17} /><span>Guardando los cambios y preparando el enlace de la sala…</span></div>}
       {preparedRoomLink && <div className="notice warning-notice room-link-ready"><Check size={17} /><span>Enlace listo para <b>{preparedRoomLink.roomName}</b>. Puedes abrir el cronómetro desde aquí; el enlace se reutilizará en las próximas aperturas de esta sesión.</span><a className="button primary" href={preparedRoomLink.href} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} /> Abrir cronómetro</a><button className="text-button" onClick={() => setPreparedRoomLink(null)} aria-label="Cerrar enlace preparado"><X size={16} /></button></div>}
       {tabulationNotice && <div className="success-notice"><Check size={17} /><span>{tabulationNotice}</span><button className="text-button" onClick={() => setTabulationNotice('')} aria-label="Cerrar aviso"><X size={16} /></button></div>}
-      {hasUnsavedChanges && <div className="notice warning-notice"><CircleHelp size={17} /><span>Tienes cambios locales sin guardar. El panel seguirá actualizando los cronómetros sin descartar estas ediciones.</span><button className="text-button" onClick={() => { if (window.confirm('¿Descartar todos los cambios locales y volver a cargar los datos guardados?')) { hasUnsavedRef.current = false; setHasUnsavedChanges(false); setFormatDirty(false); void reloadAdmin(); } }}>Descartar y recargar</button></div>}
+      {hasUnsavedChanges && <div className="notice warning-notice"><CircleHelp size={17} /><span>Tienes cambios locales sin guardar. El panel seguirá actualizando los cronómetros sin descartar estas ediciones.</span><button className="text-button" onClick={() => { if (window.confirm('¿Descartar todos los cambios locales y volver a cargar los datos guardados?')) { hasUnsavedRef.current = false; setHasUnsavedChanges(false); void reloadAdmin(); } }}>Descartar y recargar</button></div>}
       {(assignmentWarnings.length > 0 || incompatibilityIncidents.length > 0) && view !== 'settings' && <div className="notice warning-notice"><CircleHelp size={17} /><span>Hay incidencias en las asignaciones: {[...assignmentWarnings, ...incompatibilityIncidents.map((issue) => issue.roomName + ': ' + issue.message)].slice(0,3).join(' ')}{assignmentWarnings.length + incompatibilityIncidents.length > 3 ? ' +' + (assignmentWarnings.length + incompatibilityIncidents.length - 3) + ' más.' : ''}</span></div>}
       {activationPreview && <div className="activation-backdrop" role="presentation">
         <section className="activation-dialog" role="dialog" aria-modal="true" aria-labelledby="activate-round-title">
