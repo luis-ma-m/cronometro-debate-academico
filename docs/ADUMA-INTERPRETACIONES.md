@@ -13,6 +13,7 @@ Lectura aplicada:
 - El 2.º aviso del mismo equipo en un debate se convierte en una falta leve, y cada aviso a partir del 3.º es otra falta leve (art. 39.1).
 - Con 2 faltas leves se forma una falta grave, y cada falta leve a partir de la 3.ª es otra falta grave (art. 40.1). Las leves que se convierten dejan de restar como leves.
 - Las faltas que salen de avisos también se acumulan para formar graves.
+- **Registro obligatorio en el acta:** se anotan por separado todos los avisos y todas las faltas producidos, aunque su acumulación genere una falta leve o grave. La conversión no sustituye el registro de los hechos originales: por ejemplo, 2 avisos deben constar como 2 avisos y, además, como 1 falta leve a efectos de penalización.
 - **Todo se cuenta dentro de un mismo debate:** no se arrastra al siguiente.
 
 | En el acta | Faltas leves que restan | Faltas graves | Descuento |
