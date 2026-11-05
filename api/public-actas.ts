@@ -106,7 +106,7 @@ export async function publicActaAlreadySubmitted(tournamentIdValue: string, publ
   if (!remote) return false;
   const tournament = remote.snapshot as unknown as TabTournament;
   const debate = tournament.rounds.flatMap((round) => round.debates)
-    .find((item) => actaDebateRef(tournament, item.id) === publicDebateRef);
+    .find((item) => item.id === publicDebateRef || actaDebateRef(tournament, item.id) === publicDebateRef);
   if (!debate) return false;
   const result = await getPool().query(
     "SELECT 1 FROM public_acta_submissions WHERE tournament_id=$1 AND debate_ref=$2 LIMIT 1",
