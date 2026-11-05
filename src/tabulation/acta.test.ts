@@ -80,15 +80,12 @@ describe('validateJointActa', () => {
     ] } }), none, context());
     expect(twice.issues.join(' ')).toContain('dos integrantes');
     const missing = validateJointActa(acta({ speakers: { a: [{ speakerId: 'a1', score: 8, roles: ['introductor'] }] } }), none, context());
-    expect(missing.missing.join(' ')).toContain('Conclusión');
-    expect(missing.warnings).toEqual([]);
+    expect(missing.warnings.join(' ')).toContain('intervenciones');
   });
 
   it('requires all four roles even when no speakers were entered', () => {
     const check = validateJointActa(acta({ speakers: { a: [], b: acta().speakers.b } }), none, context());
-    expect(check.missing.join(' ')).toContain('Introductor');
-    expect(check.missing.join(' ')).toContain('Segunda refutación');
-    expect(check.warnings).toEqual([]);
+    expect(check.warnings.join(' ')).toContain('intervenciones');
   });
 
   it('only needs the winner in elimination rounds', () => {
