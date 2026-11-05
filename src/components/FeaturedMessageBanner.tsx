@@ -9,16 +9,15 @@ type Props = {
   transition?: boolean;
 };
 
-function FeaturedSubtitle({ item, now, serverOffsetMs, onExpired }: {
+function FeaturedSubtitle({ item, expiresAt, now, serverOffsetMs, onExpired }: {
   item: FeaturedMessageSubtitle;
+  expiresAt?: number;
   now: number;
   serverOffsetMs: number;
   onExpired: (id: string) => void;
 }) {
-  const hasTimer = Number.isFinite(item.durationSeconds) && Number(item.durationSeconds) > 0;
-  const remaining = hasTimer
-    ? Math.max(0, Math.ceil((item.publishedAtFallback! - (now + serverOffsetMs)) / 1000))
-    : null;
+  const hasTimer = typeof expiresAt === 'number' && Number.isFinite(expiresAt);
+  const remaining = hasTimer ? Math.max(0, Math.ceil((expiresAt - (now + serverOffsetMs)) / 1000)) : null;
   const expired = hasTimer && remaining === 0;
 
   useEffect(() => {
@@ -57,7 +56,8 @@ export function FeaturedMessageBanner({ message, now, serverOffsetMs, transition
     <div className="featured-message-subtitles">
       {message.subtitles.filter((item) => !removedSubtitleIds.includes(item.id)).map((item) => <FeaturedSubtitle
         key={item.id}
-        item={{ ...item, publishedAtFallback: message.publishedAt } as FeaturedMessageSubtitle & { publishedAtFallback: number }}
+        item={item}
+        expiresAt={typeof item.durationSeconds === 'number' ? message.publishedAt + item.durationSeconds * 1000 : undefined}
         now={now}
         serverOffsetMs={serverOffsetMs}
         onExpired={onSubtitleExpired}
