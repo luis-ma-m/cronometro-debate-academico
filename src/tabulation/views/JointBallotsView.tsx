@@ -3,6 +3,7 @@ import { applyReceivedActa, findActaCodes, readActaCode, receivedIsRegistered } 
 import { CheckCheck, MessageCircle, Save, SkipForward, Star, Trash2 } from 'lucide-react';
 import { SPEAKER_POSITIONS } from '../../scoring';
 import { compactActaWarnings, validateJointActa } from '../acta';
+import { matchActaSigner } from '../signer';
 import { computeDebateOutcome, effectivePenalties, outcomeContext } from '../results';
 import { isFallenAt, SPEAKER_ROLES, type SpeakerRole, type TabDebate, type TabDebateResult, type TabJointActa, type TabRound, type TabTournament } from '../types';
 import { Empty, formatNumber, IssueList, lookups, markUnsaved, Notice, parseDecimal, STATUS_LABELS, type ViewProps } from '../ui';
@@ -223,9 +224,22 @@ export function JointBallotsView({ tournament, outcomes, update, notify }: ViewP
         <ul>{round.debates.map((item) => {
           const down = fallenIn(round, item);
           const status = STATUS_LABELS[outcomes.get(item.id)?.status ?? 'empty'];
+          const signer = item.publicActaSignedBy
+            ? matchActaSigner(item.publicActaSignedBy, item.judgeIds.flatMap((id) => {
+              const judge = look.judges.get(id);
+              return judge ? [{ id, name: judge.name }] : [];
+            }), item.chairId)
+            : null;
           return <li key={item.id}><button type="button" className={item.id === debate?.id ? 'selected' : ''} onClick={() => open(item)}>
             <span><b>{look.venueName(item.venueId)}</b><small>{look.teamName(item.teamIds[0])} – {look.teamName(item.teamIds[1])}</small></span>
-            <span><span className={'state-pill ' + (down.length ? 'unassigned' : status.className)}>{down.length ? 'Caído' : status.label}</span>{!down.length && <small className="tab-cell-sub">Enlace: {item.actaLinkSentAt ? 'Enviada' : 'Por enviar'}</small>}{item.publicActaSubmissionId && <small className="tab-cell-sub">Acta: Recibida online</small>}</span>
+            <span className="acta-list-meta">
+              <span className={'state-pill ' + (down.length ? 'unassigned' : status.className)}>{down.length ? 'Caído' : status.label}</span>
+              {!down.length && <small className="tab-cell-sub">Enlace: {item.actaLinkSentAt ? 'Enviada' : 'Por enviar'}</small>}
+              {item.publicActaSubmissionId && <small className="tab-cell-sub">Acta: Recibida online</small>}
+              {item.publicActaSignedBy && signer?.kind === 'chair' && <small className="tab-cell-sub">Firma: {item.publicActaSignedBy} · Juez principal</small>}
+              {item.publicActaSignedBy && signer?.kind === 'panel' && <small className="tab-cell-sub">Firma: {item.publicActaSignedBy} · Juez secundario</small>}
+              {item.publicActaSignedBy && signer?.kind === 'unmatched' && <small className="tab-cell-sub acta-signature-issue" role="note" title="El nombre firmado no coincide con ninguno de los jueces asignados">⚠️ Posible incidencia: firma no identificada ({item.publicActaSignedBy})</small>}
+            </span>
           </button></li>;
         })}</ul>
       </section>
