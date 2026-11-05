@@ -11,7 +11,7 @@ const speakers = new Map<string, TabSpeaker>([
 ]);
 const context = (elimination = false): JointActaContext => ({ settings, teamIds: ['a', 'b'], speakers, elimination });
 const items = (value: number) => Object.fromEntries(ADUMA_RUBRIC.map((item) => [item.id, value]));
-const acta = (extra: Partial<TabJointActa> = {}): TabJointActa => ({ winnerTeamId: 'a', items: { a: items(4), b: items(3) }, speakers: {}, ...extra });
+const acta = (extra: Partial<TabJointActa> = {}): TabJointActa => ({ winnerTeamId: 'a', items: { a: items(4), b: items(3) }, speakers: {\n  a: [{ speakerId: 'a1', score: 8, roles: ['introductor', 'concluder'] }, { speakerId: 'a2', score: 7, roles: ['first_rebuttal', 'second_rebuttal'] }],\n  b: [{ speakerId: 'b1', score: 8, roles: ['introductor', 'first_rebuttal', 'second_rebuttal', 'concluder'] }],\n}, ...extra });
 const none: Record<string, TabPenalties> = {};
 
 describe('validateJointActa', () => {
@@ -76,10 +76,10 @@ describe('validateJointActa', () => {
       { speakerId: 'a2', score: 7, roles: ['introductor'] },
     ] } }), none, context());
     expect(twice.issues.join(' ')).toContain('dos integrantes');
-    expect(validateJointActa(acta({ speakers: { a: [{ speakerId: 'a1', score: 8, roles: ['introductor'] }] } }), none, context()).warnings.join(' ')).toContain('intervenciones');
+    const missing = validateJointActa(acta({ speakers: { a: [{ speakerId: 'a1', score: 8, roles: ['introductor'] }] } }), none, context());\n    expect(missing.missing.join(' ')).toContain('Conclusión');\n    expect(missing.warnings).toEqual([]);
   });
 
-  it('only needs the winner in elimination rounds', () => {
+  it('requires all four roles even when no speakers were entered', () => {\n    const check = validateJointActa(acta({ speakers: { a: [], b: acta().speakers.b } }), none, context());\n    expect(check.missing.join(' ')).toContain('Introductor');\n    expect(check.missing.join(' ')).toContain('Segunda refutación');\n    expect(check.warnings).toEqual([]);\n  });\n\n  it('only needs the winner in elimination rounds', () => {
     const check = validateJointActa({ winnerTeamId: 'b', items: {}, speakers: {} }, none, context(true));
     expect(check).toMatchObject({ issues: [], missing: [] });
     expect(validateJointActa({ winnerTeamId: 'x', items: {}, speakers: {} }, none, context(true)).issues.join(' ')).toContain('no está en el debate');
