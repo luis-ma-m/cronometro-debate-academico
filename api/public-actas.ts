@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { getPool } from "./db.js";
 import { ApiError } from "./core.js";
 import { getTabulationSnapshot } from "./tabulation-snapshots.js";
-import { readActaCode } from "../src/tabulation/whatsapp.js";
+import { actaDebateRef, readActaCode } from "../src/tabulation/whatsapp.js";
 import type { TabTournament } from "../src/tabulation/types.js";
 
 export type PublicActaSubmission = {
@@ -71,6 +71,9 @@ export async function submitPublicActa(input: Record<string, unknown>): Promise<
   }
   // The debate ID comes from the validated code, never from the public request metadata.
   const debateId = received.debateId;
+  if (actaDebateRef(tournament, debateId) !== debateRef) {
+    throw new ApiError("ACTA_DEBATE_MISMATCH", "La referencia del enlace no coincide con el debate del acta.", 422);
+  }
   const hash = createHash("sha256").update(code).digest("hex");
   const pool = getPool();
   const inserted = await pool.query(
