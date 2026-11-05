@@ -128,7 +128,8 @@ function JudgeActa({ link }: { link: ActaLink }) {
     const acta: TabJointActa = { winnerTeamId: entry.winner, items: entry.items, ...(entry.quickTotals ? { quickTotals: entry.quickTotals } : {}), ...(entry.writtenTotals ? { writtenTotals: entry.writtenTotals } : {}), speakers: entry.speakers };
     return validateJointActa(acta, entry.penalties, { settings, teamIds: [link.teams[0].id, link.teams[1].id], speakers, elimination, teamName });
   }, [entry, settings, link, speakers, elimination]);
-  const ready = !check.issues.length && !check.missing.length;
+  const missingSpeakerRoles = check.warnings.filter((warning) => warning.includes('Falta indicar quién hizo alguna de las intervenciones'));
+  const ready = !check.issues.length && !check.missing.length && missingSpeakerRoles.length === 0;
   const summary = !entry.winner ? '' : 'gana ' + teamName(entry.winner) + (elimination ? '' : ' (' + link.teams.map((team) => formatNumber(check.totals[team.id]?.net ?? null)).join(' – ') + ' ítems netos)');
   const message = actaCodeMessage(link, entry, summary);
   const sendActa = async () => {
@@ -287,6 +288,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
       </dl>
       {check.issues.length > 0 && <ul className="tab-problems">{check.issues.map((issue) => <li key={issue} className="error">{issue}</li>)}</ul>}
       {check.missing.length > 0 && <ul className="tab-problems">{check.missing.map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
+      {missingSpeakerRoles.length > 0 && <ul className="tab-problems">{missingSpeakerRoles.map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
       {ready && check.warnings.length > 0 && <ul className="tab-problems">{compactActaWarnings(check.warnings).map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
       {draft.sentAt && <p className="acta-sent"><CircleCheck size={16} /> Enviada a las {new Date(draft.sentAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}. Si cambias algo, vuelve a enviarla.</p>}
       <button type="button" className="button primary acta-send-button" disabled={!ready || sending} onClick={() => void sendActa()}>
