@@ -1072,3 +1072,15 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .featured-manager-actions{display:flex;align-items:center;gap:9px;padding-top:16px;margin-top:12px;border-top:1px solid #edf0f5}
 .featured-manager-actions>span{flex:1}
 @media(max-width:620px){.featured-manager-backdrop{padding:8px;align-items:end}.featured-manager-dialog{max-height:94vh;padding:18px;border-radius:16px}.featured-subtitle-heading{align-items:flex-start;flex-direction:column}.featured-room-list{grid-template-columns:1fr}.featured-manager-actions{flex-wrap:wrap}.featured-manager-actions>span{display:none}.featured-manager-actions .button{flex:1}}
+
+
+/* Expiración progresiva de mensajes destacados. */
+.featured-message-item{overflow:hidden;min-height:0;transition:opacity .55s ease,transform .55s ease,filter .55s ease,max-height .55s ease,padding .55s ease,border-width .55s ease}
+.featured-message-item-untimed{justify-content:center;text-align:center}
+.featured-message-item-untimed span{text-align:center}
+.featured-message-item.is-expiring{opacity:0;transform:translateY(-8px) scale(.97);filter:blur(4px);max-height:0;padding-top:0;padding-bottom:0;border-top-width:0;border-bottom-width:0}
+.featured-message-banner{overflow:hidden;transition:opacity .7s ease,transform .7s ease,filter .7s ease,max-height .7s ease,margin .7s ease,padding .7s ease}
+.featured-message-banner.is-expiring{opacity:0;transform:translateY(-10px);filter:blur(5px);max-height:0;margin-top:0;margin-bottom:0;padding-top:0;padding-bottom:0}
+.featured-duration input:disabled{opacity:.45;cursor:not-allowed}
+.featured-timer-toggle{display:flex;align-items:center;gap:8px;align-self:end;min-height:40px}
+@media(prefers-reduced-motion:reduce){.featured-message-item,.featured-message-banner{transition:none!important}.featured-message-item.is-expiring,.featured-message-banner.is-expiring{filter:none;transform:none}}
