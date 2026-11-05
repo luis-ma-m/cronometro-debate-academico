@@ -491,6 +491,20 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     return tournament.rounds.reduce((total, round) => total + round.debates.filter((debate) => !debate.teamIds.some((id) => isFallenAt(teams.get(id), round.number))
       && outcomes.get(debate.id)?.status !== 'complete').length, 0);
   }, [tournament, outcomes]);
+  const remoteDifferences = useMemo(
+    () => remoteConflict && tournament ? findSnapshotDifferences(tournament, remoteConflict.remote.snapshot) : [],
+    [remoteConflict, tournament],
+  );
+  const remoteDifferenceGroups = useMemo(() => {
+    const groups = new Map<string, SnapshotDifference[]>();
+    for (const difference of remoteDifferences) {
+      const root = difference.path.split(/[.[]/, 1)[0] ?? 'Otros datos';
+      const label = SNAPSHOT_LABELS[root] ?? root;
+      groups.set(label, [...(groups.get(label) ?? []), difference]);
+    }
+    return [...groups.entries()];
+  }, [remoteDifferences]);
+
   const badges: Partial<Record<ViewId, { text: string; kind: string; title: string }>> = {
     ...(tournament?.draftRound ? { rondas: { text: 'Borrador', kind: 'info', title: 'Hay un borrador de ronda pendiente de confirmar' } } : {}),
     ...(pendingActas ? { actas: { text: String(pendingActas), kind: 'warn', title: pendingActas + ' actas pendientes' } } : {}),
@@ -548,11 +562,33 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           <button type="button" className="button secondary" onClick={() => store.reloadFromStorage()}>Cargar la otra versión</button>
           <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Sobrescribir la versión guardada por la otra pestaña con la de esta pestaña?')) store.overwrite(); }}>Mantener esta versión</button>
         </div>}
-        {remoteSync === 'conflict' && remoteConflict && <div className="notice error-notice" role="alert">
-          <span>Hay dos versiones distintas del torneo. La copia local y la de Neon se conservan; elige cuál debe prevalecer antes de seguir sincronizando.</span>
-          <button type="button" className="button secondary" onClick={recoverRemoteVersion}>Recuperar Neon</button>
-          <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Publicar la copia de este dispositivo sobre la revisión remota? La copia remota actual quedará reemplazada, pero se conservará una copia local de seguridad.')) void publishLocalVersion(); }}>Publicar este dispositivo</button>
-        </div>}
+        {remoteSync === 'conflict' && remoteConflict && <section className="notice error-notice tab-remote-conflict" role="alert" aria-labelledby="tab-remote-conflict-title">
+          <div className="tab-remote-conflict-heading">
+            <div>
+              <strong id="tab-remote-conflict-title">Hay dos versiones distintas del torneo</strong>
+              <p>La copia local y la de Neon se conservan. Revisa los valores divergentes y elige cuál debe prevalecer antes de continuar la sincronización.</p>
+            </div>
+            <span className="tab-remote-conflict-count">{remoteDifferences.length} {remoteDifferences.length === 1 ? 'diferencia' : 'diferencias'}</span>
+          </div>
+          {remoteDifferences.length ? <div className="tab-remote-diff-groups">
+            {remoteDifferenceGroups.map(([group, items]) => <details className="tab-remote-diff-group" key={group} open>
+              <summary><b>{group}</b><span>{items.length} {items.length === 1 ? 'cambio' : 'cambios'}</span></summary>
+              <div className="tab-remote-diff-list">
+                {items.map((difference) => <article className="tab-remote-diff-item" key={difference.path}>
+                  <strong>{prettyDifferencePath(difference.path)}</strong>
+                  <div className="tab-remote-diff-values">
+                    <div><small>Este dispositivo</small><pre>{displayDifferenceValue(difference.localValue)}</pre></div>
+                    <div><small>Neon</small><pre>{displayDifferenceValue(difference.remoteValue)}</pre></div>
+                  </div>
+                </article>)}
+              </div>
+            </details>)}
+          </div> : <p className="tab-remote-diff-empty">El contenido funcional coincide. La discrepancia detectada se limita a metadatos de sincronización o a una revisión concurrente.</p>}
+          <div className="tab-remote-conflict-actions">
+            <button type="button" className="button secondary" onClick={recoverRemoteVersion}>Recuperar Neon</button>
+            <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Publicar la copia de este dispositivo sobre la revisión remota? La copia remota actual quedará reemplazada, pero se conservará una copia local de seguridad.')) void publishLocalVersion(); }}>Publicar este dispositivo</button>
+          </div>
+        </section>}
         {remoteSync === 'error' && <Notice kind="error">No se ha podido confirmar el guardado en Neon. La copia local sigue disponible; revisa la conexión y vuelve a intentarlo.</Notice>}
         {remoteSync === 'offline' && apiConfigured && <Notice kind="warning">Sin conexión con Neon. Los cambios permanecen en el almacenamiento local y se intentarán sincronizar al recuperar la conexión.</Notice>}
         {state.error && <Notice kind="error">{state.error}{state.status === 'error' && <> <button type="button" className="button secondary tab-retry" onClick={() => {
