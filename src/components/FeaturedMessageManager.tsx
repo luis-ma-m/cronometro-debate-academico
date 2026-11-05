@@ -15,8 +15,8 @@ type Props = {
 const makeId = () => globalThis.crypto?.randomUUID?.() ?? 'msg-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const toDraft = (item: FeaturedMessageSubtitle): DraftSubtitle => ({
   id: item.id, text: item.text, hasTimer: Number.isFinite(item.durationSeconds) && item.durationSeconds > 0,
-  minutes: String(Math.floor(item.durationSeconds / 60)),
-  seconds: String(item.durationSeconds % 60).padStart(2, '0'),
+  minutes: typeof item.durationSeconds === 'number' ? String(Math.floor(item.durationSeconds / 60)) : '00',
+  seconds: typeof item.durationSeconds === 'number' ? String(item.durationSeconds % 60).padStart(2, '0') : '00',
 });
 
 export function FeaturedMessageManager({ rooms, activeMessage, saving, onClose, onPublish, onClear }: Props) {
