@@ -174,6 +174,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         if (!currentState.tournament || currentState.tournament.id !== tournament.id || currentState.status !== 'saved' || currentState.readOnly) return;
         let next = currentState.tournament;
         let applied = 0;
+        let recoveredSignatures = 0;
         const appliedIds: string[] = [];
         for (const submission of submissions) {
           if (seenPublicActas.current.has(submission.id)) continue;
@@ -192,6 +193,14 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
             continue;
           }
           if (debate.publicActaSubmissionId === submission.id) {
+            // Backfill signatures for actas received before the signer field was persisted locally.
+            if (!debate.publicActaSignedBy && received.payload.signedBy.trim()) {
+              next = { ...next, rounds: next.rounds.map((item) => item.id !== round.id ? item : {
+                ...item, debates: item.debates.map((itemDebate) => itemDebate.id === debate.id
+                  ? { ...itemDebate, publicActaSignedBy: received.payload!.signedBy.trim() } : itemDebate),
+              }) };
+              recoveredSignatures++;
+            }
             seenPublicActas.current.add(submission.id);
             continue;
           }
@@ -203,11 +212,14 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           appliedIds.push(submission.id);
           applied++;
         }
-        if (applied && !cancelled) {
+        if ((applied || recoveredSignatures) && !cancelled) {
+          const message = applied
+            ? applied + ' acta(s) recibida(s) directamente desde el móvil y sincronizada(s) con Neon.'
+            : recoveredSignatures + ' firma(s) de actas ya recibidas recuperada(s) para su revisión.';
           const ok = store.update(() => next, {
             type: 'acta.save',
-            message: applied + ' acta(s) recibida(s) directamente desde el móvil y sincronizada(s) con Neon.',
-            details: { source: 'public-acta-inbox', count: applied },
+            message,
+            details: { source: 'public-acta-inbox', count: applied, recoveredSignatures },
           });
           if (ok) {
             store.flush();

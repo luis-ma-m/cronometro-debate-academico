@@ -197,6 +197,8 @@ export interface TabDebate {
   actaLinkSentAt?: number;
   /** ID of the immutable public acta submission already applied to this debate. */
   publicActaSubmissionId?: string;
+  /** Name declared by the person who signed the received mobile acta. */
+  publicActaSignedBy?: string;
   result?: TabDebateResult;
 }
 

@@ -509,7 +509,7 @@ function receivedDebate(round: TabRound, debate: TabDebate, payload: ActaCode, n
     updatedAt: now,
   };
   const favor = teams.includes(payload.favor) ? payload.favor : debate.favorTeamId;
-  return { ...debate, ...(favor ? { favorTeamId: favor } : {}), result };
+  return { ...debate, ...(favor ? { favorTeamId: favor } : {}), ...(payload.signedBy.trim() ? { publicActaSignedBy: payload.signedBy.trim() } : {}), result };
 }
 
 export function applyReceivedActa(tournament: TabTournament, received: ReceivedActa, now = Date.now()): TabTournament {

@@ -195,6 +195,7 @@ function normalizeRound(round: Json, references: References): { round: TabRound;
       ...(typeof debate.bracketSlot === 'number' ? { bracketSlot: debate.bracketSlot } : {}),
       ...(typeof debate.actaLinkSentAt === 'number' && Number.isFinite(debate.actaLinkSentAt) ? { actaLinkSentAt: debate.actaLinkSentAt } : {}),
       ...(typeof debate.publicActaSubmissionId === 'string' && debate.publicActaSubmissionId ? { publicActaSubmissionId: debate.publicActaSubmissionId.slice(0, 80) } : {}),
+      ...(typeof debate.publicActaSignedBy === 'string' && debate.publicActaSignedBy.trim() ? { publicActaSignedBy: debate.publicActaSignedBy.trim().slice(0, 120) } : {}),
       ...(result ? { result } : {}),
     };
   }));

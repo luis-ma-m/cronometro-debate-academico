@@ -100,6 +100,13 @@ describe('schema v2 normalization', () => {
     expect(tournament.rounds[0].debates[0].actaLinkSentAt).toBe(12345);
   });
 
+  it('preserves the signer name on a received acta', () => {
+    const raw = JSON.parse(JSON.stringify(fullAduma()));
+    raw.rounds[0].debates[0].publicActaSignedBy = '  LUIS Martín  ';
+    const { tournament } = normalizeTabTournament(raw);
+    expect(tournament.rounds[0].debates[0].publicActaSignedBy).toBe('LUIS Martín');
+  });
+
   it('ignores invalid roles, unknown teams and bad levels', () => {
     const raw = JSON.parse(JSON.stringify(fullAduma()));
     raw.judgeConflicts.push({ id: 'c3', judgeId: 'j1', teamId: 'b', level: 'mucha', note: '' });
