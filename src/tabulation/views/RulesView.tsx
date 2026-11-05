@@ -130,7 +130,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
               <div className="tab-warning-item" key={warningEditorPhase.id + '-warning-' + warningIndex}>
                 <label>
                   <span>Aviso {warningIndex + 1} · segundos restantes</span>
-                  <input type="number" step={1} value={draft}
+                  <input type="text" inputMode="numeric" pattern="-?[0-9]*" value={draft}
                     onChange={(event) => setWarningDrafts((current) => current.map((value, index) => index === warningIndex ? event.target.value : value))}
                     onBlur={commitWarningDrafts} />
                 </label>
