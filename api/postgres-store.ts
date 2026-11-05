@@ -173,6 +173,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     { key: "institutions", value: JSON.stringify(institutions.map((row) => str(row.name))) },
     { key: "speakers", value: JSON.stringify(speakers.map((row) => ({ id: str(row.id), teamId: str(row.team_id), name: str(row.name) }))) },
     { key: "formatPhases", value: JSON.stringify(parseJson(settingsJson.formatPhases, defaultPhases())) },
+    { key: "featuredMessage", value: JSON.stringify(parseJson(settingsJson.featuredMessage, null)) },
     { key: "scoring", value: JSON.stringify(scoring) },
     { key: "roundTypes", value: JSON.stringify(Object.fromEntries(rounds.map((round) => [str(round.id), str(round.score_type) === "elimination" ? "elimination" : "qualifying"]))) },
     { key: "schemaVersion", value: "4" },
@@ -299,6 +300,7 @@ async function persistConfig(client: PoolClient, oldRows: SheetRow[], newRows: S
     formatPhases: json(getConfig(newRows, "formatPhases"), defaultPhases()),
     roundTypes: json(getConfig(newRows, "roundTypes"), {}),
     schemaVersion: getConfig(newRows, "schemaVersion") || "4",
+    featuredMessage: json(getConfig(newRows, "featuredMessage"), null),
   };
   const result = await client.query(
     `UPDATE tournament_settings SET tournament_name=$1, active_round_id=$2,
