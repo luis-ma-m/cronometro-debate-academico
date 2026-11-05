@@ -193,6 +193,8 @@ export interface TabDebate {
   judgeIds: string[];
   chairId: string;
   bracketSlot?: number;
+  /** Locally recorded when the organiser clicks Send link. */
+  actaLinkSentAt?: number;
   result?: TabDebateResult;
 }
 
