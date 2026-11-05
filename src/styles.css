@@ -1084,3 +1084,5 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 .featured-duration input:disabled{opacity:.45;cursor:not-allowed}
 .featured-timer-toggle{display:flex;align-items:center;gap:8px;align-self:end;min-height:40px}
 @media(prefers-reduced-motion:reduce){.featured-message-item,.featured-message-banner{transition:none!important}.featured-message-item.is-expiring,.featured-message-banner.is-expiring{filter:none;transform:none}}
+
+.featured-message-subtitles-single{grid-template-columns:minmax(0,1fr)}
