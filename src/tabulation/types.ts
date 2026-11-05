@@ -1,5 +1,5 @@
-import type { SpeakerPosition } from '../scoring';
-import type { Phase } from '../domain';
+import type { SpeakerPosition } from '../scoring.js';
+import type { Phase } from '../domain.js';
 
 /** Local, frontend-only tabulation model. Nothing derived (standings, byes, outcomes) is stored. */
 export const TAB_SCHEMA_VERSION = 2;

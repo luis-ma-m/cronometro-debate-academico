@@ -1,10 +1,10 @@
 import { deflateSync, inflateSync, strFromU8, strToU8 } from 'fflate';
-import { canonicalJson, cyrb53 } from './hash';
-import { presetSettings } from './presets';
+import { canonicalJson, cyrb53 } from './hash.js';
+import { presetSettings } from './presets.js';
 import {
   SPEAKER_ROLES,
   type TabDebate, type TabDebateResult, type TabJointActa, type TabPenalties, type TabRound, type TabSettings, type TabSpeaker, type TabSpeakerEntry, type TabTournament,
-} from './types';
+} from './types.js';
 
 /**
  * Actas by WhatsApp, with no server. The link sent to the chair carries what the judges' page cannot know: the names
