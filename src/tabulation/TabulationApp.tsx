@@ -174,6 +174,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         if (!currentState.tournament || currentState.tournament.id !== tournament.id || currentState.status !== 'saved' || currentState.readOnly) return;
         let next = currentState.tournament;
         let applied = 0;
+        const appliedIds: string[] = [];
         for (const submission of submissions) {
           if (seenPublicActas.current.has(submission.id)) continue;
           const received = readActaCode(next, submission.code);
@@ -198,7 +199,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
             ...item, debates: item.debates.map((itemDebate) => itemDebate.id === debate.id
               ? { ...itemDebate, publicActaSubmissionId: submission.id } : itemDebate),
           }) };
-          seenPublicActas.current.add(submission.id);
+          appliedIds.push(submission.id);
           applied++;
         }
         if (applied && !cancelled) {
@@ -207,7 +208,10 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
             message: applied + ' acta(s) recibida(s) directamente desde el móvil y sincronizada(s) con Neon.',
             details: { source: 'public-acta-inbox', count: applied },
           });
-          if (ok) store.flush();
+          if (ok) {
+            store.flush();
+            appliedIds.forEach((id) => seenPublicActas.current.add(id));
+          }
         }
       } catch {
         // Network errors are retried on the next polling cycle; they do not affect local tabulation.
