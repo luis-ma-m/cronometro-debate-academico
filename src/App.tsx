@@ -1790,6 +1790,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
     {!snapshot ? <section className="timer-empty"><Monitor size={36} /><h1>Sala no disponible</h1><p>{error || 'La sala física no existe o aún no se ha configurado.'}</p><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Reintentar</button></section>
     : transitioning ? <section className="round-transition" aria-live="polite">
         <span className="eyebrow">RONDA ACTIVADA</span>
+        {snapshot.featuredMessage && <section className="featured-message-banner featured-message-banner-transition"><span className="featured-message-kicker">MENSAJE DE LA ORGANIZACIÓN</span><h2>{snapshot.featuredMessage.title}</h2><div className="featured-message-subtitles">{snapshot.featuredMessage.subtitles.map((item) => { const remaining = Math.max(0, Math.ceil((snapshot.featuredMessage!.publishedAt + item.durationSeconds * 1000 - (now + serverOffsetMs)) / 1000)); return <div className="featured-message-item" key={item.id}><span>{item.text}</span><b>{formatTime(remaining)}</b></div>; })}</div></section>}
         <div className="transition-orbit"><Monitor size={38} /></div>
         <h1>Nueva ronda activada</h1>
         <p className="transition-round-name">{snapshot.roundName}</p>
