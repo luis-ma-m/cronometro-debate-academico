@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Plus, Trash2, X } from 'lucide-react';
 import { penaltyConversionWarning } from '../results';
 import { LEDU_PHASES } from '../../timer';
 import type { Phase } from '../../domain';
@@ -90,7 +90,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
             <Field label="Equipo"><select value={phase.side} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, side: event.target.value as Phase['side'] } : item))}><option value="favor">A favor</option><option value="contra">En contra</option></select></Field>
             <Field label="Quién interviene"><input value={phase.speaker} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, speaker: event.target.value } : item))} /></Field>
             <NumberField label="Duración (segundos)" value={phase.durationSeconds} min={1} max={7200} onChange={(value) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, durationSeconds: Math.max(1, Math.round(value)) } : item))} />
-            <div className="field tab-warning-editor">
+            <div className="tab-warning-editor">
               <span className="field-label">Avisos del cronómetro</span>
               <p className="muted">Añade un aviso por cada momento en el que quieras alertar durante esta intervención.</p>
               <div className="tab-warning-list">
@@ -123,8 +123,8 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
                         ...item,
                         warningThresholdsSeconds: (item.warningThresholdsSeconds ?? []).filter((_, currentIndex) => currentIndex !== warningIndex),
                       } : item))}
-                    >×</button>
-                    <small>Al llegar a este tiempo, el cronómetro cambia a amarillo y, si el sonido está activado, reproduce un tono. Si ya se ha alcanzado otro aviso, también parpadea.</small>
+                    ><X size={14} /></button>
+                    <small>Cuando queden {threshold} segundos, el cronómetro cambia a amarillo y, si el sonido está activado, reproduce un tono. Al alcanzarse dos avisos o más, el cronómetro también parpadea.</small>
                   </div>
                 ))}
               </div>
@@ -133,9 +133,9 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
                 className="button ghost"
                 onClick={() => {
                   const current = phase.warningThresholdsSeconds ?? [];
-                  const candidates = [60, 30, 10, Math.floor(phase.durationSeconds / 2), Math.floor(phase.durationSeconds / 3), 5, 1]
-                    .map((value) => Math.max(1, Math.min(phase.durationSeconds, value)));
-                  const nextValue = candidates.find((value) => !current.includes(value)) ?? Math.max(1, Math.min(phase.durationSeconds, (current[current.length - 1] ?? 1) - 1));
+                  let nextValue = Math.max(1, Math.min(phase.durationSeconds, Math.floor(phase.durationSeconds / 2)));
+                  while (current.includes(nextValue) && nextValue > 1) nextValue -= 1;
+                  if (current.includes(nextValue)) return;
                   const values = [...current, nextValue].sort((a, b) => b - a);
                   set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, warningThresholdsSeconds: values } : item));
                 }}
