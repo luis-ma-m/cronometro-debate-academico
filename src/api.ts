@@ -134,3 +134,15 @@ export const publishTabulationSnapshot = (
   token: string,
   input: { tabTournamentId: string; expectedRevision: number; operationId: string; snapshot: import('./tabulation/types').TabTournament },
 ) => apiCall<TabulationPublicationResult>('publishTabulationSnapshot', { token, ...input });
+
+
+export type PublicActaSubmission = {
+  id: string; tournamentId: string; roundNumber: number; roundName: string;
+  debateRef: string; judgeName: string; code: string; createdAt: number;
+};
+export const submitPublicActa = (input: {
+  submissionId: string; tournamentId: string; roundNumber: number; roundName: string;
+  debateRef: string; judgeName: string; code: string;
+}) => apiCall<{ id: string; createdAt: number; duplicate: boolean }>('submitPublicActa', input);
+export const listPublicActas = (token: string, tournamentId: string) =>
+  apiCall<PublicActaSubmission[]>('listPublicActas', { token, tournamentId });
