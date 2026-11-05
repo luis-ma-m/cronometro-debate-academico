@@ -574,7 +574,7 @@ function DebateTable({ tournament, round, problems, look, outcomes, onEdit }: {
                 {judges.filter((judge) => !debate.judgeIds.includes(judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}{judgeNotes(judge, debate)}</option>)}
               </select>}
             </div>}</td>
-          {status && <td className="tab-no-print"><span className={'state-pill ' + status.className}>{notHeld ? 'Sin acta (caído)' : status.label}</span>{round.kind === 'qualifying' && <small className="tab-cell-sub">Enlace: {debate.actaLinkSentAt ? 'Enviada' : 'Por enviar'}</small>}{debate.publicActaSubmissionId && <small className="tab-cell-sub">Acta: Recibida online</small>}</td>}
+          {status && <td className="tab-no-print"><span className={'state-pill ' + status.className}>{notHeld ? 'Sin acta (caído)' : status.label}</span>{!notHeld && <small className="tab-cell-sub">Enlace: {debate.actaLinkSentAt ? 'Enviada' : 'Por enviar'}</small>}{debate.publicActaSubmissionId && <small className="tab-cell-sub">Acta: Recibida online</small>}</td>}
         </tr>,
         debateProblems.length > 0 && <tr key={debate.id + '-problems'} className="tab-problem-row tab-no-project tab-no-print"><td colSpan={outcomes ? 6 : 5}>
           <ul className="tab-problems">{debateProblems.map((problem) => <li key={problem.message} className={problem.severity}>{problem.message}</li>)}</ul>
