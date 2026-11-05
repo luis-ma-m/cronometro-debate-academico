@@ -1117,3 +1117,24 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
  .tab-warning-item small{grid-column:1/-1}
  .tab-warning-modal-footer .button{flex:1}
 }
+
+
+/* Keep timer phase controls aligned on one desktop row. */
+.tab-phase-fields{
+  grid-template-columns:minmax(145px,1fr) minmax(115px,.75fr) minmax(165px,1.15fr) minmax(145px,.9fr) minmax(175px,1.05fr) minmax(165px,1fr);
+  align-items:end;
+}
+.tab-phase-fields .tab-warning-summary{
+  grid-column:auto;
+  min-width:0;
+  min-height:40px;
+  box-sizing:border-box;
+  padding:5px 8px;
+  gap:8px;
+}
+.tab-phase-fields .tab-warning-summary>div{gap:6px;flex-wrap:wrap}
+.tab-phase-fields .tab-warning-summary .button{min-height:32px;padding:6px 8px;font-size:11px}
+.tab-phase-fields .tab-toggle{align-self:end;min-height:40px;margin:0;display:flex;align-items:center}
+@media(max-width:1250px){.tab-phase-fields{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.tab-phase-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.tab-phase-fields{grid-template-columns:minmax(0,1fr)}}
