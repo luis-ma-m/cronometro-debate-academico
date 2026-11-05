@@ -30,6 +30,101 @@ const VIEWS = [
 export type TabulationViewId = (typeof VIEWS)[number]['id'];
 type ViewId = TabulationViewId;
 
+type SnapshotDifference = { path: string; localValue: unknown; remoteValue: unknown };
+
+const SNAPSHOT_LABELS: Record<string, string> = {
+  name: 'Nombre', seed: 'Semilla del torneo', settings: 'Configuración',
+  teams: 'Equipos', speakers: 'Oradores', judges: 'Jueces', venues: 'Salas',
+  groups: 'Grupos', rounds: 'Rondas y debates', breakSeeds: 'Orden de clasificación',
+  manualOrder: 'Orden manual', panelLink: 'Vinculación con Gestión', whatsapp: 'Configuración de WhatsApp',
+  judgeConflicts: 'Incompatibilidades', draftRound: 'Borrador de ronda',
+  active: 'Activo', institution: 'Institución', rating: 'Experiencia',
+  canChair: 'Puede presidir', incompatibleJudgeIds: 'Jueces incompatibles',
+  unavailableRoundIds: 'Rondas no disponibles', unavailableRoundNumbers: 'Números de ronda no disponibles',
+  unavailableRoundNames: 'Rondas no disponibles por nombre', phone: 'Teléfono',
+  teamId: 'Equipo', teamIds: 'Equipos', judgeId: 'Juez', judgeIds: 'Jueces',
+  venueId: 'Sala', chairId: 'Juez principal', favorTeamId: 'Equipo a favor',
+  kind: 'Tipo', number: 'Número', sideMode: 'Reparto de posturas',
+  panelSize: 'Tamaño del panel', silent: 'Ronda cerrada', debates: 'Debates',
+  result: 'Acta / resultado', ballots: 'Actas de jueces', penalties: 'Penalizaciones',
+  winnerTeamId: 'Equipo ganador', totals: 'Puntuaciones', speeches: 'Notas de orador',
+  roles: 'Intervenciones', score: 'Puntuación', notes: 'Observaciones',
+  rubric: 'Rúbrica', timerPhases: 'Fases del cronómetro', ballotMode: 'Modalidad de acta',
+  stage: 'Sistema de competición', groupCount: 'Número de grupos', groupAdvance: 'Clasifican por grupo',
+  swissRounds: 'Rondas suizas', avoidSameInstitution: 'Evitar misma institución',
+  breakSize: 'Plazas de clasificación', qualifyingPanelSize: 'Jueces por debate (clasificatoria)',
+  eliminationPanelSize: 'Jueces por debate (eliminatorias)', speakerScores: 'Puntuar oradores',
+  tiebreaks: 'Criterios de desempate', conflictPolicy: 'Política de incompatibilidades',
+};
+
+function prettyDifferencePath(path: string): string {
+  const parts = path.replace(/^tournament\\./, '').split('.');
+  const root = parts[0] ?? path;
+  const label = SNAPSHOT_LABELS[root] ?? root;
+  const detail = parts.slice(1).map((part) => {
+    const match = part.match(/^(.+)\\[(.+)\\]$/);
+    if (match) {
+      const field = SNAPSHOT_LABELS[match[1]!] ?? match[1]!;
+      return field + ' «' + match[2] + '»';
+    }
+    return SNAPSHOT_LABELS[part] ?? part;
+  });
+  return detail.length ? label + ' → ' + detail.join(' → ') : label;
+}
+
+function displayDifferenceValue(value: unknown): string {
+  if (value === undefined) return 'No existe';
+  if (value === null) return 'Vacío';
+  if (typeof value === 'string') return value.length ? value : 'Vacío';
+  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '—';
+  try { return JSON.stringify(value, null, 2) ?? '—'; } catch { return String(value); }
+}
+
+/** Compares persisted tournament content while ignoring revision and timestamps used only for sync bookkeeping. */
+function findSnapshotDifferences(local: unknown, remote: unknown): SnapshotDifference[] {
+  const differences: SnapshotDifference[] = [];
+  const ignored = new Set(['revision', 'updatedAt', 'createdAt', 'logTail', 'logSeq']);
+  const stable = (value: unknown): string => {
+    if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+    if (value && typeof value === 'object') {
+      return '{' + Object.keys(value as Record<string, unknown>).sort().map((key) => JSON.stringify(key) + ':' + stable((value as Record<string, unknown>)[key])).join(',') + '}';
+    }
+    return JSON.stringify(value);
+  };
+  const visit = (left: unknown, right: unknown, path: string, depth: number) => {
+    if (stable(left) === stable(right)) return;
+    if (depth > 8) {
+      differences.push({ path, localValue: left, remoteValue: right });
+      return;
+    }
+    if (Array.isArray(left) || Array.isArray(right)) {
+      const a = Array.isArray(left) ? left : [];
+      const b = Array.isArray(right) ? right : [];
+      const keyed = [...a, ...b].every((item) => item && typeof item === 'object' && 'id' in item);
+      if (!keyed) {
+        differences.push({ path, localValue: left, remoteValue: right });
+        return;
+      }
+      const byId = (items: unknown[]) => new Map(items.map((item) => [String((item as { id: unknown }).id), item]));
+      const am = byId(a), bm = byId(b);
+      for (const id of [...new Set([...am.keys(), ...bm.keys()])].sort()) {
+        visit(am.get(id), bm.get(id), path + '[' + id + ']', depth + 1);
+      }
+      return;
+    }
+    if (left && typeof left === 'object' && right && typeof right === 'object') {
+      const a = left as Record<string, unknown>, b = right as Record<string, unknown>;
+      const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((key) => !ignored.has(key)).sort();
+      for (const key of keys) visit(a[key], b[key], path ? path + '.' + key : key, depth + 1);
+      return;
+    }
+    differences.push({ path, localValue: left, remoteValue: right });
+  };
+  visit(local, remote, '', 0);
+  return differences;
+}
+
 function readHashView(): ViewId {
   const id = window.location.hash.replace(/^#/, '').split('/')[0];
   return VIEWS.find((view) => view.id === id)?.id ?? 'inicio';
@@ -395,6 +490,20 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     return tournament.rounds.reduce((total, round) => total + round.debates.filter((debate) => !debate.teamIds.some((id) => isFallenAt(teams.get(id), round.number))
       && outcomes.get(debate.id)?.status !== 'complete').length, 0);
   }, [tournament, outcomes]);
+  const remoteDifferences = useMemo(
+    () => remoteConflict && tournament ? findSnapshotDifferences(tournament, remoteConflict.remote.snapshot) : [],
+    [remoteConflict, tournament],
+  );
+  const remoteDifferenceGroups = useMemo(() => {
+    const groups = new Map<string, SnapshotDifference[]>();
+    for (const difference of remoteDifferences) {
+      const root = difference.path.split(/[.[]/, 1)[0] ?? 'Otros datos';
+      const label = SNAPSHOT_LABELS[root] ?? root;
+      groups.set(label, [...(groups.get(label) ?? []), difference]);
+    }
+    return [...groups.entries()];
+  }, [remoteDifferences]);
+
   const badges: Partial<Record<ViewId, { text: string; kind: string; title: string }>> = {
     ...(tournament?.draftRound ? { rondas: { text: 'Borrador', kind: 'info', title: 'Hay un borrador de ronda pendiente de confirmar' } } : {}),
     ...(pendingActas ? { actas: { text: String(pendingActas), kind: 'warn', title: pendingActas + ' actas pendientes' } } : {}),
@@ -452,11 +561,33 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           <button type="button" className="button secondary" onClick={() => store.reloadFromStorage()}>Cargar la otra versión</button>
           <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Sobrescribir la versión guardada por la otra pestaña con la de esta pestaña?')) store.overwrite(); }}>Mantener esta versión</button>
         </div>}
-        {remoteSync === 'conflict' && remoteConflict && <div className="notice error-notice" role="alert">
-          <span>Hay dos versiones distintas del torneo. La copia local y la de Neon se conservan; elige cuál debe prevalecer antes de seguir sincronizando.</span>
-          <button type="button" className="button secondary" onClick={recoverRemoteVersion}>Recuperar Neon</button>
-          <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Publicar la copia de este dispositivo sobre la revisión remota? La copia remota actual quedará reemplazada, pero se conservará una copia local de seguridad.')) void publishLocalVersion(); }}>Publicar este dispositivo</button>
-        </div>}
+        {remoteSync === 'conflict' && remoteConflict && <section className="notice error-notice tab-remote-conflict" role="alert" aria-labelledby="tab-remote-conflict-title">
+          <div className="tab-remote-conflict-heading">
+            <div>
+              <strong id="tab-remote-conflict-title">Hay dos versiones distintas del torneo</strong>
+              <p>La copia local y la de Neon se conservan. Revisa los valores divergentes y elige cuál debe prevalecer antes de continuar la sincronización.</p>
+            </div>
+            <span className="tab-remote-conflict-count">{remoteDifferences.length} {remoteDifferences.length === 1 ? 'diferencia' : 'diferencias'}</span>
+          </div>
+          {remoteDifferences.length ? <div className="tab-remote-diff-groups">
+            {remoteDifferenceGroups.map(([group, items]) => <details className="tab-remote-diff-group" key={group} open>
+              <summary><b>{group}</b><span>{items.length} {items.length === 1 ? 'cambio' : 'cambios'}</span></summary>
+              <div className="tab-remote-diff-list">
+                {items.map((difference) => <article className="tab-remote-diff-item" key={difference.path}>
+                  <strong>{prettyDifferencePath(difference.path)}</strong>
+                  <div className="tab-remote-diff-values">
+                    <div><small>Este dispositivo</small><pre>{displayDifferenceValue(difference.localValue)}</pre></div>
+                    <div><small>Neon</small><pre>{displayDifferenceValue(difference.remoteValue)}</pre></div>
+                  </div>
+                </article>)}
+              </div>
+            </details>)}
+          </div> : <p className="tab-remote-diff-empty">El contenido funcional coincide. La discrepancia detectada se limita a metadatos de sincronización o a una revisión concurrente.</p>}
+          <div className="tab-remote-conflict-actions">
+            <button type="button" className="button secondary" onClick={recoverRemoteVersion}>Recuperar Neon</button>
+            <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Publicar la copia de este dispositivo sobre la revisión remota? La copia remota actual quedará reemplazada, pero se conservará una copia local de seguridad.')) void publishLocalVersion(); }}>Publicar este dispositivo</button>
+          </div>
+        </section>}
         {remoteSync === 'error' && <Notice kind="error">No se ha podido confirmar el guardado en Neon. La copia local sigue disponible; revisa la conexión y vuelve a intentarlo.</Notice>}
         {remoteSync === 'offline' && apiConfigured && <Notice kind="warning">Sin conexión con Neon. Los cambios permanecen en el almacenamiento local y se intentarán sincronizar al recuperar la conexión.</Notice>}
         {state.error && <Notice kind="error">{state.error}{state.status === 'error' && <> <button type="button" className="button secondary tab-retry" onClick={() => {
