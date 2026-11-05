@@ -7,7 +7,7 @@ import { ADUMA_RUBRIC, presetSettings } from './presets';
 import { SPEAKER_ROLES, type SpeakerRole, type TabJointActa, type TabPenalties, type TabSettings, type TabSpeaker } from './types';
 import { copyText, formatNumber, parseDecimal } from './ui';
 import { actaCodeMessage, decodeActaLink, encodeActaCode, whatsAppUrl, type ActaEntry, type ActaLink } from './whatsapp';
-import { apiConfigured, submitPublicActa } from '../api';
+import { apiConfigured, getPublicActaStatus, submitPublicActa } from '../api';
 
 interface PhoneDraft {
   favor: string;
@@ -102,6 +102,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
   const [draft, setDraft] = useState<PhoneDraft>(() => loadDraft(link));
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   useEffect(() => {
     try {
       window.localStorage.setItem(draftKey(link), JSON.stringify(draft));
@@ -109,6 +110,21 @@ function JudgeActa({ link }: { link: ActaLink }) {
   }, [draft, link]);
   useEffect(() => {
     document.title = 'Acta · ' + link.round.name + (link.venue ? ' · ' + link.venue : '');
+  }, [link]);
+  // The submission state is authoritative on the server, not in localStorage: reopening the public link
+  // on another device must not allow a second acta to be created for the same debate.
+  useEffect(() => {
+    if (!apiConfigured || !link.tournamentId) return;
+    let active = true;
+    const refreshStatus = async () => {
+      try {
+        const status = await getPublicActaStatus(link.tournamentId!, link.debate);
+        if (active && status.submitted) setSubmitted(true);
+      } catch { /* If status cannot be checked, keep the form available; sending still enforces uniqueness. */ }
+    };
+    void refreshStatus();
+    const interval = window.setInterval(() => void refreshStatus(), 5000);
+    return () => { active = false; window.clearInterval(interval); };
   }, [link]);
 
   const elimination = link.round.elimination;
@@ -145,6 +161,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
       await submitPublicActa({ submissionId, tournamentId: link.tournamentId, roundNumber: link.round.number,
         roundName: link.round.name, debateRef: link.debate, judgeName, code });
       setDraft((current) => ({ ...current, sentAt }));
+      setSubmitted(true);
       setSending(false);
     } catch {
       setSending(false);
@@ -181,6 +198,22 @@ function JudgeActa({ link }: { link: ActaLink }) {
   const stepsDone = steps.filter(Boolean).length;
   let stepNumber = 0;
   const step = (done: boolean) => <Step number={++stepNumber} done={done} />;
+
+  if (submitted) {
+    return <main className="acta-shell">
+      <header className="acta-header">
+        <p className="eyebrow">{link.tournament || 'Acta del jurado'}</p>
+        <h1>{link.round.name}{link.venue ? ' · ' + link.venue : ''}</h1>
+        <p className="acta-teams">{link.teams[0].name} <span>frente a</span> {link.teams[1].name}</p>
+      </header>
+      <section className="acta-card acta-sent" role="status">
+        <CircleCheck size={30} />
+        <h2>El acta ya ha sido enviada a tabulación</h2>
+        <p>Este enlace ya no permite cumplimentar ni enviar otra acta para este debate.</p>
+        <p>Si detectas algún error en el acta enviada, ponte en contacto con la mesa de tabulación.</p>
+      </section>
+    </main>;
+  }
 
   return <main className="acta-shell">
     <header className="acta-header">
