@@ -237,6 +237,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
     {!elimination && <section className="acta-card">
       <h2>{step(itemsDone)}Hoja de ítems ({formatNumber(settings.itemMin)}–{formatNumber(settings.itemMax)})</h2>
       <label className="acta-option"><input type="checkbox" checked={draft.quick} onChange={(event) => edit((current) => ({ ...current, quick: event.target.checked }))} />Solo los totales (sin el detalle de ítems)</label>
+      {draft.quick && <p className="muted">Introduce los ítems totales de cada equipo sin descontar las faltas; estas se registran aparte.</p>}
       {draft.quick ? <div className="acta-pairs">{ordered.map((team) => <label key={team.id}><span>Total de {team.name}</span>
         <input inputMode="decimal" value={draft.quickTotals[team.id] ?? ''} onChange={(event) => edit((current) => ({ ...current, quickTotals: { ...current.quickTotals, [team.id]: event.target.value } }))} /></label>)}</div>
         : <div className="acta-items">
@@ -268,7 +269,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
               <input inputMode="numeric" aria-label={(field === 'warnings' ? 'Avisos' : field === 'minors' ? 'Faltas leves' : 'Faltas graves') + ' de ' + team.name} value={penalty[field]} onChange={(event) => set(field, event.target.value)} placeholder="0" /></label>)}
           </div>
           <small className="muted">Cuentan como {effective.minors} leve(s) y {effective.majors} grave(s){effective.deduction ? ': −' + formatNumber(effective.deduction) + ' ítems' : ''}. Neto: <b>{formatNumber(check.totals[team.id]?.net ?? null)}</b></small>
-          <label className="acta-inline"><span>Total de items escritos en el acta en papel</span><input inputMode="decimal" value={draft.writtenTotals[team.id] ?? ''} onChange={(event) => edit((current) => ({ ...current, writtenTotals: { ...current.writtenTotals, [team.id]: event.target.value } }))} /></label>
+          <label className="acta-inline"><span>Total de items después del descuento por faltas</span><input inputMode="decimal" value={draft.writtenTotals[team.id] ?? ''} onChange={(event) => edit((current) => ({ ...current, writtenTotals: { ...current.writtenTotals, [team.id]: event.target.value } }))} /></label>
         </div>;
       })}
     </section>}
