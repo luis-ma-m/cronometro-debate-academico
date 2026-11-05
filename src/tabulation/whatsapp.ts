@@ -43,8 +43,10 @@ export type ActaRules = Pick<TabSettings,
 export interface ActaLink {
   /** 1: first format, with ids; 2: compact, with teams and members by position. */
   version: 1 | 2;
-  /** Empty in compact links. */
+  /** Empty in legacy compact links. */
   tournament: string;
+  /** Tournament id added to new compact links for direct acta delivery. */
+  tournamentId?: string;
   round: { number: number; name: string; elimination: boolean };
   /** The debate id (first format) or a short reference to it (compact). It also names the phone's draft. */
   debate: string;
@@ -186,6 +188,11 @@ function debateRef(tournament: Pick<TabTournament, 'id'>, debateId: string): str
   return cyrb53('ref|' + tournament.id + '|' + debateId).slice(0, 8);
 }
 
+/** Public reference carried by a compact judge link; it is not an authentication credential. */
+export function actaDebateRef(tournament: Pick<TabTournament, 'id'>, debateId: string): string {
+  return debateRef(tournament, debateId);
+}
+
 export function actaRules(settings: TabSettings): ActaRules {
   const { rubric, itemMin, itemMax, speakerScores, speakerScoreMin, speakerScoreMax, speakerScoreStep, warningConversion, minorEscalation, minorPoints, minorsPerMajor, majorMode, majorPoints } = settings;
   // Descriptions stay out of the link to keep it short; the judges' page shows them by item id.
@@ -233,6 +240,7 @@ export function buildActaLink(tournament: TabTournament, round: TabRound, debate
     jury.map((id) => judges.get(id!) ?? 'Juez'),
     whatsAppNumber(tournament.whatsapp?.deskPhone ?? ''),
     rulesDiff(actaRules(tournament.settings)),
+    tournament.id,
   ];
   const data = pack(compact, base62Encode);
   // Keep the fragment alphanumeric and contiguous: WhatsApp iOS otherwise stops auto-linking at the first hyphen.
@@ -247,7 +255,7 @@ const isNumber = (value: unknown): value is number => typeof value === 'number' 
 /** The judges' page view of a compact link: teams A and B, members A0, A1… in the order of the desk. */
 function linkFromCompact(value: unknown): ActaLink | null {
   if (!Array.isArray(value) || value.length < 10) return null;
-  const [number, elimination, name, ref, key, venue, teams, jury, desk, rules] = value as unknown[];
+  const [number, elimination, name, ref, key, venue, teams, jury, desk, rules, tournamentId] = value as unknown[];
   if (!Number.isInteger(number) || (elimination !== 0 && elimination !== 1) || !isText(name) || !isText(ref) || !isText(key) || !isText(venue) || !isText(desk)) return null;
   if (!Array.isArray(jury) || !jury.every(isText)) return null;
   if (!Array.isArray(teams) || teams.length !== 2) return null;
@@ -255,6 +263,7 @@ function linkFromCompact(value: unknown): ActaLink | null {
   return {
     version: 2,
     tournament: '',
+    tournamentId: isText(tournamentId) ? tournamentId : '',
     round: { number: number as number, name: name || 'Ronda ' + number, elimination: elimination === 1 },
     debate: ref,
     key,

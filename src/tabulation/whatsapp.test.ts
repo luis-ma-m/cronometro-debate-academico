@@ -6,7 +6,7 @@ import { actaV1Tournament, debate, makeTournament, qualifyingRound, result } fro
 import type { TabTournament } from './types';
 import { confirmDraft, createRoundDraft } from './draft';
 import {
-  actaCodeMessage, actaLinkMessage, actaRules, applyReceivedActa, base32Decode, base32Encode, base62Decode, base62Encode, buildActaLink, decodeActaLink,
+  actaCodeMessage, actaDebateRef, actaLinkMessage, actaRules, applyReceivedActa, base32Decode, base32Encode, base62Decode, base62Encode, buildActaLink, decodeActaLink,
   encodeActaCode, findActaCodes, readActaCode, receivedIsRegistered, whatsAppNumber, whatsAppUrl, type ActaEntry, type ActaLink,
 } from './whatsapp';
 
@@ -103,6 +103,8 @@ describe('acta link for the judge', () => {
     expect(fragment).not.toContain('-');
     const decoded = decodeActaLink(fragment);
     expect(decoded).toEqual(link);
+    expect(decoded.tournamentId).toBe(tournament.id);
+    expect(actaDebateRef(tournament, 'd1')).toBe(decoded.debate);
 
     // Previously sent A2 links used separators. They must remain valid after
     // switching newly generated links to the WhatsApp-safe contiguous format.

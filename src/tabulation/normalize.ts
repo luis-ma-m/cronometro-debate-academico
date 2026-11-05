@@ -194,6 +194,7 @@ function normalizeRound(round: Json, references: References): { round: TabRound;
       chairId: text(debate.chairId),
       ...(typeof debate.bracketSlot === 'number' ? { bracketSlot: debate.bracketSlot } : {}),
       ...(typeof debate.actaLinkSentAt === 'number' && Number.isFinite(debate.actaLinkSentAt) ? { actaLinkSentAt: debate.actaLinkSentAt } : {}),
+      ...(typeof debate.publicActaSubmissionId === 'string' && debate.publicActaSubmissionId ? { publicActaSubmissionId: debate.publicActaSubmissionId.slice(0, 80) } : {}),
       ...(result ? { result } : {}),
     };
   }));
