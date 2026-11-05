@@ -6,7 +6,8 @@ import { effectivePenalties } from './penalties';
 import { ADUMA_RUBRIC, presetSettings } from './presets';
 import { SPEAKER_ROLES, type SpeakerRole, type TabJointActa, type TabPenalties, type TabSettings, type TabSpeaker } from './types';
 import { copyText, formatNumber, parseDecimal } from './ui';
-import { actaCodeMessage, decodeActaLink, whatsAppUrl, type ActaEntry, type ActaLink } from './whatsapp';
+import { actaCodeMessage, decodeActaLink, encodeActaCode, whatsAppUrl, type ActaEntry, type ActaLink } from './whatsapp';
+import { apiConfigured, submitPublicActa } from '../api';
 
 interface PhoneDraft {
   favor: string;
@@ -100,6 +101,7 @@ export default function JudgeActaApp() {
 function JudgeActa({ link }: { link: ActaLink }) {
   const [draft, setDraft] = useState<PhoneDraft>(() => loadDraft(link));
   const [copied, setCopied] = useState(false);
+  const [sending, setSending] = useState(false);
   useEffect(() => {
     try {
       window.localStorage.setItem(draftKey(link), JSON.stringify(draft));
@@ -129,6 +131,25 @@ function JudgeActa({ link }: { link: ActaLink }) {
   const ready = !check.issues.length && !check.missing.length;
   const summary = !entry.winner ? '' : 'gana ' + teamName(entry.winner) + (elimination ? '' : ' (' + link.teams.map((team) => formatNumber(check.totals[team.id]?.net ?? null)).join(' – ') + ' ítems netos)');
   const message = actaCodeMessage(link, entry, summary);
+  const sendActa = async () => {
+    if (sending || !ready) return;
+    setSending(true);
+    const sentAt = Date.now();
+    const signedEntry = { ...entry, sentAt };
+    const code = encodeActaCode(link, signedEntry);
+    try {
+      if (!apiConfigured || !link.tournamentId) throw new Error('El enlace no admite envío directo.');
+      const submissionId = globalThis.crypto?.randomUUID?.() ?? ('acta_' + sentAt + '_' + Math.random().toString(36).slice(2, 12));
+      await submitPublicActa({ submissionId, tournamentId: link.tournamentId, roundNumber: link.round.number,
+        roundName: link.round.name, debateRef: link.debate, judgeName: draft.signedBy.trim() || link.jury[0] || 'Juez principal', code });
+      setDraft((current) => ({ ...current, sentAt }));
+      setSending(false);
+    } catch {
+      setSending(false);
+      setDraft((current) => ({ ...current, sentAt: null }));
+      window.location.assign(whatsAppUrl(link.desk, actaCodeMessage(link, signedEntry, summary)));
+    }
+  };
   const sections = [...new Set(link.rules.rubric.map((item) => item.section))];
 
   /** Enter moves down the column of items, as on the paper. */
@@ -267,12 +288,11 @@ function JudgeActa({ link }: { link: ActaLink }) {
       {check.missing.length > 0 && <ul className="tab-problems">{check.missing.map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
       {ready && check.warnings.length > 0 && <ul className="tab-problems">{compactActaWarnings(check.warnings).map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
       {draft.sentAt && <p className="acta-sent"><CircleCheck size={16} /> Enviada a las {new Date(draft.sentAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}. Si cambias algo, vuelve a enviarla.</p>}
-      {ready
-        ? <a className="button primary acta-send-button" href={whatsAppUrl(link.desk, message)} target="_blank" rel="noreferrer"
-          onClick={() => setDraft((current) => ({ ...current, sentAt: Date.now() }))}><Send size={18} /> Enviar por WhatsApp</a>
-        : <button type="button" className="button primary acta-send-button" disabled><Send size={18} /> Enviar por WhatsApp</button>}
+      <button type="button" className="button primary acta-send-button" disabled={!ready || sending} onClick={() => void sendActa()}>
+        {sending ? <><span className="acta-loading-spinner" aria-hidden="true" /> Guardando acta…</> : <><Send size={18} /> Enviar acta</>}
+      </button>
       {ready && <button type="button" className="text-button" onClick={() => void copyText(message).then((ok) => setCopied(ok))}><Copy size={14} /> {copied ? 'Mensaje copiado: pégalo en el chat de la mesa' : 'Copiar el mensaje'}</button>}
-      <p className="muted">El acta se guarda en este móvil hasta que la envíes. El papel firmado sigue siendo el acta oficial.</p>
+      <p className="muted">El acta se guarda en el servidor para que aparezca en Tabulación. Si no se puede confirmar el guardado, se abrirá WhatsApp para enviarla a la mesa. El papel firmado sigue siendo el acta oficial.</p>
     </section>
   </main>;
 }
