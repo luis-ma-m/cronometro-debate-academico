@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Room, Tournament } from "../src/domain.js";
+import type { FeaturedMessage, Room, Tournament } from "../src/domain.js";
 import {
   ApiError,
   defaultPhases,
@@ -53,6 +53,25 @@ function makeTournament(): Tournament {
 }
 
 describe("Vercel API core", () => {
+
+  it("only exposes a featured message to its selected physical rooms", () => {
+    const tournament = makeTournament();
+    const message: FeaturedMessage = {
+      id: "notice-1", title: "Pausa general", publishedAt: 1_800_000_000_000,
+      targetPhysicalRoomIds: ["physical-a1"],
+      subtitles: [
+        { id: "s1", text: "Volvemos pronto", durationSeconds: 300 },
+        { id: "s2", text: "Entrega de actas", durationSeconds: 120 },
+      ],
+    };
+    tournament.featuredMessage = message;
+    expect(publicRoomPayload(tournament, "sala-a1").featuredMessage).toEqual(message);
+    tournament.physicalRooms.push({ id: "physical-a2", slug: "sala-a2", name: "Sala A2", active: true, createdAt: 1, updatedAt: 1 });
+    expect(publicRoomPayload(tournament, "sala-a2").featuredMessage).toBeUndefined();
+    tournament.featuredMessage = { ...message, targetPhysicalRoomIds: [] };
+    expect(publicRoomPayload(tournament, "sala-a2").featuredMessage).toEqual(tournament.featuredMessage);
+  });
+
   it("accepts negative warning thresholds for overtime alerts", () => {
     const tournament = makeTournament();
     tournament.formats[0].phases[0].warningThresholdsSeconds = [30, 10, -10];

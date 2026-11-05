@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
+import type { FeaturedMessage, FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured } from "./db.js";
 import { getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from "./tabulation-snapshots.js";
 import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
@@ -188,11 +188,36 @@ function tournamentFromData(data: SheetData): Tournament {
     institutions,
     formatPhases: parseJson<Phase[]>(configValue(config, "formatPhases"), defaultPhases()),
     minimumJudgesPerRoom: minimumJudges,
+    featuredMessage: parseJson<FeaturedMessage | undefined>(configValue(config, "featuredMessage"), undefined),
     revision: num(configValue(config, "revision")) || 1,
     updatedAt: num(configValue(config, "updatedAt")) || Date.now(),
     serverTime: Date.now(),
   };
 }
+function validateFeaturedMessage(message: Tournament["featuredMessage"], physicalRooms: PhysicalRoom[]): void {
+  if (!message) return;
+  if (typeof message.id !== "string" || !message.id.trim() || typeof message.title !== "string" || !message.title.trim() || message.title.length > 120) {
+    throw new ApiError("INVALID_FEATURED_MESSAGE", "El mensaje destacado necesita un título válido de hasta 120 caracteres.");
+  }
+  if (!Array.isArray(message.subtitles) || message.subtitles.length > 2) {
+    throw new ApiError("INVALID_FEATURED_MESSAGE", "El mensaje destacado puede contener como máximo dos subtítulos.");
+  }
+  const subtitleIds = new Set<string>();
+  for (const item of message.subtitles) {
+    if (!item || typeof item.id !== "string" || !item.id.trim() || subtitleIds.has(item.id) ||
+      typeof item.text !== "string" || !item.text.trim() || item.text.length > 180 ||
+      (item.durationSeconds !== undefined && (!Number.isInteger(item.durationSeconds) || item.durationSeconds < 1 || item.durationSeconds > 86400))) {
+      throw new ApiError("INVALID_FEATURED_MESSAGE", "Cada subtítulo debe tener un identificador único, texto y, si se configura, un contador entre 1 segundo y 24 horas.");
+    }
+    subtitleIds.add(item.id);
+  }
+  if (!Array.isArray(message.targetPhysicalRoomIds) ||
+      message.targetPhysicalRoomIds.some((id) => typeof id !== "string" || !physicalRooms.some((room) => room.id === id && room.active)) ||
+      !Number.isFinite(message.publishedAt) || message.publishedAt <= 0) {
+    throw new ApiError("INVALID_FEATURED_MESSAGE", "Las salas destinatarias o la fecha de publicación del mensaje no son válidas.");
+  }
+}
+
 function rowObjectForRoom(room: Room, minimumJudges: number, timestamp: number): SheetRow {
   return {
     id: room.id,
@@ -400,6 +425,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     }
     validateTournamentInput(payload.tournament);
     const tournament = payload.tournament as Tournament;
+    validateFeaturedMessage(tournament.featuredMessage, tournament.physicalRooms);
     const phases = Array.isArray(tournament.formatPhases) && tournament.formatPhases.length
       ? tournament.formatPhases
       : tournament.formats[0]?.phases || defaultPhases();
@@ -412,6 +438,9 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     const oldRoomRows = data.rows.Salas;
     const persistedTimers = timerRowMap(data.rows.Cronometros);
     const now = Date.now();
+    if (tournament.featuredMessage && tournament.featuredMessage.id !== current.featuredMessage?.id) {
+      tournament.featuredMessage = { ...tournament.featuredMessage, publishedAt: now };
+    }
     const finalRooms: Room[] = tournament.rooms.map((room) => {
       const round = tournament.rounds.find((item) => item.id === room.roundId);
       const selectedFormatId = room.formatId || round?.defaultFormatId || "";
@@ -445,6 +474,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
       tournament.rounds.map((round) => [round.id, round.scoreType ?? current.rounds.find((item) => item.id === round.id)?.scoreType ?? "qualifying"]),
     )));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
+    setConfig(configRows, "featuredMessage", JSON.stringify(tournament.featuredMessage ?? null));
     setConfig(configRows, "schemaVersion", "3");
     // Only activateRound may change the globally active round or activation revision.
     setConfig(configRows, "activeRoundId", current.activeRoundId || "");
