@@ -1032,3 +1032,14 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
  .overview-projection .overview-room-grid .room-row{min-height:88px}
  .overview-room-actions{gap:6px}
 }
+
+
+/* Mensajes destacados enviados desde Gestión a las pantallas de sala. */
+.featured-message-banner{margin:16px 0;padding:clamp(18px,3vw,30px);border-radius:18px;color:#fff;background:radial-gradient(circle at 85% 0,#365b9a 0,#1c3158 42%,#101c34 100%);box-shadow:0 14px 36px #14233b20;text-align:center}
+.featured-message-kicker{font-size:10px;letter-spacing:.2em;font-weight:800;color:#c5d5fa}
+.featured-message-banner h2{font-size:clamp(25px,4vw,44px);line-height:1.08;letter-spacing:-.035em;margin:10px 0 20px}
+.featured-message-subtitles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-width:1000px;margin:0 auto}
+.featured-message-item{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:16px 18px;border:1px solid #ffffff30;border-radius:12px;background:#ffffff12;text-align:left}
+.featured-message-item span{font-size:clamp(13px,1.5vw,18px);font-weight:650;line-height:1.35}
+.featured-message-item b{font-size:clamp(24px,3vw,36px);font-variant-numeric:tabular-nums;white-space:nowrap}
+@media(max-width:760px){.featured-message-subtitles{grid-template-columns:1fr}.featured-message-item{padding:13px 14px}.page-heading .top-actions{width:100%;flex-wrap:wrap}}
