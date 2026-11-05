@@ -249,6 +249,7 @@ export function JointBallotsView({ tournament, outcomes, update, notify }: ViewP
             {!elimination && <fieldset className="tab-fieldset">
               <legend>{section()}Hoja de ítems ({formatNumber(settings.itemMin)}–{formatNumber(settings.itemMax)} por ítem)</legend>
               <label className="check-item"><input type="checkbox" checked={draft.quick} onChange={(event) => edit((current) => ({ ...current, quick: event.target.checked }))} />Modo rápido: solo ganador y totales (el detalle de ítems se completa después)</label>
+              {draft.quick && <p className="muted">Introduce los ítems totales de cada equipo sin descontar las faltas; estas se registran aparte.</p>}
               {!draft.quick ? <div className="tournament-table-wrap">
                 <table className="tab-ballot-table tab-items-table">
                   <thead><tr><th>Ítem</th>{ordered.map((teamId) => <th key={teamId}>{sideLabel(teamId) && <small>{sideLabel(teamId)}</small>}{look.teamName(teamId)}</th>)}</tr></thead>
@@ -284,7 +285,7 @@ export function JointBallotsView({ tournament, outcomes, update, notify }: ViewP
                   </div>
                   <small className="muted">Cuentan como {effective.minors} leve(s) y {effective.majors} grave(s){effective.deduction ? ': −' + formatNumber(effective.deduction) + ' ítems' : ''}.</small>
                   <p className="tab-net">Ítems: {formatNumber(total?.gross ?? null)} · faltas −{formatNumber(total?.deduction ?? 0)} · <b>neto {formatNumber(total?.net ?? null)}</b></p>
-                  <label className="tab-field compact"><span>Total de items escritos en el acta en papel</span><input inputMode="decimal" value={draft.writtenTotals[teamId] ?? ''} onChange={(event) => edit((current) => ({ ...current, writtenTotals: { ...current.writtenTotals, [teamId]: event.target.value } }))} /></label>
+                  <label className="tab-field compact"><span>Total de items después del descuento por faltas</span><input inputMode="decimal" value={draft.writtenTotals[teamId] ?? ''} onChange={(event) => edit((current) => ({ ...current, writtenTotals: { ...current.writtenTotals, [teamId]: event.target.value } }))} /></label>
                 </div>;
               })}</div>
             </fieldset>}
