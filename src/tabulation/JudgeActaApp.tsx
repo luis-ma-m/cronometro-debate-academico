@@ -229,10 +229,20 @@ function JudgeActa({ link }: { link: ActaLink }) {
         {team.members.map((member) => {
           const row = draft.speakers[team.id]?.[member.id] ?? { score: '', roles: [] };
           const set = (patch: Partial<typeof row>) => edit((current) => ({ ...current, speakers: { ...current.speakers, [team.id]: { ...current.speakers[team.id], [member.id]: { ...row, ...patch } } } }));
+          const setRole = (role: SpeakerRole, checked: boolean) => edit((current) => {
+            const teamRows = current.speakers[team.id] ?? {};
+            const selected = teamRows[member.id] ?? row;
+            return { ...current, speakers: { ...current.speakers, [team.id]: {
+              ...Object.fromEntries(Object.entries(teamRows).map(([id, speaker]) => [id, id === member.id
+                ? { ...speaker, roles: checked ? [...speaker.roles.filter((item) => item !== role), role] : speaker.roles.filter((item) => item !== role) }
+                : checked ? { ...speaker, roles: speaker.roles.filter((item) => item !== role) } : speaker])),
+              ...(!teamRows[member.id] ? { [member.id]: { ...selected, roles: checked ? [...selected.roles.filter((item) => item !== role), role] : selected.roles.filter((item) => item !== role) } } : {}),
+            } } };
+          });
           return <div key={member.id} className="acta-speaker">
             <label className="acta-inline"><span>{member.name}</span><input inputMode="decimal" aria-label={'Nota de ' + member.name} value={row.score} onChange={(event) => set({ score: event.target.value })} /></label>
             <div className="acta-roles">{SPEAKER_ROLES.map((role) => <label key={role}><input type="checkbox" checked={row.roles.includes(role)} aria-label={ROLE_LABELS[role] + ': ' + member.name}
-              onChange={(event) => set({ roles: event.target.checked ? [...row.roles, role] : row.roles.filter((item) => item !== role) })} />{ROLE_LABELS[role]}</label>)}</div>
+              onChange={(event) => setRole(role, event.target.checked)} />{ROLE_LABELS[role]}</label>)}</div>
           </div>;
         })}
       </div>)}
