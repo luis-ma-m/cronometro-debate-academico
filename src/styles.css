@@ -542,7 +542,7 @@ details[open]::details-content{block-size:auto;opacity:1;}
 .tab-ballot-list{padding:14px}
 .tab-ballot-list ul{list-style:none;margin:0;padding:0;display:grid;gap:5px}
 .tab-ballot-list button{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid #e7ebf1;background:#fff;border-radius:8px;padding:9px;text-align:left}
-.tab-ballot-list button span:first-child{display:grid;gap:2px;font-size:12px;min-width:0}
+.tab-ballot-list button > span:first-child{display:grid;gap:2px;font-size:12px;min-width:0}
 .tab-ballot-list button small{color:#8a95a7;font-size:10px;overflow:hidden;text-overflow:ellipsis}
 .tab-ballot-list button.selected{border-color:#177e6b;box-shadow:inset 3px 0 #177e6b}
 .tab-fieldset{border:1px solid #e7ebf1;border-radius:10px;padding:12px 14px;margin:0 0 14px;min-width:0}
@@ -716,7 +716,7 @@ input.tab-input-warning{border-color:#d49b36!important;background:#fffaf0!import
 .acta-send{padding:4px 0 12px;display:grid;gap:8px}
 .acta-send-button{font-size:16px;padding:15px;text-decoration:none;background:#1f9d55!important}
 .acta-send-button:disabled{opacity:.45}
-.acta-sent{display:flex;align-items:center;gap:6px;color:#16805f;font-size:13px;margin:0}
+.acta-sent{display:grid;justify-items:center;gap:10px;text-align:center;color:#16805f;font-size:13px;margin:0}
 .acta-error{text-align:center;display:grid;justify-items:center;gap:8px;margin-top:40px;color:#a33a30}
 /* Round tables fit a 1366 px laptop: narrower selects, judge names truncated with an ellipsis. */
 .tab-draw td{padding:10px 6px}
@@ -1141,3 +1141,9 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 
 @keyframes acta-loading-spin{to{transform:rotate(360deg)}}
 .acta-loading-spinner{display:inline-block;width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:acta-loading-spin .7s linear infinite;vertical-align:middle}
+
+/* Acta list metadata stays vertical; the status background wraps only its own label. */
+.tab-ballot-list .acta-list-meta{display:grid;justify-items:start;align-content:center;gap:4px;min-width:0}
+.tab-ballot-list .acta-list-meta>.state-pill{display:inline-flex;width:max-content;max-width:100%;justify-self:start}
+.tab-ballot-list .acta-list-meta>.tab-cell-sub{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.tab-ballot-list .acta-list-meta>.acta-signature-issue{color:#b42318!important;font-weight:750}
