@@ -290,7 +290,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
       {check.missing.length > 0 && <ul className="tab-problems">{check.missing.map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
       {missingSpeakerRoles.length > 0 && <ul className="tab-problems">{missingSpeakerRoles.map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
       {ready && check.warnings.length > 0 && <ul className="tab-problems">{compactActaWarnings(check.warnings).map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
-      {draft.sentAt && <p className="acta-sent"><CircleCheck size={16} /> Enviada a las {new Date(draft.sentAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}. Si cambias algo, vuelve a enviarla.</p>}
+      {draft.sentAt && <p className="acta-sent"><CircleCheck size={16} /> Enviada a las {new Date(draft.sentAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}. Si necesitas corregirla, contacta con la mesa.</p>}
       <button type="button" className="button primary acta-send-button" disabled={!ready || sending} onClick={() => void sendActa()}>
         {sending ? <><span className="acta-loading-spinner" aria-hidden="true" /> Guardando acta…</> : <><Send size={18} /> Enviar acta</>}
       </button>
