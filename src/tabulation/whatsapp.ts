@@ -188,6 +188,11 @@ function debateRef(tournament: Pick<TabTournament, 'id'>, debateId: string): str
   return cyrb53('ref|' + tournament.id + '|' + debateId).slice(0, 8);
 }
 
+/** Public reference carried by a compact judge link; it is not an authentication credential. */
+export function actaDebateRef(tournament: Pick<TabTournament, 'id'>, debateId: string): string {
+  return debateRef(tournament, debateId);
+}
+
 export function actaRules(settings: TabSettings): ActaRules {
   const { rubric, itemMin, itemMax, speakerScores, speakerScoreMin, speakerScoreMax, speakerScoreStep, warningConversion, minorEscalation, minorPoints, minorsPerMajor, majorMode, majorPoints } = settings;
   // Descriptions stay out of the link to keep it short; the judges' page shows them by item id.
