@@ -164,7 +164,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   // Public judge submissions are immutable inbox records. Only the authenticated tabulation session
   // can read them; each valid code is checked against the current debate before being applied.
   useEffect(() => {
-    if (!apiConfigured || !remoteToken || !tournament || state.readOnly) return;
+    if (!apiConfigured || !remoteToken || !tournament || state.readOnly || remoteSync !== 'synced') return;
     let cancelled = false;
     const receive = async () => {
       try {
@@ -223,7 +223,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     window.addEventListener('focus', receive);
     window.addEventListener('online', receive);
     return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('focus', receive); window.removeEventListener('online', receive); };
-  }, [apiConfigured, remoteToken, tournament?.id, state.readOnly, store]);
+  }, [apiConfigured, remoteToken, tournament?.id, state.readOnly, remoteSync, store]);
 
   useEffect(() => {
     if (!apiConfigured || !remoteToken || !tournament || remoteSync === 'conflict') return;
