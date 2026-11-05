@@ -94,6 +94,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
               <span className="field-label">Avisos del cronómetro</span>
               <p className="muted">Añade un aviso por cada momento en el que quieras alertar durante esta intervención.</p>
               <div className="tab-warning-list">
+                {(phase.warningThresholdsSeconds ?? []).length === 0 && <p className="muted">No hay avisos configurados: el cronómetro no cambiará a amarillo ni emitirá tonos antes de terminar esta intervención.</p>}
                 {(phase.warningThresholdsSeconds ?? []).map((threshold, warningIndex) => (
                   <div className="tab-warning-item" key={phase.id + '-warning-' + warningIndex}>
                     <label>
@@ -107,6 +108,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
                         onChange={(event) => {
                           const nextValue = Number(event.target.value);
                           if (!event.target.value || !Number.isFinite(nextValue)) return;
+                          if ((phase.warningThresholdsSeconds ?? []).some((value, currentIndex) => currentIndex !== warningIndex && value === nextValue)) return;
                           const values = [...(phase.warningThresholdsSeconds ?? [])];
                           values[warningIndex] = Math.max(1, Math.min(phase.durationSeconds, Math.round(nextValue)));
                           values.sort((a, b) => b - a);
@@ -131,6 +133,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
               <button
                 type="button"
                 className="button ghost"
+                disabled={(phase.warningThresholdsSeconds ?? []).length >= phase.durationSeconds}
                 onClick={() => {
                   const current = phase.warningThresholdsSeconds ?? [];
                   let nextValue = Math.max(1, Math.min(phase.durationSeconds, Math.floor(phase.durationSeconds / 2)));
