@@ -199,7 +199,8 @@ function JudgeActa({ link }: { link: ActaLink }) {
     </section>}
 
     {!elimination && <section className="acta-card">
-      <h2>{step(false)}Faltas <small>si las hubo</small></h2>
+      <h2>{step(false)}Faltas y avisos</h2>
+      <p className="muted">Anota todos los avisos y todas las faltas que se hayan producido durante el debate, también los que se acumulen para generar una falta leve o grave. No registres solo la penalización resultante: deben constar los avisos y las faltas originales.</p>
       {ordered.map((team) => {
         const penalty = draft.penalties[team.id] ?? { warnings: '', minors: '', majors: '' };
         const effective = effectivePenalties({ warnings: count(penalty.warnings), minors: count(penalty.minors), majors: count(penalty.majors), disqualified: false }, settings);
