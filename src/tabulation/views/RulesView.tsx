@@ -42,6 +42,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
   const [presetChoice, setPresetChoice] = useState<Exclude<PresetId, 'custom'>>(settings.presetId === 'custom' ? 'ledu-groups' : settings.presetId);
   const [warningEditorPhaseId, setWarningEditorPhaseId] = useState<string | null>(null);
   const warningEditorPhase = settings.timerPhases.find((phase) => phase.id === warningEditorPhaseId) ?? null;
+  const warningEditorThresholds = warningEditorPhase ? [...(warningEditorPhase.warningThresholdsSeconds ?? [])].sort((a, b) => b - a) : [];
   const hasRounds = tournament.rounds.length > 0;
   const set = <K extends keyof TabSettings>(key: K, value: TabSettings[K]) =>
     update((current) => ({ ...current, settings: { ...current.settings, [key]: value, presetId: key === 'timerPhases' ? current.settings.presetId : 'custom' } }));
@@ -112,8 +113,8 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
             <button type="button" className="icon-button" aria-label="Cerrar" onClick={() => setWarningEditorPhaseId(null)}><X size={18} /></button>
           </header>
           <div className="tab-warning-modal-list">
-            {(warningEditorPhase.warningThresholdsSeconds ?? []).length === 0 && <p className="muted">No hay avisos. El cronómetro no cambiará a amarillo ni parpadeará antes de terminar la intervención.</p>}
-            {(warningEditorPhase.warningThresholdsSeconds ?? []).map((threshold, warningIndex) => (
+            {warningEditorThresholds.length === 0 && <p className="muted">No hay avisos. El cronómetro no cambiará a amarillo ni parpadeará antes de terminar la intervención.</p>}
+            {warningEditorThresholds.map((threshold, warningIndex) => (
               <div className="tab-warning-item" key={warningEditorPhase.id + '-warning-' + warningIndex}>
                 <label>
                   <span>Aviso {warningIndex + 1} · segundos restantes</span>
@@ -121,8 +122,8 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
                     onChange={(event) => {
                       const nextValue = Number(event.target.value);
                       if (!event.target.value || !Number.isFinite(nextValue)) return;
-                      if ((warningEditorPhase.warningThresholdsSeconds ?? []).some((value, currentIndex) => currentIndex !== warningIndex && value === nextValue)) return;
-                      const values = [...(warningEditorPhase.warningThresholdsSeconds ?? [])];
+                      if (warningEditorThresholds.some((value, currentIndex) => currentIndex !== warningIndex && value === nextValue)) return;
+                      const values = [...warningEditorThresholds];
                       values[warningIndex] = Math.max(1, Math.min(warningEditorPhase.durationSeconds, Math.round(nextValue)));
                       values.sort((a, b) => b - a);
                       set('timerPhases', settings.timerPhases.map((item) => item.id === warningEditorPhase.id ? { ...item, warningThresholdsSeconds: values } : item));
@@ -130,7 +131,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
                 </label>
                 <button type="button" className="icon-button danger-action" aria-label={'Eliminar aviso ' + (warningIndex + 1)} title="Eliminar aviso"
                   onClick={() => set('timerPhases', settings.timerPhases.map((item) => item.id === warningEditorPhase.id ? {
-                    ...item, warningThresholdsSeconds: (item.warningThresholdsSeconds ?? []).filter((_, currentIndex) => currentIndex !== warningIndex),
+                    ...item, warningThresholdsSeconds: warningEditorThresholds.filter((_, currentIndex) => currentIndex !== warningIndex),
                   } : item))}><X size={14} /></button>
                 <small>{warningIndex === 0
                   ? 'Al llegar a este umbral, el cronómetro cambia a amarillo y reproduce un tono si el sonido está activado.'
@@ -141,9 +142,9 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
             ))}
           </div>
           <footer className="tab-warning-modal-footer">
-            <button type="button" className="button ghost" disabled={(warningEditorPhase.warningThresholdsSeconds ?? []).length >= warningEditorPhase.durationSeconds}
+            <button type="button" className="button ghost" disabled={warningEditorThresholds.length >= warningEditorPhase.durationSeconds}
               onClick={() => {
-                const current = warningEditorPhase.warningThresholdsSeconds ?? [];
+                const current = warningEditorThresholds;
                 let nextValue = Math.max(1, Math.min(warningEditorPhase.durationSeconds, Math.floor(warningEditorPhase.durationSeconds / 2)));
                 while (current.includes(nextValue) && nextValue > 1) nextValue -= 1;
                 if (current.includes(nextValue)) return;
