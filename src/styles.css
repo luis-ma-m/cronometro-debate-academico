@@ -1086,3 +1086,16 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 @media(prefers-reduced-motion:reduce){.featured-message-item,.featured-message-banner{transition:none!important}.featured-message-item.is-expiring,.featured-message-banner.is-expiring{filter:none;transform:none}}
 
 .featured-message-subtitles-single{grid-template-columns:minmax(0,1fr)}
+
+/* Individual countdown warning editor in tournament rules. */
+.tab-warning-editor{grid-column:1/-1;display:grid;gap:9px;min-width:0}
+.tab-warning-editor>span{font-size:12px;font-weight:700;color:#354258}
+.tab-warning-editor>p{margin:-4px 0 2px}
+.tab-warning-list{display:grid;gap:9px}
+.tab-warning-item{display:grid;grid-template-columns:minmax(120px,190px) 36px minmax(0,1fr);align-items:center;gap:10px;border:1px solid #e3e8ef;border-radius:9px;padding:10px 12px;background:#fbfcfe}
+.tab-warning-item label{display:grid;gap:5px;min-width:0}
+.tab-warning-item label span{font-size:11px;font-weight:600;color:#475569}
+.tab-warning-item input{width:100%;min-width:0;box-sizing:border-box}
+.tab-warning-item small{font-size:11px;line-height:1.45;color:#778398}
+.tab-warning-item .icon-button{width:34px;height:34px;padding:0}
+@media(max-width:640px){.tab-warning-item{grid-template-columns:minmax(0,1fr) 36px}.tab-warning-item small{grid-column:1/-1}}
