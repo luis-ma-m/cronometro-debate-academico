@@ -40,6 +40,8 @@ function SeedOrderField({ value, breakSize, onChange }: { value: number[]; break
 export function RulesView({ tournament, update, notify, store }: ViewProps) {
   const { settings } = tournament;
   const [presetChoice, setPresetChoice] = useState<Exclude<PresetId, 'custom'>>(settings.presetId === 'custom' ? 'ledu-groups' : settings.presetId);
+  const [warningEditorPhaseId, setWarningEditorPhaseId] = useState<string | null>(null);
+  const warningEditorPhase = settings.timerPhases.find((phase) => phase.id === warningEditorPhaseId) ?? null;
   const hasRounds = tournament.rounds.length > 0;
   const set = <K extends keyof TabSettings>(key: K, value: TabSettings[K]) =>
     update((current) => ({ ...current, settings: { ...current.settings, [key]: value, presetId: key === 'timerPhases' ? current.settings.presetId : 'custom' } }));
@@ -90,59 +92,9 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
             <Field label="Equipo"><select value={phase.side} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, side: event.target.value as Phase['side'] } : item))}><option value="favor">A favor</option><option value="contra">En contra</option></select></Field>
             <Field label="Quién interviene"><input value={phase.speaker} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, speaker: event.target.value } : item))} /></Field>
             <NumberField label="Duración (segundos)" value={phase.durationSeconds} min={1} max={7200} onChange={(value) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, durationSeconds: Math.max(1, Math.round(value)) } : item))} />
-            <div className="tab-warning-editor">
-              <span className="field-label">Avisos del cronómetro</span>
-              <p className="muted">Añade un aviso por cada momento en el que quieras alertar durante esta intervención.</p>
-              <div className="tab-warning-list">
-                {(phase.warningThresholdsSeconds ?? []).length === 0 && <p className="muted">No hay avisos configurados: el cronómetro no cambiará a amarillo ni emitirá tonos antes de terminar esta intervención.</p>}
-                {(phase.warningThresholdsSeconds ?? []).map((threshold, warningIndex) => (
-                  <div className="tab-warning-item" key={phase.id + '-warning-' + warningIndex}>
-                    <label>
-                      <span>Aviso {warningIndex + 1} · segundos restantes</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={phase.durationSeconds}
-                        step={1}
-                        value={threshold}
-                        onChange={(event) => {
-                          const nextValue = Number(event.target.value);
-                          if (!event.target.value || !Number.isFinite(nextValue)) return;
-                          if ((phase.warningThresholdsSeconds ?? []).some((value, currentIndex) => currentIndex !== warningIndex && value === nextValue)) return;
-                          const values = [...(phase.warningThresholdsSeconds ?? [])];
-                          values[warningIndex] = Math.max(1, Math.min(phase.durationSeconds, Math.round(nextValue)));
-                          values.sort((a, b) => b - a);
-                          set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, warningThresholdsSeconds: values } : item));
-                        }}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="icon-button danger-action"
-                      aria-label={'Eliminar aviso ' + (warningIndex + 1)}
-                      title="Eliminar aviso"
-                      onClick={() => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? {
-                        ...item,
-                        warningThresholdsSeconds: (item.warningThresholdsSeconds ?? []).filter((_, currentIndex) => currentIndex !== warningIndex),
-                      } : item))}
-                    ><X size={14} /></button>
-                    <small>Cuando queden {threshold} segundos, el cronómetro cambia a amarillo y, si el sonido está activado, reproduce un tono. Al alcanzarse dos avisos o más, el cronómetro también parpadea.</small>
-                  </div>
-                ))}
-              </div>
-              <button
-                type="button"
-                className="button ghost"
-                disabled={(phase.warningThresholdsSeconds ?? []).length >= phase.durationSeconds}
-                onClick={() => {
-                  const current = phase.warningThresholdsSeconds ?? [];
-                  let nextValue = Math.max(1, Math.min(phase.durationSeconds, Math.floor(phase.durationSeconds / 2)));
-                  while (current.includes(nextValue) && nextValue > 1) nextValue -= 1;
-                  if (current.includes(nextValue)) return;
-                  const values = [...current, nextValue].sort((a, b) => b - a);
-                  set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, warningThresholdsSeconds: values } : item));
-                }}
-              ><Plus size={14} /> Añadir aviso</button>
+            <div className="tab-warning-summary">
+              <div><span className="field-label">Avisos</span><strong>{(phase.warningThresholdsSeconds ?? []).length ? (phase.warningThresholdsSeconds ?? []).length + ' configurado(s)' : 'Sin avisos'}</strong></div>
+              <button type="button" className="button secondary" onClick={() => setWarningEditorPhaseId(phase.id)}>Configurar avisos</button>
             </div>
             <Toggle label="Mostrar tiempo extra" checked={phase.allowOvertimeDisplay !== false} onChange={(value) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, allowOvertimeDisplay: value } : item))} />
           </div>
@@ -153,6 +105,56 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
           </div>
         </div>)}
       </div>
+      {warningEditorPhase && <div className="tab-warning-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setWarningEditorPhaseId(null); }}>
+        <section className="tab-warning-modal" role="dialog" aria-modal="true" aria-labelledby="tab-warning-modal-title">
+          <header className="tab-warning-modal-header">
+            <div><p className="eyebrow">FORMATO DEL CRONÓMETRO</p><h3 id="tab-warning-modal-title">Avisos · {warningEditorPhase.name}</h3><p>Configura los segundos restantes y consulta el efecto individual de cada aviso.</p></div>
+            <button type="button" className="icon-button" aria-label="Cerrar" onClick={() => setWarningEditorPhaseId(null)}><X size={18} /></button>
+          </header>
+          <div className="tab-warning-modal-list">
+            {(warningEditorPhase.warningThresholdsSeconds ?? []).length === 0 && <p className="muted">No hay avisos. El cronómetro no cambiará a amarillo ni parpadeará antes de terminar la intervención.</p>}
+            {(warningEditorPhase.warningThresholdsSeconds ?? []).map((threshold, warningIndex) => (
+              <div className="tab-warning-item" key={warningEditorPhase.id + '-warning-' + warningIndex}>
+                <label>
+                  <span>Aviso {warningIndex + 1} · segundos restantes</span>
+                  <input type="number" min={1} max={warningEditorPhase.durationSeconds} step={1} value={threshold}
+                    onChange={(event) => {
+                      const nextValue = Number(event.target.value);
+                      if (!event.target.value || !Number.isFinite(nextValue)) return;
+                      if ((warningEditorPhase.warningThresholdsSeconds ?? []).some((value, currentIndex) => currentIndex !== warningIndex && value === nextValue)) return;
+                      const values = [...(warningEditorPhase.warningThresholdsSeconds ?? [])];
+                      values[warningIndex] = Math.max(1, Math.min(warningEditorPhase.durationSeconds, Math.round(nextValue)));
+                      values.sort((a, b) => b - a);
+                      set('timerPhases', settings.timerPhases.map((item) => item.id === warningEditorPhase.id ? { ...item, warningThresholdsSeconds: values } : item));
+                    }} />
+                </label>
+                <button type="button" className="icon-button danger-action" aria-label={'Eliminar aviso ' + (warningIndex + 1)} title="Eliminar aviso"
+                  onClick={() => set('timerPhases', settings.timerPhases.map((item) => item.id === warningEditorPhase.id ? {
+                    ...item, warningThresholdsSeconds: (item.warningThresholdsSeconds ?? []).filter((_, currentIndex) => currentIndex !== warningIndex),
+                  } : item))}><X size={14} /></button>
+                <small>{warningIndex === 0
+                  ? 'Al llegar a este umbral, el cronómetro cambia a amarillo y reproduce un tono si el sonido está activado.'
+                  : warningIndex === 1
+                    ? 'Al llegar a este umbral, además del amarillo, comienza el parpadeo del cronómetro y se reproduce un tono si el sonido está activado.'
+                    : 'Al llegar a este umbral se reproduce un tono si el sonido está activado. El amarillo y el parpadeo ya se habrán activado con los avisos anteriores.'}</small>
+              </div>
+            ))}
+          </div>
+          <footer className="tab-warning-modal-footer">
+            <button type="button" className="button ghost" disabled={(warningEditorPhase.warningThresholdsSeconds ?? []).length >= warningEditorPhase.durationSeconds}
+              onClick={() => {
+                const current = warningEditorPhase.warningThresholdsSeconds ?? [];
+                let nextValue = Math.max(1, Math.min(warningEditorPhase.durationSeconds, Math.floor(warningEditorPhase.durationSeconds / 2)));
+                while (current.includes(nextValue) && nextValue > 1) nextValue -= 1;
+                if (current.includes(nextValue)) return;
+                const values = [...current, nextValue].sort((a, b) => b - a);
+                set('timerPhases', settings.timerPhases.map((item) => item.id === warningEditorPhase.id ? { ...item, warningThresholdsSeconds: values } : item));
+              }}><Plus size={14} /> Añadir aviso</button>
+            <span />
+            <button type="button" className="button primary" onClick={() => setWarningEditorPhaseId(null)}>Listo</button>
+          </footer>
+        </section>
+      </div>}
       <div className="tab-actions">
         <button type="button" className="button secondary" onClick={() => set('timerPhases', [...settings.timerPhases, { id: 'custom-' + Date.now(), name: 'Nueva intervención', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 180, type: 'other', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true }])}>Añadir intervención</button>
         <button type="button" className="button ghost" onClick={() => { if (window.confirm('¿Restaurar la secuencia LEDU original de 12 intervenciones?')) set('timerPhases', LEDU_PHASES.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }))); }}>Restaurar secuencia LEDU</button>
