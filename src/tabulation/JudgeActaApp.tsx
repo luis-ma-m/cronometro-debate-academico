@@ -135,13 +135,14 @@ function JudgeActa({ link }: { link: ActaLink }) {
     if (sending || !ready) return;
     setSending(true);
     const sentAt = Date.now();
-    const signedEntry = { ...entry, sentAt };
+    const judgeName = draft.signedBy.trim() || link.jury[0] || 'Juez principal';
+    const signedEntry = { ...entry, signedBy: judgeName, sentAt };
     const code = encodeActaCode(link, signedEntry);
     try {
       if (!apiConfigured || !link.tournamentId) throw new Error('El enlace no admite envío directo.');
       const submissionId = globalThis.crypto?.randomUUID?.() ?? ('acta_' + sentAt + '_' + Math.random().toString(36).slice(2, 12));
       await submitPublicActa({ submissionId, tournamentId: link.tournamentId, roundNumber: link.round.number,
-        roundName: link.round.name, debateRef: link.debate, judgeName: draft.signedBy.trim() || link.jury[0] || 'Juez principal', code });
+        roundName: link.round.name, debateRef: link.debate, judgeName, code });
       setDraft((current) => ({ ...current, sentAt }));
       setSending(false);
     } catch {
