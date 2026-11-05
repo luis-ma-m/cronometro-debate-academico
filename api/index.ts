@@ -206,8 +206,8 @@ function validateFeaturedMessage(message: Tournament["featuredMessage"], physica
   for (const item of message.subtitles) {
     if (!item || typeof item.id !== "string" || !item.id.trim() || subtitleIds.has(item.id) ||
       typeof item.text !== "string" || !item.text.trim() || item.text.length > 180 ||
-      !Number.isInteger(item.durationSeconds) || item.durationSeconds < 1 || item.durationSeconds > 86400) {
-      throw new ApiError("INVALID_FEATURED_MESSAGE", "Cada subtítulo debe tener un identificador único, texto y un contador entre 1 segundo y 24 horas.");
+      (item.durationSeconds !== undefined && (!Number.isInteger(item.durationSeconds) || item.durationSeconds < 1 || item.durationSeconds > 86400))) {
+      throw new ApiError("INVALID_FEATURED_MESSAGE", "Cada subtítulo debe tener un identificador único, texto y, si se configura, un contador entre 1 segundo y 24 horas.");
     }
     subtitleIds.add(item.id);
   }
