@@ -574,7 +574,7 @@ function DebateTable({ tournament, round, problems, look, outcomes, onEdit }: {
                 {judges.filter((judge) => !debate.judgeIds.includes(judge.id)).map((judge) => <option key={judge.id} value={judge.id}>{judge.name}{judgeNotes(judge, debate)}</option>)}
               </select>}
             </div>}</td>
-          {status && <td className="tab-no-print"><span className={'state-pill ' + status.className}>{notHeld ? 'Sin acta (caído)' : status.label}</span></td>}
+          {status && <td className="tab-no-print"><span className={'state-pill ' + status.className}>{notHeld ? 'Sin acta (caído)' : status.label}</span>{round.kind === 'qualifying' && <small className="tab-cell-sub">Enlace: {debate.actaLinkSentAt ? 'Enviada' : 'Por enviar'}</small>}</td>}
         </tr>,
         debateProblems.length > 0 && <tr key={debate.id + '-problems'} className="tab-problem-row tab-no-project tab-no-print"><td colSpan={outcomes ? 6 : 5}>
           <ul className="tab-problems">{debateProblems.map((problem) => <li key={problem.message} className={problem.severity}>{problem.message}</li>)}</ul>
@@ -613,7 +613,7 @@ function WhatsAppLinks({ tournament, round, notify, onSent }: { tournament: TabT
         <td>{row.link.jury[0] ?? 'sin juez'}<small className="tab-cell-sub">{row.phone ? '+' + row.phone : 'sin móvil: WhatsApp pedirá el chat'}</small></td>
         <td className="tab-whatsapp-actions">
           <a className="button secondary" href={row.href} target="_blank" rel="noreferrer" aria-label={'Enviar el enlace de ' + row.label}
-            onClick={() => onSent(round.name + ' · enlace del acta de ' + row.label + ' enviado por WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.')}><Send size={14} /> Enviar enlace</a>
+            onClick={() => { onSent(round.name + ' · enlace del acta de ' + row.label + ' enviado por WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.'); row.onSent(); }}><Send size={14} /> Enviar enlace</a>
           <a className="text-button" href={row.url} target="_blank" rel="noreferrer" aria-label={'Abrir el acta de ' + row.label}>Abrir el acta</a>
         </td>
       </tr>)}</tbody>
