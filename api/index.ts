@@ -199,8 +199,8 @@ function validateFeaturedMessage(message: Tournament["featuredMessage"], physica
   if (typeof message.id !== "string" || !message.id.trim() || typeof message.title !== "string" || !message.title.trim() || message.title.length > 120) {
     throw new ApiError("INVALID_FEATURED_MESSAGE", "El mensaje destacado necesita un título válido de hasta 120 caracteres.");
   }
-  if (!Array.isArray(message.subtitles) || message.subtitles.length < 2 || message.subtitles.length > 12) {
-    throw new ApiError("INVALID_FEATURED_MESSAGE", "El mensaje destacado debe contener entre 2 y 12 subtítulos.");
+  if (!Array.isArray(message.subtitles) || message.subtitles.length > 2) {
+    throw new ApiError("INVALID_FEATURED_MESSAGE", "El mensaje destacado puede contener como máximo dos subtítulos.");
   }
   const subtitleIds = new Set<string>();
   for (const item of message.subtitles) {
