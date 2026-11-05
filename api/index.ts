@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import type { FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
+import type { FeaturedMessage, FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured } from "./db.js";
 import { getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from "./tabulation-snapshots.js";
 import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
@@ -188,6 +188,7 @@ function tournamentFromData(data: SheetData): Tournament {
     institutions,
     formatPhases: parseJson<Phase[]>(configValue(config, "formatPhases"), defaultPhases()),
     minimumJudgesPerRoom: minimumJudges,
+    featuredMessage: parseJson<FeaturedMessage | undefined>(configValue(config, "featuredMessage"), undefined),
     revision: num(configValue(config, "revision")) || 1,
     updatedAt: num(configValue(config, "updatedAt")) || Date.now(),
     serverTime: Date.now(),
@@ -445,6 +446,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
       tournament.rounds.map((round) => [round.id, round.scoreType ?? current.rounds.find((item) => item.id === round.id)?.scoreType ?? "qualifying"]),
     )));
     setConfig(configRows, "minimumJudgesPerRoom", String(minimumJudges));
+    setConfig(configRows, "featuredMessage", JSON.stringify(tournament.featuredMessage ?? null));
     setConfig(configRows, "schemaVersion", "3");
     // Only activateRound may change the globally active round or activation revision.
     setConfig(configRows, "activeRoundId", current.activeRoundId || "");
