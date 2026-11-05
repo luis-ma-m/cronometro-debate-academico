@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import type { FeaturedMessage, FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured } from "./db.js";
 import { getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from "./tabulation-snapshots.js";
-import { listPublicActas, submitPublicActa } from "./public-actas.js";
+import { listPublicActas, publicActaAlreadySubmitted, submitPublicActa } from "./public-actas.js";
 import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
@@ -388,6 +388,8 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       if (count > 60) throw new ApiError("RATE_LIMITED", "Se han enviado demasiadas actas desde esta conexión. Inténtalo más tarde.", 429);
       return submitPublicActa(payload);
     }
+    case "getPublicActaStatus":
+      return { submitted: await publicActaAlreadySubmitted(str(payload.tournamentId), str(payload.debateRef)) };
     case "listPublicActas":
       await requireSession(payload.token);
       return listPublicActas(str(payload.tournamentId));
