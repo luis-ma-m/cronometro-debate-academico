@@ -195,6 +195,8 @@ export interface TabDebate {
   bracketSlot?: number;
   /** Locally recorded when the organiser clicks Send link. */
   actaLinkSentAt?: number;
+  /** ID of the immutable public acta submission already applied to this debate. */
+  publicActaSubmissionId?: string;
   result?: TabDebateResult;
 }
 
