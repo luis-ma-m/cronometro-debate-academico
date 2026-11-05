@@ -140,6 +140,8 @@ export type PublicActaSubmission = {
   id: string; tournamentId: string; roundNumber: number; roundName: string;
   debateRef: string; judgeName: string; code: string; createdAt: number;
 };
+export const getPublicActaStatus = (tournamentId: string, debateRef: string) =>
+  apiCall<{ submitted: boolean }>('getPublicActaStatus', { tournamentId, debateRef });
 export const submitPublicActa = (input: {
   submissionId: string; tournamentId: string; roundNumber: number; roundName: string;
   debateRef: string; judgeName: string; code: string;
