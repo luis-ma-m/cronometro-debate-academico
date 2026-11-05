@@ -45,7 +45,7 @@ export function FeaturedMessageManager({ rooms, activeMessage, saving, onClose, 
       setError('Cada subtítulo debe tener texto y, si se activa, un contador superior a cero.');
       return;
     }
-    if (subtitles.some((item) => item.hasTimer && (!/^\\d+$/.test(item.minutes) || !/^\\d{1,2}$/.test(item.seconds) || Number(item.seconds) > 59))) {
+    if (subtitles.some((item) => item.hasTimer && (!/^\d+$/.test(item.minutes) || !/^\d{1,2}$/.test(item.seconds) || Number(item.seconds) > 59))) {
       setError('Indica minutos válidos y segundos entre 00 y 59.');
       return;
     }
