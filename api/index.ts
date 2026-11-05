@@ -388,8 +388,13 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
       if (count > 60) throw new ApiError("RATE_LIMITED", "Se han enviado demasiadas actas desde esta conexión. Inténtalo más tarde.", 429);
       return submitPublicActa(payload);
     }
-    case "getPublicActaStatus":
+    case "getPublicActaStatus": {
+      const key = "ledu:public-acta-status:" + sha256(requestIp(req));
+      const count = num(await redisCommand(["INCR", key]));
+      if (count === 1) await redisCommand(["EXPIRE", key, 900]);
+      if (count > 120) throw new ApiError("RATE_LIMITED", "Demasiadas consultas al estado del acta. Inténtalo más tarde.", 429);
       return { submitted: await publicActaAlreadySubmitted(str(payload.tournamentId), str(payload.debateRef)) };
+    }
     case "listPublicActas":
       await requireSession(payload.token);
       return listPublicActas(str(payload.tournamentId));
