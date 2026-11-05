@@ -21,10 +21,7 @@ const toDraft = (item: FeaturedMessageSubtitle): DraftSubtitle => ({
 
 export function FeaturedMessageManager({ rooms, activeMessage, saving, onClose, onPublish, onClear }: Props) {
   const [title, setTitle] = useState(activeMessage?.title ?? '');
-  const [subtitles, setSubtitles] = useState<DraftSubtitle[]>(() => activeMessage?.subtitles.map(toDraft) ?? [
-    { id: makeId(), text: '', hasTimer: true, minutes: '05', seconds: '00' },
-    { id: makeId(), text: '', hasTimer: true, minutes: '02', seconds: '00' },
-  ]);
+  const [subtitles, setSubtitles] = useState<DraftSubtitle[]>(() => activeMessage?.subtitles.map(toDraft) ?? []);
   const [allRooms, setAllRooms] = useState(!activeMessage || activeMessage.targetPhysicalRoomIds.length === 0);
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>(activeMessage?.targetPhysicalRoomIds ?? []);
   const [error, setError] = useState('');
@@ -35,14 +32,14 @@ export function FeaturedMessageManager({ rooms, activeMessage, saving, onClose, 
   const publish = async () => {
     setError('');
     if (!title.trim()) { setError('Escribe un título para el mensaje.'); return; }
-    if (subtitles.length < 2) { setError('Añade al menos dos subtítulos.'); return; }
-    const normalized = subtitles.map((item) => {
+    if (subtitles.length > 2) { setError('Puedes añadir como máximo dos subtítulos.'); return; }
+    const normalized = subtitles.filter((item) => item.text.trim()).map((item) => {
       const minutes = Number(item.minutes);
       const seconds = Number(item.seconds);
       return { id: item.id, text: item.text.trim(), ...(item.hasTimer ? { durationSeconds: minutes * 60 + seconds } : {}) };
     });
-    if (normalized.some((item) => !item.text || (item.durationSeconds !== undefined && (!Number.isInteger(item.durationSeconds) || item.durationSeconds <= 0)))) {
-      setError('Cada subtítulo debe tener texto y, si se activa, un contador superior a cero.');
+    if (normalized.some((item) => item.durationSeconds !== undefined && (!Number.isInteger(item.durationSeconds) || item.durationSeconds <= 0))) {
+      setError('Si incluyes un contador, debe ser superior a cero.');
       return;
     }
     if (subtitles.some((item) => item.hasTimer && (!/^\d+$/.test(item.minutes) || !/^\d{1,2}$/.test(item.seconds) || Number(item.seconds) > 59))) {
@@ -74,9 +71,9 @@ export function FeaturedMessageManager({ rooms, activeMessage, saving, onClose, 
         <button className="icon-button" type="button" onClick={onClose} disabled={saving} aria-label="Cerrar"><X size={18} /></button>
       </header>
       <label className="featured-field">Título principal<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Ej. Comida y reanudación del torneo" /></label>
-      <div className="featured-subtitle-heading"><div><b>Subtítulos y contadores</b><small>Puedes añadir un contador independiente a cada subtítulo; no es obligatorio.</small></div><button type="button" className="button secondary" onClick={() => setSubtitles((current) => [...current, { id: makeId(), text: '', hasTimer: true, minutes: '01', seconds: '00' }])}><Plus size={15} /> Añadir subtítulo</button></div>
+      <div className="featured-subtitle-heading"><div><b>Subtítulos y contadores</b><small>Añade ninguno, uno o dos subtítulos. El contador de cada uno es opcional.</small></div><button type="button" className="button secondary" disabled={subtitles.length >= 2} onClick={() => setSubtitles((current) => [...current, { id: makeId(), text: '', hasTimer: true, minutes: '01', seconds: '00' }])}><Plus size={15} /> Añadir subtítulo</button></div>
       <div className="featured-subtitle-list">{subtitles.map((item, index) => <article className="featured-subtitle-editor" key={item.id}>
-        <div className="featured-subtitle-editor-top"><b>Subtítulo {index + 1}</b>{subtitles.length > 2 && <button type="button" className="icon-button" aria-label={'Eliminar subtítulo ' + (index + 1)} onClick={() => setSubtitles((current) => current.filter((value) => value.id !== item.id))}><Trash2 size={14} /></button>}</div>
+        <div className="featured-subtitle-editor-top"><b>Subtítulo {index + 1}</b>{<button type="button" className="icon-button" aria-label={'Eliminar subtítulo ' + (index + 1)} onClick={() => setSubtitles((current) => current.filter((value) => value.id !== item.id))}><Trash2 size={14} /></button>}</div>
         <label className="featured-field">Texto<input value={item.text} onChange={(event) => updateSubtitle(item.id, { text: event.target.value })} maxLength={180} placeholder="Ej. La siguiente ronda comienza en..." /></label>
         <div className="featured-duration"><label className="featured-timer-toggle"><input type="checkbox" checked={item.hasTimer} onChange={(event) => updateSubtitle(item.id, { hasTimer: event.target.checked })} /> Incluir contador</label><label>Minutos<input type="number" min="0" max="1440" value={item.minutes} disabled={!item.hasTimer} onChange={(event) => updateSubtitle(item.id, { minutes: event.target.value })} /></label><label>Segundos<input type="number" min="0" max="59" value={item.seconds} disabled={!item.hasTimer} onChange={(event) => updateSubtitle(item.id, { seconds: event.target.value })} /></label></div>
       </article>)}</div>
