@@ -93,6 +93,13 @@ describe('schema v2 normalization', () => {
     expect(issues.join(' ')).toContain('borrador');
   });
 
+  it('preserves the sent-link marker on each debate', () => {
+    const raw = JSON.parse(JSON.stringify(fullAduma()));
+    raw.rounds[0].debates[0].actaLinkSentAt = 12345;
+    const { tournament } = normalizeTabTournament(raw);
+    expect(tournament.rounds[0].debates[0].actaLinkSentAt).toBe(12345);
+  });
+
   it('ignores invalid roles, unknown teams and bad levels', () => {
     const raw = JSON.parse(JSON.stringify(fullAduma()));
     raw.judgeConflicts.push({ id: 'c3', judgeId: 'j1', teamId: 'b', level: 'mucha', note: '' });
