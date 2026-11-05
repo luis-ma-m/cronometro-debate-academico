@@ -30,6 +30,102 @@ const VIEWS = [
 export type TabulationViewId = (typeof VIEWS)[number]['id'];
 type ViewId = TabulationViewId;
 
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type SnapshotDifference = { path: string; localValue: unknown; remoteValue: unknown };
+
+const SNAPSHOT_LABELS: Record<string, string> = {
+  name: 'Nombre del torneo', seed: 'Semilla del torneo', settings: 'Configuración',
+  teams: 'Equipos', speakers: 'Oradores', judges: 'Jueces', venues: 'Salas',
+  groups: 'Grupos', rounds: 'Rondas y debates', breakSeeds: 'Orden de clasificación',
+  manualOrder: 'Orden manual', panelLink: 'Vinculación con Gestión', whatsapp: 'Configuración de WhatsApp',
+  judgeConflicts: 'Incompatibilidades', draftRound: 'Borrador de ronda',
+  active: 'Activo', name: 'Nombre', institution: 'Institución', rating: 'Experiencia',
+  canChair: 'Puede presidir', incompatibleJudgeIds: 'Jueces incompatibles',
+  unavailableRoundIds: 'Rondas no disponibles', unavailableRoundNumbers: 'Números de ronda no disponibles',
+  unavailableRoundNames: 'Rondas no disponibles por nombre', phone: 'Teléfono',
+  teamId: 'Equipo', teamIds: 'Equipos', judgeId: 'Juez', judgeIds: 'Jueces',
+  venueId: 'Sala', chairId: 'Juez principal', favorTeamId: 'Equipo a favor',
+  kind: 'Tipo', number: 'Número', sideMode: 'Reparto de posturas',
+  panelSize: 'Tamaño del panel', silent: 'Ronda cerrada', debates: 'Debates',
+  result: 'Acta / resultado', ballots: 'Actas de jueces', penalties: 'Penalizaciones',
+  winnerTeamId: 'Equipo ganador', totals: 'Puntuaciones', speeches: 'Notas de orador',
+  roles: 'Intervenciones', score: 'Puntuación', notes: 'Observaciones',
+  rubric: 'Rúbrica', timerPhases: 'Fases del cronómetro', ballotMode: 'Modalidad de acta',
+  stage: 'Sistema de competición', groupCount: 'Número de grupos', groupAdvance: 'Clasifican por grupo',
+  swissRounds: 'Rondas suizas', avoidSameInstitution: 'Evitar misma institución',
+  breakSize: 'Plazas de clasificación', qualifyingPanelSize: 'Jueces por debate (clasificatoria)',
+  eliminationPanelSize: 'Jueces por debate (eliminatorias)', speakerScores: 'Puntuar oradores',
+  tiebreaks: 'Criterios de desempate', conflictPolicy: 'Política de incompatibilidades',
+};
+
+function prettyDifferencePath(path: string): string {
+  const parts = path.replace(/^tournament\\./, '').split('.');
+  const root = parts[0] ?? path;
+  const label = SNAPSHOT_LABELS[root] ?? root;
+  const detail = parts.slice(1).map((part) => {
+    const match = part.match(/^(.+)\\[(.+)\\]$/);
+    if (match) {
+      const field = SNAPSHOT_LABELS[match[1]!] ?? match[1]!;
+      return field + ' «' + match[2] + '»';
+    }
+    return SNAPSHOT_LABELS[part] ?? part;
+  });
+  return detail.length ? label + ' → ' + detail.join(' → ') : label;
+}
+
+function displayDifferenceValue(value: unknown): string {
+  if (value === undefined) return 'No existe';
+  if (value === null) return 'Vacío';
+  if (typeof value === 'string') return value.length ? value : 'Vacío';
+  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '—';
+  try { return JSON.stringify(value, null, 2) ?? '—'; } catch { return String(value); }
+}
+
+/** Compares persisted tournament content while ignoring revision and timestamps used only for sync bookkeeping. */
+function findSnapshotDifferences(local: unknown, remote: unknown): SnapshotDifference[] {
+  const differences: SnapshotDifference[] = [];
+  const ignored = new Set(['revision', 'updatedAt', 'createdAt', 'logTail', 'logSeq']);
+  const stable = (value: unknown): string => {
+    if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
+    if (value && typeof value === 'object') {
+      return '{' + Object.keys(value as Record<string, unknown>).sort().map((key) => JSON.stringify(key) + ':' + stable((value as Record<string, unknown>)[key])).join(',') + '}';
+    }
+    return JSON.stringify(value);
+  };
+  const visit = (left: unknown, right: unknown, path: string, depth: number) => {
+    if (stable(left) === stable(right)) return;
+    if (depth > 8) {
+      differences.push({ path, localValue: left, remoteValue: right });
+      return;
+    }
+    if (Array.isArray(left) || Array.isArray(right)) {
+      const a = Array.isArray(left) ? left : [];
+      const b = Array.isArray(right) ? right : [];
+      const keyed = [...a, ...b].every((item) => item && typeof item === 'object' && 'id' in item);
+      if (!keyed) {
+        differences.push({ path, localValue: left, remoteValue: right });
+        return;
+      }
+      const byId = (items: unknown[]) => new Map(items.map((item) => [String((item as { id: unknown }).id), item]));
+      const am = byId(a), bm = byId(b);
+      for (const id of [...new Set([...am.keys(), ...bm.keys()])].sort()) {
+        visit(am.get(id), bm.get(id), path + '[' + id + ']', depth + 1);
+      }
+      return;
+    }
+    if (left && typeof left === 'object' && right && typeof right === 'object') {
+      const a = left as Record<string, unknown>, b = right as Record<string, unknown>;
+      const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((key) => !ignored.has(key)).sort();
+      for (const key of keys) visit(a[key], b[key], path ? path + '.' + key : key, depth + 1);
+      return;
+    }
+    differences.push({ path, localValue: left, remoteValue: right });
+  };
+  visit(local, remote, '', 0);
+  return differences;
+}
+
 function readHashView(): ViewId {
   const id = window.location.hash.replace(/^#/, '').split('/')[0];
   return VIEWS.find((view) => view.id === id)?.id ?? 'inicio';
