@@ -30,16 +30,15 @@ const VIEWS = [
 export type TabulationViewId = (typeof VIEWS)[number]['id'];
 type ViewId = TabulationViewId;
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type SnapshotDifference = { path: string; localValue: unknown; remoteValue: unknown };
 
 const SNAPSHOT_LABELS: Record<string, string> = {
-  name: 'Nombre del torneo', seed: 'Semilla del torneo', settings: 'Configuración',
+  name: 'Nombre', seed: 'Semilla del torneo', settings: 'Configuración',
   teams: 'Equipos', speakers: 'Oradores', judges: 'Jueces', venues: 'Salas',
   groups: 'Grupos', rounds: 'Rondas y debates', breakSeeds: 'Orden de clasificación',
   manualOrder: 'Orden manual', panelLink: 'Vinculación con Gestión', whatsapp: 'Configuración de WhatsApp',
   judgeConflicts: 'Incompatibilidades', draftRound: 'Borrador de ronda',
-  active: 'Activo', name: 'Nombre', institution: 'Institución', rating: 'Experiencia',
+  active: 'Activo', institution: 'Institución', rating: 'Experiencia',
   canChair: 'Puede presidir', incompatibleJudgeIds: 'Jueces incompatibles',
   unavailableRoundIds: 'Rondas no disponibles', unavailableRoundNumbers: 'Números de ronda no disponibles',
   unavailableRoundNames: 'Rondas no disponibles por nombre', phone: 'Teléfono',
