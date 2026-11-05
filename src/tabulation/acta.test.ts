@@ -11,7 +11,10 @@ const speakers = new Map<string, TabSpeaker>([
 ]);
 const context = (elimination = false): JointActaContext => ({ settings, teamIds: ['a', 'b'], speakers, elimination });
 const items = (value: number) => Object.fromEntries(ADUMA_RUBRIC.map((item) => [item.id, value]));
-const acta = (extra: Partial<TabJointActa> = {}): TabJointActa => ({ winnerTeamId: 'a', items: { a: items(4), b: items(3) }, speakers: {}, ...extra });
+const acta = (extra: Partial<TabJointActa> = {}): TabJointActa => ({ winnerTeamId: 'a', items: { a: items(4), b: items(3) }, speakers: {
+  a: [{ speakerId: 'a1', score: 8, roles: ['introductor', 'concluder'] }, { speakerId: 'a2', score: 7, roles: ['first_rebuttal', 'second_rebuttal'] }],
+  b: [{ speakerId: 'b1', score: 8, roles: ['introductor', 'first_rebuttal', 'second_rebuttal', 'concluder'] }],
+}, ...extra });
 const none: Record<string, TabPenalties> = {};
 
 describe('validateJointActa', () => {
@@ -76,7 +79,13 @@ describe('validateJointActa', () => {
       { speakerId: 'a2', score: 7, roles: ['introductor'] },
     ] } }), none, context());
     expect(twice.issues.join(' ')).toContain('dos integrantes');
-    expect(validateJointActa(acta({ speakers: { a: [{ speakerId: 'a1', score: 8, roles: ['introductor'] }] } }), none, context()).warnings.join(' ')).toContain('intervenciones');
+    const missing = validateJointActa(acta({ speakers: { a: [{ speakerId: 'a1', score: 8, roles: ['introductor'] }] } }), none, context());
+    expect(missing.warnings.join(' ')).toContain('intervenciones');
+  });
+
+  it('requires all four roles even when no speakers were entered', () => {
+    const check = validateJointActa(acta({ speakers: { a: [], b: acta().speakers.b } }), none, context());
+    expect(check.warnings.join(' ')).toContain('intervenciones');
   });
 
   it('only needs the winner in elimination rounds', () => {

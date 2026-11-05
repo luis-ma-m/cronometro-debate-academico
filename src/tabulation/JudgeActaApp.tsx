@@ -126,7 +126,8 @@ function JudgeActa({ link }: { link: ActaLink }) {
     const acta: TabJointActa = { winnerTeamId: entry.winner, items: entry.items, ...(entry.quickTotals ? { quickTotals: entry.quickTotals } : {}), ...(entry.writtenTotals ? { writtenTotals: entry.writtenTotals } : {}), speakers: entry.speakers };
     return validateJointActa(acta, entry.penalties, { settings, teamIds: [link.teams[0].id, link.teams[1].id], speakers, elimination, teamName });
   }, [entry, settings, link, speakers, elimination]);
-  const ready = !check.issues.length && !check.missing.length;
+  const missingSpeakerRoles = check.warnings.filter((warning) => warning.includes('Falta indicar quién hizo alguna de las intervenciones'));
+  const ready = !check.issues.length && !check.missing.length && missingSpeakerRoles.length === 0;
   const summary = !entry.winner ? '' : 'gana ' + teamName(entry.winner) + (elimination ? '' : ' (' + link.teams.map((team) => formatNumber(check.totals[team.id]?.net ?? null)).join(' – ') + ' ítems netos)');
   const message = actaCodeMessage(link, entry, summary);
   const sections = [...new Set(link.rules.rubric.map((item) => item.section))];
@@ -229,10 +230,20 @@ function JudgeActa({ link }: { link: ActaLink }) {
         {team.members.map((member) => {
           const row = draft.speakers[team.id]?.[member.id] ?? { score: '', roles: [] };
           const set = (patch: Partial<typeof row>) => edit((current) => ({ ...current, speakers: { ...current.speakers, [team.id]: { ...current.speakers[team.id], [member.id]: { ...row, ...patch } } } }));
+          const setRole = (role: SpeakerRole, checked: boolean) => edit((current) => {
+            const teamRows = current.speakers[team.id] ?? {};
+            const selected = teamRows[member.id] ?? row;
+            return { ...current, speakers: { ...current.speakers, [team.id]: {
+              ...Object.fromEntries(Object.entries(teamRows).map(([id, speaker]) => [id, id === member.id
+                ? { ...speaker, roles: checked ? [...speaker.roles.filter((item) => item !== role), role] : speaker.roles.filter((item) => item !== role) }
+                : checked ? { ...speaker, roles: speaker.roles.filter((item) => item !== role) } : speaker])),
+              ...(!teamRows[member.id] ? { [member.id]: { ...selected, roles: checked ? [...selected.roles.filter((item) => item !== role), role] : selected.roles.filter((item) => item !== role) } } : {}),
+            } } };
+          });
           return <div key={member.id} className="acta-speaker">
             <label className="acta-inline"><span>{member.name}</span><input inputMode="decimal" aria-label={'Nota de ' + member.name} value={row.score} onChange={(event) => set({ score: event.target.value })} /></label>
             <div className="acta-roles">{SPEAKER_ROLES.map((role) => <label key={role}><input type="checkbox" checked={row.roles.includes(role)} aria-label={ROLE_LABELS[role] + ': ' + member.name}
-              onChange={(event) => set({ roles: event.target.checked ? [...row.roles, role] : row.roles.filter((item) => item !== role) })} />{ROLE_LABELS[role]}</label>)}</div>
+              onChange={(event) => setRole(role, event.target.checked)} />{ROLE_LABELS[role]}</label>)}</div>
           </div>;
         })}
       </div>)}
@@ -255,6 +266,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
       </dl>
       {check.issues.length > 0 && <ul className="tab-problems">{check.issues.map((issue) => <li key={issue} className="error">{issue}</li>)}</ul>}
       {check.missing.length > 0 && <ul className="tab-problems">{check.missing.map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
+      {missingSpeakerRoles.length > 0 && <ul className="tab-problems">{missingSpeakerRoles.map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
       {ready && check.warnings.length > 0 && <ul className="tab-problems">{compactActaWarnings(check.warnings).map((item) => <li key={item} className="warning">{item}</li>)}</ul>}
       {draft.sentAt && <p className="acta-sent"><CircleCheck size={16} /> Enviada a las {new Date(draft.sentAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}. Si cambias algo, vuelve a enviarla.</p>}
       {ready

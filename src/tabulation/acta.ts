@@ -124,7 +124,7 @@ export function validateJointActa(acta: TabJointActa | undefined, penalties: Rec
           roleOwner.set(role, row.speakerId);
         }
       }
-      if (entries.length && SPEAKER_ROLES.some((role) => !roleOwner.has(role))) {
+      if (SPEAKER_ROLES.some((role) => !roleOwner.has(role))) {
         warnings.push('Falta indicar quién hizo alguna de las intervenciones de ' + name(teamId) + '.');
       }
     }

@@ -317,11 +317,19 @@ export function JointBallotsView({ tournament, outcomes, update, notify }: ViewP
                   <tbody>{roster(teamId).map((speaker) => {
                     const entry = draft.speakers[teamId]?.[speaker.id] ?? { score: '', roles: [] };
                     const setEntry = (patch: Partial<SpeakerDraft>) => edit((current) => ({ ...current, speakers: { ...current.speakers, [teamId]: { ...current.speakers[teamId], [speaker.id]: { ...entry, ...patch } } } }));
+                    const setRole = (role: SpeakerRole, checked: boolean) => edit((current) => {
+                      const teamRows = current.speakers[teamId] ?? {};
+                      return { ...current, speakers: { ...current.speakers, [teamId]: Object.fromEntries(
+                        Object.entries({ ...teamRows, [speaker.id]: teamRows[speaker.id] ?? entry }).map(([id, currentEntry]) => [id, id === speaker.id
+                          ? { ...currentEntry, roles: checked ? [...currentEntry.roles.filter((item) => item !== role), role] : currentEntry.roles.filter((item) => item !== role) }
+                          : checked ? { ...currentEntry, roles: currentEntry.roles.filter((item) => item !== role) } : currentEntry])
+                      ) } };
+                    });
                     return <tr key={speaker.id}>
                       <td>{speaker.name}</td>
                       <td><input className="tab-score-input small" inputMode="decimal" aria-label={'Nota de ' + speaker.name} value={entry.score} onChange={(event) => setEntry({ score: event.target.value })} /></td>
                       {SPEAKER_ROLES.map((role) => <td key={role}><input type="checkbox" aria-label={ROLE_LABELS[role] + ': ' + speaker.name} checked={entry.roles.includes(role)}
-                        onChange={(event) => setEntry({ roles: event.target.checked ? [...entry.roles, role] : entry.roles.filter((item) => item !== role) })} /></td>)}
+                        onChange={(event) => setRole(role, event.target.checked)} /></td>)}
                     </tr>;
                   })}</tbody>
                 </table>}
