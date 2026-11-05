@@ -14,7 +14,7 @@ type Props = {
 
 const makeId = () => globalThis.crypto?.randomUUID?.() ?? 'msg-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const toDraft = (item: FeaturedMessageSubtitle): DraftSubtitle => ({
-  id: item.id, text: item.text, hasTimer: Number.isFinite(item.durationSeconds) && item.durationSeconds > 0,
+  id: item.id, text: item.text, hasTimer: typeof item.durationSeconds === 'number' && item.durationSeconds > 0,
   minutes: typeof item.durationSeconds === 'number' ? String(Math.floor(item.durationSeconds / 60)) : '00',
   seconds: typeof item.durationSeconds === 'number' ? String(item.durationSeconds % 60).padStart(2, '0') : '00',
 });
@@ -41,7 +41,7 @@ export function FeaturedMessageManager({ rooms, activeMessage, saving, onClose, 
       const seconds = Number(item.seconds);
       return { id: item.id, text: item.text.trim(), ...(item.hasTimer ? { durationSeconds: minutes * 60 + seconds } : {}) };
     });
-    if (normalized.some((item) => !item.text || ('durationSeconds' in item && (!Number.isInteger(item.durationSeconds) || item.durationSeconds <= 0)))) {
+    if (normalized.some((item) => !item.text || (item.durationSeconds !== undefined && (!Number.isInteger(item.durationSeconds) || item.durationSeconds <= 0)))) {
       setError('Cada subtítulo debe tener texto y, si se activa, un contador superior a cero.');
       return;
     }
