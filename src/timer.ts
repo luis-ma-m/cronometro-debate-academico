@@ -1,5 +1,5 @@
-import type { Phase, TimerState } from './domain';
-import { findAssignmentConflicts } from './incompatibilities';
+import type { Phase, TimerState } from './domain.js';
+import { findAssignmentConflicts } from './incompatibilities.js';
 
 export const LEDU_PHASES: Phase[] = [
   { id: 'ledu-01', name: 'Exposición inicial', side: 'favor', speaker: 'Equipo a favor', durationSeconds: 240, type: 'opening', warningThresholdsSeconds: [60, 30, 10], allowOvertimeDisplay: true },
