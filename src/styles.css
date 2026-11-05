@@ -1086,3 +1086,6 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 @media(prefers-reduced-motion:reduce){.featured-message-item,.featured-message-banner{transition:none!important}.featured-message-item.is-expiring,.featured-message-banner.is-expiring{filter:none;transform:none}}
 
 .featured-message-subtitles-single{grid-template-columns:minmax(0,1fr)}
+
+@keyframes acta-loading-spin{to{transform:rotate(360deg)}}
+.acta-loading-spinner{display:inline-block;width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:acta-loading-spin .7s linear infinite;vertical-align:middle}
