@@ -1141,3 +1141,5 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 
 @keyframes acta-loading-spin{to{transform:rotate(360deg)}}
 .acta-loading-spinner{display:inline-block;width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:acta-loading-spin .7s linear infinite;vertical-align:middle}
+
+.room-icon.disconnected{background:#fff0ee;color:#b23d31}.state-pill.disconnected{background:#fff0ee;color:#b23d31}
