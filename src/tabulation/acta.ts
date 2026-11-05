@@ -124,9 +124,8 @@ export function validateJointActa(acta: TabJointActa | undefined, penalties: Rec
           roleOwner.set(role, row.speakerId);
         }
       }
-      const missingRoles = SPEAKER_ROLES.filter((role) => !roleOwner.has(role));
-      if (missingRoles.length) {
-        missing.push('Falta asignar ' + missingRoles.map((role) => '«' + ROLE_LABELS[role] + '»').join(', ') + ' de ' + name(teamId) + '.');
+      if (SPEAKER_ROLES.some((role) => !roleOwner.has(role))) {
+        warnings.push('Falta indicar quién hizo alguna de las intervenciones de ' + name(teamId) + '.');
       }
     }
   }
