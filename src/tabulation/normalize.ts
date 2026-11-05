@@ -193,6 +193,7 @@ function normalizeRound(round: Json, references: References): { round: TabRound;
       judgeIds: judgeList,
       chairId: text(debate.chairId),
       ...(typeof debate.bracketSlot === 'number' ? { bracketSlot: debate.bracketSlot } : {}),
+      ...(typeof debate.actaLinkSentAt === 'number' && Number.isFinite(debate.actaLinkSentAt) ? { actaLinkSentAt: debate.actaLinkSentAt } : {}),
       ...(result ? { result } : {}),
     };
   }));
