@@ -1075,11 +1075,11 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 
 
 /* Expiración progresiva de mensajes destacados. */
-.featured-message-item{overflow:hidden;min-height:0;transition:opacity .55s ease,transform .55s ease,filter .55s ease,max-height .55s ease,padding .55s ease,border-width .55s ease}
+.featured-message-item{overflow:hidden;min-height:0;max-height:160px;transition:opacity .55s ease,transform .55s ease,filter .55s ease,max-height .55s ease,padding .55s ease,border-width .55s ease}
 .featured-message-item-untimed{justify-content:center;text-align:center}
 .featured-message-item-untimed span{text-align:center}
 .featured-message-item.is-expiring{opacity:0;transform:translateY(-8px) scale(.97);filter:blur(4px);max-height:0;padding-top:0;padding-bottom:0;border-top-width:0;border-bottom-width:0}
-.featured-message-banner{overflow:hidden;transition:opacity .7s ease,transform .7s ease,filter .7s ease,max-height .7s ease,margin .7s ease,padding .7s ease}
+.featured-message-banner{overflow:hidden;max-height:1200px;transition:opacity .7s ease,transform .7s ease,filter .7s ease,max-height .7s ease,margin .7s ease,padding .7s ease}
 .featured-message-banner.is-expiring{opacity:0;transform:translateY(-10px);filter:blur(5px);max-height:0;margin-top:0;margin-bottom:0;padding-top:0;padding-bottom:0}
 .featured-duration input:disabled{opacity:.45;cursor:not-allowed}
 .featured-timer-toggle{display:flex;align-items:center;gap:8px;align-self:end;min-height:40px}
