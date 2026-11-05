@@ -103,6 +103,7 @@ describe('acta link for the judge', () => {
     expect(fragment).not.toContain('-');
     const decoded = decodeActaLink(fragment);
     expect(decoded).toEqual(link);
+    expect(decoded.tournamentId).toBe(tournament.id);
 
     // Previously sent A2 links used separators. They must remain valid after
     // switching newly generated links to the WhatsApp-safe contiguous format.
