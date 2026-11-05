@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { getPool } from "./db.js";
 import { ApiError } from "./core.js";
+import { getTabulationSnapshot } from "./tabulation-snapshots.js";
+import { readActaCode } from "../src/tabulation/whatsapp.js";
+import type { TabTournament } from "../src/tabulation/types.js";
 
 export type PublicActaSubmission = {
   id: string;
@@ -54,18 +57,32 @@ export async function submitPublicActa(input: Record<string, unknown>): Promise<
       || !judgeName || !/^ACTA[12]-[0-9A-Za-z]+-[a-f0-9]{14}$/i.test(code)) {
     throw new ApiError("INVALID_PUBLIC_ACTA", "Los datos del acta no son válidos.");
   }
+  const remote = await getTabulationSnapshot(tournamentId);
+  if (!remote) throw new ApiError("TOURNAMENT_NOT_FOUND", "La tabulación de este torneo aún no está sincronizada con Neon.", 409);
+  const tournament = remote.snapshot as unknown as TabTournament;
+  const received = readActaCode(tournament, code);
+  if (received.error || !received.payload || !received.roundId || !received.debateId) {
+    throw new ApiError("INVALID_PUBLIC_ACTA", received.error || "El código no corresponde a un debate válido.", 422);
+  }
+  const round = tournament.rounds.find((item) => item.id === received.roundId);
+  if (!round || round.number !== roundNumber || round.name !== roundName
+      || received.payload.signedBy.trim() !== judgeName) {
+    throw new ApiError("ACTA_METADATA_MISMATCH", "El juez o la ronda no coinciden con el código del acta.", 422);
+  }
+  // The debate ID comes from the validated code, never from the public request metadata.
+  const debateId = received.debateId;
   const hash = createHash("sha256").update(code).digest("hex");
   const pool = getPool();
   const inserted = await pool.query(
     "INSERT INTO public_acta_submissions(id,tournament_id,round_number,round_name,debate_ref,judge_name,acta_code,code_sha256) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(tournament_id,debate_ref) DO NOTHING RETURNING id,created_at",
-    [id, tournamentId, roundNumber, roundName, debateRef, judgeName, code, hash],
+    [id, tournamentId, roundNumber, roundName, debateId, judgeName, code, hash],
   );
   if (inserted.rows[0]) {
     return { id, createdAt: new Date(String((inserted.rows[0] as Record<string, unknown>).created_at)).getTime(), duplicate: false };
   }
   const existing = await pool.query(
     "SELECT id,created_at,code_sha256 FROM public_acta_submissions WHERE tournament_id=$1 AND debate_ref=$2",
-    [tournamentId, debateRef],
+    [tournamentId, debateId],
   );
   const row = existing.rows[0] as Record<string, unknown> | undefined;
   if (!row) throw new ApiError("PUBLIC_ACTA_SAVE_FAILED", "No se ha podido confirmar el guardado del acta.", 503);
