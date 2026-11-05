@@ -225,7 +225,7 @@ export function JointBallotsView({ tournament, outcomes, update, notify }: ViewP
           const status = STATUS_LABELS[outcomes.get(item.id)?.status ?? 'empty'];
           return <li key={item.id}><button type="button" className={item.id === debate?.id ? 'selected' : ''} onClick={() => open(item)}>
             <span><b>{look.venueName(item.venueId)}</b><small>{look.teamName(item.teamIds[0])} – {look.teamName(item.teamIds[1])}</small></span>
-            <span><span className={'state-pill ' + (down.length ? 'unassigned' : status.className)}>{down.length ? 'Caído' : status.label}</span>{round.kind === 'qualifying' && <small className="tab-cell-sub">Enlace: {item.actaLinkSentAt ? 'Enviada' : 'Por enviar'}</small>}{item.publicActaSubmissionId && <small className="tab-cell-sub">Acta: Recibida online</small>}</span>
+            <span><span className={'state-pill ' + (down.length ? 'unassigned' : status.className)}>{down.length ? 'Caído' : status.label}</span>{!down.length && <small className="tab-cell-sub">Enlace: {item.actaLinkSentAt ? 'Enviada' : 'Por enviar'}</small>}{item.publicActaSubmissionId && <small className="tab-cell-sub">Acta: Recibida online</small>}</span>
           </button></li>;
         })}</ul>
       </section>
