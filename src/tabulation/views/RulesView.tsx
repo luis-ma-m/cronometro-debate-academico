@@ -155,8 +155,8 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
                 const current = warningDrafts.map((value) => value.trim()).filter((value) => value !== '').map(Number).filter(Number.isFinite);
                 let nextValue = Math.floor(warningEditorPhase.durationSeconds / 2);
                 while (current.includes(nextValue)) nextValue -= 1;
-                setWarningDrafts((drafts) => [...drafts, String(nextValue)]);
                 const values = [...new Set([...current, nextValue])].sort((a, b) => b - a);
+                setWarningDrafts(values.map(String));
                 set('timerPhases', settings.timerPhases.map((item) => item.id === warningEditorPhase.id ? { ...item, warningThresholdsSeconds: values } : item));
               }}><Plus size={14} /> Añadir aviso</button>
             <span />
