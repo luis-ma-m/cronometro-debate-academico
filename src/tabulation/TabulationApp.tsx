@@ -185,7 +185,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           }
           const round = next.rounds.find((item) => item.id === received.roundId);
           const debate = round?.debates.find((item) => item.id === received.debateId);
-          if (!round || !debate || round.number !== submission.roundNumber || round.name !== submission.roundName
+          if (!round || !debate || debate.id !== submission.debateRef || round.number !== submission.roundNumber || round.name !== submission.roundName
               || received.payload.signedBy.trim() !== submission.judgeName.trim()) {
             seenPublicActas.current.add(submission.id);
             store.logError('Acta pública rechazada: la ronda indicada no coincide con el debate.');
