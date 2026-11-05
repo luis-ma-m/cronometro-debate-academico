@@ -37,7 +37,8 @@ export function FeaturedMessageBanner({ message, now, serverOffsetMs, transition
   const [bannerRemoved, setBannerRemoved] = useState(false);
   const currentTime = now + serverOffsetMs;
   const timedSubtitles = message.subtitles.filter((item) => Number.isFinite(item.durationSeconds) && Number(item.durationSeconds) > 0);
-  const allSubtitlesAreTimed = message.subtitles.length > 0 && timedSubtitles.length === message.subtitles.length;\n  const allTimersFinished = allSubtitlesAreTimed && timedSubtitles.every((item) =>
+  const allSubtitlesAreTimed = message.subtitles.length > 0 && timedSubtitles.length === message.subtitles.length;
+  const allTimersFinished = allSubtitlesAreTimed && timedSubtitles.every((item) =>
     message.publishedAt + Number(item.durationSeconds) * 1000 <= currentTime);
   const onSubtitleExpired = useCallback((id: string) => {
     setRemovedSubtitleIds((current) => current.includes(id) ? current : [...current, id]);
