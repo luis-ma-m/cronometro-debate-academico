@@ -90,7 +90,57 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
             <Field label="Equipo"><select value={phase.side} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, side: event.target.value as Phase['side'] } : item))}><option value="favor">A favor</option><option value="contra">En contra</option></select></Field>
             <Field label="Quién interviene"><input value={phase.speaker} onChange={(event) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, speaker: event.target.value } : item))} /></Field>
             <NumberField label="Duración (segundos)" value={phase.durationSeconds} min={1} max={7200} onChange={(value) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, durationSeconds: Math.max(1, Math.round(value)) } : item))} />
-            <Field label="Avisos (segundos, separados por comas)" hint="Ejemplo: 60, 30, 10"><input value={(phase.warningThresholdsSeconds ?? []).join(', ')} onChange={(event) => { const values = event.target.value.split(',').map((value) => Number(value.trim())).filter((value) => Number.isFinite(value) && value > 0).sort((a, b) => b - a); set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, warningThresholdsSeconds: values } : item)); }} /></Field>
+            <div className="field tab-warning-editor">
+              <span className="field-label">Avisos del cronómetro</span>
+              <p className="muted">Añade un aviso por cada momento en el que quieras alertar durante esta intervención.</p>
+              <div className="tab-warning-list">
+                {(phase.warningThresholdsSeconds ?? []).map((threshold, warningIndex) => (
+                  <div className="tab-warning-item" key={phase.id + '-warning-' + warningIndex}>
+                    <label>
+                      <span>Aviso {warningIndex + 1} · segundos restantes</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={phase.durationSeconds}
+                        step={1}
+                        value={threshold}
+                        onChange={(event) => {
+                          const nextValue = Number(event.target.value);
+                          if (!event.target.value || !Number.isFinite(nextValue)) return;
+                          const values = [...(phase.warningThresholdsSeconds ?? [])];
+                          values[warningIndex] = Math.max(1, Math.min(phase.durationSeconds, Math.round(nextValue)));
+                          values.sort((a, b) => b - a);
+                          set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, warningThresholdsSeconds: values } : item));
+                        }}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="icon-button danger-action"
+                      aria-label={'Eliminar aviso ' + (warningIndex + 1)}
+                      title="Eliminar aviso"
+                      onClick={() => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? {
+                        ...item,
+                        warningThresholdsSeconds: (item.warningThresholdsSeconds ?? []).filter((_, currentIndex) => currentIndex !== warningIndex),
+                      } : item))}
+                    >×</button>
+                    <small>Al llegar a este tiempo, el cronómetro cambia a amarillo y, si el sonido está activado, reproduce un tono. Si ya se ha alcanzado otro aviso, también parpadea.</small>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="button ghost"
+                onClick={() => {
+                  const current = phase.warningThresholdsSeconds ?? [];
+                  const candidates = [60, 30, 10, Math.floor(phase.durationSeconds / 2), Math.floor(phase.durationSeconds / 3), 5, 1]
+                    .map((value) => Math.max(1, Math.min(phase.durationSeconds, value)));
+                  const nextValue = candidates.find((value) => !current.includes(value)) ?? Math.max(1, Math.min(phase.durationSeconds, (current[current.length - 1] ?? 1) - 1));
+                  const values = [...current, nextValue].sort((a, b) => b - a);
+                  set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, warningThresholdsSeconds: values } : item));
+                }}
+              ><Plus size={14} /> Añadir aviso</button>
+            </div>
             <Toggle label="Mostrar tiempo extra" checked={phase.allowOvertimeDisplay !== false} onChange={(value) => set('timerPhases', settings.timerPhases.map((item, i) => i === index ? { ...item, allowOvertimeDisplay: value } : item))} />
           </div>
           <div className="tab-actions">
