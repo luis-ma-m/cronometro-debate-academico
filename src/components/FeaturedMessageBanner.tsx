@@ -49,12 +49,13 @@ export function FeaturedMessageBanner({ message, now, serverOffsetMs, transition
     return () => window.clearTimeout(timeout);
   }, [allTimersFinished]);
 
+  const visibleSubtitles = message.subtitles.filter((item) => !removedSubtitleIds.includes(item.id));
   if (bannerRemoved) return null;
   return <section className={'featured-message-banner' + (transition ? ' featured-message-banner-transition' : '') + (allTimersFinished ? ' is-expiring' : '')} aria-live="polite" aria-hidden={allTimersFinished}>
     <span className="featured-message-kicker">MENSAJE DE LA ORGANIZACIÓN</span>
     <h2>{message.title}</h2>
-    <div className="featured-message-subtitles">
-      {message.subtitles.filter((item) => !removedSubtitleIds.includes(item.id)).map((item) => <FeaturedSubtitle
+    <div className={'featured-message-subtitles' + (visibleSubtitles.length === 1 ? ' featured-message-subtitles-single' : '')}>
+      {visibleSubtitles.map((item) => <FeaturedSubtitle
         key={item.id}
         item={item}
         expiresAt={typeof item.durationSeconds === 'number' ? message.publishedAt + item.durationSeconds * 1000 : undefined}
