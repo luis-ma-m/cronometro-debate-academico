@@ -348,7 +348,7 @@ export function RoundsView({ tournament, outcomes, update, notify, store, projec
             }}
             onZip={() => exportZip(round.id, false)} onPdf={() => exportPdf(round)} onScreen={() => setScreenId(round.id)} onAudit={() => audit(round)}
             onReopen={() => reopen(round)} onRemove={() => removeRound(round)} onSend={() => sendToPanel(round)} onOpenBallots={() => onNavigate('actas')}
-            whatsapp={tournament.settings.ballotMode === 'joint' ? <WhatsAppLinks tournament={tournament} round={round} notify={notify} onSent={(message) => store.log({ type: 'acta.link', message })} /> : null}
+            whatsapp={tournament.settings.ballotMode === 'joint' ? <WhatsAppLinks tournament={tournament} round={round} notify={notify} onSent={(message) => store.log({ type: 'acta.link', message })} onMarkSent={(debateId) => update((current) => ({ ...current, rounds: current.rounds.map((item) => item.id === round.id ? { ...item, debates: item.debates.map((debate) => debate.id === debateId ? { ...debate, actaLinkSentAt: Date.now() } : debate) } : item) }), { type: 'acta.link', message: 'Enlace de acta marcado como enviado en ' + round.name + '.' })} /> : null}
             onSimulate={tournament.sample ? () => {
               const result = simulateRoundResults(tournament, round.id);
               update(() => result.tournament, { type: 'acta.save', message: 'Resultados simulados de ' + round.name + ' (torneo de ejemplo).' });
@@ -585,7 +585,7 @@ function DebateTable({ tournament, round, problems, look, outcomes, onEdit }: {
 }
 
 /** Links for the chairs: each one opens the acta of its debate on the phone, to be sent back by WhatsApp. */
-function WhatsAppLinks({ tournament, round, notify, onSent }: { tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void }) {
+function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent }: { tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void; onMarkSent: (debateId: string) => void }) {
   const baseUrl = (tournament.whatsapp?.baseUrl.trim() || window.location.origin).replace(/\/+$/, '');
   const unreachable = /^https?:\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[)/.test(baseUrl);
   const desk = whatsAppNumber(tournament.whatsapp?.deskPhone ?? '');
@@ -596,7 +596,7 @@ function WhatsAppLinks({ tournament, round, notify, onSent }: { tournament: TabT
       const { url, link } = buildActaLink(tournament, round, debate, baseUrl);
       const phone = whatsAppNumber(judges.get(debate.chairId)?.phone ?? '');
       const label = (link.venue || 'Debate') + ' (' + link.teams.map((team) => team.name).join(' – ') + ')';
-      return { debate, url, link, phone, label, href: whatsAppUrl(phone, actaLinkMessage(link, url)) };
+      return { debate, url, link, phone, label, href: whatsAppUrl(phone, actaLinkMessage(link, url)), onSent: () => onMarkSent(debate.id) };
     });
   }, [tournament, round, baseUrl]);
   const groupMessage = 'Actas de ' + round.name + ' · ' + tournament.name + '. Cada juez principal abre el enlace de su sala, rellena el acta y la envía por WhatsApp a la mesa:\n\n'
