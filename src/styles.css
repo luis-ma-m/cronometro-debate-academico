@@ -1138,3 +1138,6 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
 @media(max-width:1250px){.tab-phase-fields{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:760px){.tab-phase-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.tab-phase-fields{grid-template-columns:minmax(0,1fr)}}
+
+@keyframes acta-loading-spin{to{transform:rotate(360deg)}}
+.acta-loading-spinner{display:inline-block;width:16px;height:16px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:acta-loading-spin .7s linear infinite;vertical-align:middle}
