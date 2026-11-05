@@ -15,6 +15,7 @@ import { buildSpeakerRankings, buildTeamRanking } from './rankings';
 import { currentPhaseLabel, currentPhaseSideLabel, resolveActiveRoundId } from './overview';
 import { SearchableEntityPicker } from './components/SearchableEntityPicker';
 import { FeaturedMessageManager } from './components/FeaturedMessageManager';
+import { FeaturedMessageBanner } from './components/FeaturedMessageBanner';
 import { applyOutboxToPanel, buildPanelHandoff, readOutbox, writeHandoff } from './tabulation/panelBridge';
 
 const SESSION_KEY = 'ledu-admin-session';
@@ -1790,7 +1791,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
     {!snapshot ? <section className="timer-empty"><Monitor size={36} /><h1>Sala no disponible</h1><p>{error || 'La sala física no existe o aún no se ha configurado.'}</p><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Reintentar</button></section>
     : transitioning ? <section className="round-transition" aria-live="polite">
         <span className="eyebrow">RONDA ACTIVADA</span>
-        {snapshot.featuredMessage && <section className="featured-message-banner featured-message-banner-transition"><span className="featured-message-kicker">MENSAJE DE LA ORGANIZACIÓN</span><h2>{snapshot.featuredMessage.title}</h2><div className="featured-message-subtitles">{snapshot.featuredMessage.subtitles.map((item) => { const remaining = Math.max(0, Math.ceil((snapshot.featuredMessage!.publishedAt + item.durationSeconds * 1000 - (now + serverOffsetMs)) / 1000)); return <div className="featured-message-item" key={item.id}><span>{item.text}</span><b>{formatTime(remaining)}</b></div>; })}</div></section>}
+        {snapshot.featuredMessage && <FeaturedMessageBanner key={snapshot.featuredMessage.id} message={snapshot.featuredMessage} now={now} serverOffsetMs={serverOffsetMs} transition />}
         <div className="transition-orbit"><Monitor size={38} /></div>
         <h1>Nueva ronda activada</h1>
         <p className="transition-round-name">{snapshot.roundName}</p>
@@ -1802,9 +1803,9 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
         <div className="transition-countdown"><b>{transitionSeconds}</b><span>segundos para comenzar</span></div>
         <p className="transition-help">El cronómetro está preparado y no descontará tiempo hasta que termine este aviso.</p>
       </section>
-    : !snapshot.hasAssignment ? <section className="timer-empty no-room-assignment">{snapshot.featuredMessage && <section className="featured-message-banner" aria-live="polite"><span className="featured-message-kicker">MENSAJE DE LA ORGANIZACIÓN</span><h2>{snapshot.featuredMessage.title}</h2><div className="featured-message-subtitles">{snapshot.featuredMessage.subtitles.map((item) => { const remaining = Math.max(0, Math.ceil((snapshot.featuredMessage!.publishedAt + item.durationSeconds * 1000 - (now + serverOffsetMs)) / 1000)); return <div className="featured-message-item" key={item.id}><span>{item.text}</span><b>{formatTime(remaining)}</b></div>; })}</div></section>}<Monitor size={42} /><p className="eyebrow">{snapshot.tournamentName} · {snapshot.roundName}</p><h1>Sala sin asignación en esta ronda</h1><p>{snapshot.physicalRoomName} conserva su enlace permanente. El panel de organización aún no ha asignado un debate a esta sala para la ronda activa.</p><span className="permanent-room-slug">/sala/{snapshot.roomSlug}</span><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Actualizar estado</button></section>
+    : !snapshot.hasAssignment ? <section className="timer-empty no-room-assignment">{snapshot.featuredMessage && <FeaturedMessageBanner key={snapshot.featuredMessage.id} message={snapshot.featuredMessage} now={now} serverOffsetMs={serverOffsetMs} />}<Monitor size={42} /><p className="eyebrow">{snapshot.tournamentName} · {snapshot.roundName}</p><h1>Sala sin asignación en esta ronda</h1><p>{snapshot.physicalRoomName} conserva su enlace permanente. El panel de organización aún no ha asignado un debate a esta sala para la ronda activa.</p><span className="permanent-room-slug">/sala/{snapshot.roomSlug}</span><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Actualizar estado</button></section>
     : <>
-      {snapshot.featuredMessage && <section className="featured-message-banner" aria-live="polite"><span className="featured-message-kicker">MENSAJE DE LA ORGANIZACIÓN</span><h2>{snapshot.featuredMessage.title}</h2><div className="featured-message-subtitles">{snapshot.featuredMessage.subtitles.map((item) => { const remaining = Math.max(0, Math.ceil((snapshot.featuredMessage!.publishedAt + item.durationSeconds * 1000 - (now + serverOffsetMs)) / 1000)); return <div className="featured-message-item" key={item.id}><span>{item.text}</span><b>{formatTime(remaining)}</b></div>; })}</div></section>}
+      {snapshot.featuredMessage && <FeaturedMessageBanner key={snapshot.featuredMessage.id} message={snapshot.featuredMessage} now={now} serverOffsetMs={serverOffsetMs} />}
       <section className="timer-card timer-primary-card">
         <div className="timer-status"><span className={'state-pill ' + (timedOut ? 'paused' : room?.timer.status || '')}>{ended ? 'Debate finalizado' : timedOut ? 'Tiempo agotado · exceso de tiempo' : room?.timer.status === 'running' ? 'Intervención en curso' : room?.timer.status === 'paused' ? 'Cronómetro pausado' : 'Preparado para comenzar'}</span><span>{snapshot.physicalRoomName} · {snapshot.roundName}</span></div>
         <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''} · {phase?.side === 'favor' ? 'A favor' : phase?.side === 'contra' ? 'En contra' : ''}</b></div>
