@@ -71,6 +71,21 @@ export interface Room {
   updatedAt: number;
 }
 
+export interface FeaturedMessageSubtitle {
+  id: string;
+  text: string;
+  durationSeconds: number;
+}
+
+export interface FeaturedMessage {
+  id: string;
+  title: string;
+  subtitles: FeaturedMessageSubtitle[];
+  /** Empty means every active physical room. */
+  targetPhysicalRoomIds: string[];
+  publishedAt: number;
+}
+
 export interface Tournament {
   tournamentName: string;
   rounds: Round[];
@@ -87,6 +102,7 @@ export interface Tournament {
   institutions?: string[];
   formatPhases?: Phase[];
   minimumJudgesPerRoom?: number;
+  featuredMessage?: FeaturedMessage;
   revision: number;
   updatedAt: number;
   serverTime?: number;
@@ -106,5 +122,6 @@ export interface PublicRoom {
   teamContra: string;
   judges: string[];
   minimumJudgesPerRoom?: number;
+  featuredMessage?: FeaturedMessage;
   serverTime: number;
 }
