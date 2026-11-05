@@ -438,6 +438,9 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     const oldRoomRows = data.rows.Salas;
     const persistedTimers = timerRowMap(data.rows.Cronometros);
     const now = Date.now();
+    if (tournament.featuredMessage && tournament.featuredMessage.id !== current.featuredMessage?.id) {
+      tournament.featuredMessage = { ...tournament.featuredMessage, publishedAt: now };
+    }
     const finalRooms: Room[] = tournament.rooms.map((room) => {
       const round = tournament.rounds.find((item) => item.id === room.roundId);
       const selectedFormatId = room.formatId || round?.defaultFormatId || "";
