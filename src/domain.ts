@@ -74,7 +74,7 @@ export interface Room {
 export interface FeaturedMessageSubtitle {
   id: string;
   text: string;
-  durationSeconds: number;
+  durationSeconds?: number;
 }
 
 export interface FeaturedMessage {
