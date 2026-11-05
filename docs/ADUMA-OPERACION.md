@@ -55,6 +55,7 @@ Guía para la mesa de tabulación: qué hacer antes del torneo, en cada ronda y 
    - Cada juez principal rellena el acta en el móvil con el jurado y pulsa «Enviar por WhatsApp».
    - En Actas → «Actas recibidas por WhatsApp», copia los mensajes que vayan llegando (puedes pegar el chat entero) y pulsa «Aceptar» en cada una, o «Aceptar las … nuevas sin incidencias».
    - Revisa las que muestren avisos y cruza el total con el papel cuando llegue.
+   - **Transcribe todos los avisos y todas las faltas**, aunque sean leves o aunque se hayan generado por acumulación. No basta con anotar únicamente la falta resultante: los avisos y las faltas originales deben quedar reflejados por separado.
 7. **Actas en papel** de las salas que no la hayan enviado. Transcríbelas en el orden del papel: postura, ítems (Enter baja por la columna), faltas, total escrito, ganador, jurado, notas de los integrantes con sus posiciones y notas. «Guardar y siguiente» o Ctrl+Enter.
    - Si hay prisa, usa el **modo rápido** (ganador y totales) y completa el detalle después.
    - Un aviso «total escrito no coincide» suele ser un error de transcripción: revísalo.
