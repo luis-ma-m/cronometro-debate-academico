@@ -51,7 +51,7 @@ export function RulesView({ tournament, update, notify, store }: ViewProps) {
   const commitWarningBulkDrafts = () => {
     if (warningBulkDrafts.length !== settings.timerPhases.length) return;
     const parsed = warningBulkDrafts.map((draft) => {
-      const values = draft.split(/[,;\\s]+/).map((value) => value.trim()).filter(Boolean).map(Number);
+      const values = draft.split(/[,;\s]+/).map((value) => value.trim()).filter(Boolean).map(Number);
       return [...new Set(values)].sort((a, b) => b - a);
     });
     if (parsed.some((values) => values.some((value) => !Number.isFinite(value)))) return;
