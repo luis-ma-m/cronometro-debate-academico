@@ -95,6 +95,26 @@ export async function submitPublicActa(input: Record<string, unknown>): Promise<
   return { id: String(row.id), createdAt: new Date(String(row.created_at)).getTime(), duplicate: true };
 }
 
+export async function publicActaAlreadySubmitted(tournamentIdValue: string, publicDebateRefValue: string): Promise<boolean> {
+  await ensureSchema();
+  const tournamentId = text(tournamentIdValue, 200);
+  const publicDebateRef = text(publicDebateRefValue, 80);
+  if (!/^[a-zA-Z0-9_-]{1,200}$/.test(tournamentId) || !/^[a-zA-Z0-9_-]{1,80}$/.test(publicDebateRef)) {
+    throw new ApiError("INVALID_PAYLOAD", "El enlace del acta no es válido.");
+  }
+  const remote = await getTabulationSnapshot(tournamentId);
+  if (!remote) return false;
+  const tournament = remote.snapshot as unknown as TabTournament;
+  const debate = tournament.rounds.flatMap((round) => round.debates)
+    .find((item) => actaDebateRef(tournament, item.id) === publicDebateRef);
+  if (!debate) return false;
+  const result = await getPool().query(
+    "SELECT 1 FROM public_acta_submissions WHERE tournament_id=$1 AND debate_ref=$2 LIMIT 1",
+    [tournamentId, debate.id],
+  );
+  return result.rows.length > 0;
+}
+
 export async function listPublicActas(tournamentIdValue: string): Promise<PublicActaSubmission[]> {
   await ensureSchema();
   const tournamentId = text(tournamentIdValue, 200);
