@@ -6,7 +6,7 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
-import { apiConfigured, getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from '../api';
+import { apiConfigured, getTabulationSnapshot, listPublicActas, listTabulationSnapshots, publishTabulationSnapshot } from '../api';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 import { BallotsView } from './views/BallotsView';
@@ -16,6 +16,7 @@ import { ParticipantsView } from './views/ParticipantsView';
 import { RoundsView } from './views/RoundsView';
 import { RulesView } from './views/RulesView';
 import { StandingsView } from './views/StandingsView';
+import { applyReceivedActa, readActaCode } from './whatsapp';
 
 const VIEWS = [
   { id: 'inicio', label: 'Inicio', icon: House },
@@ -57,6 +58,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
   const initialRecovery = useRef(false);
   const componentAlive = useRef(true);
+  const seenPublicActas = useRef(new Set<string>());
   useEffect(() => { componentAlive.current = true; return () => { componentAlive.current = false; }; }, []);
   const remoteToken = useMemo(() => {
     try {
@@ -158,6 +160,65 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       setRemoteSync('checking');
     }
   }, [apiConfigured, remoteToken, tournament?.id, state.status, remoteSync]);
+
+  // Public judge submissions are immutable inbox records. Only the authenticated tabulation session
+  // can read them; each valid code is checked against the current debate before being applied.
+  useEffect(() => {
+    if (!apiConfigured || !remoteToken || !tournament || state.readOnly) return;
+    let cancelled = false;
+    const receive = async () => {
+      try {
+        const submissions = await listPublicActas(remoteToken, tournament.id);
+        if (cancelled) return;
+        const currentState = store.getState();
+        if (!currentState.tournament || currentState.tournament.id !== tournament.id || currentState.status !== 'saved' || currentState.readOnly) return;
+        let next = currentState.tournament;
+        let applied = 0;
+        for (const submission of submissions) {
+          if (seenPublicActas.current.has(submission.id)) continue;
+          const received = readActaCode(next, submission.code);
+          if (received.error || !received.payload || !received.roundId || !received.debateId) {
+            seenPublicActas.current.add(submission.id);
+            store.logError('Acta pública rechazada (' + submission.roundName + ', ' + submission.judgeName + '): ' + (received.error ?? 'código no válido'));
+            continue;
+          }
+          const round = next.rounds.find((item) => item.id === received.roundId);
+          const debate = round?.debates.find((item) => item.id === received.debateId);
+          if (!round || !debate || round.number !== submission.roundNumber) {
+            seenPublicActas.current.add(submission.id);
+            store.logError('Acta pública rechazada: la ronda indicada no coincide con el debate.');
+            continue;
+          }
+          if (debate.publicActaSubmissionId === submission.id) {
+            seenPublicActas.current.add(submission.id);
+            continue;
+          }
+          next = applyReceivedActa(next, received, submission.createdAt);
+          next = { ...next, rounds: next.rounds.map((item) => item.id !== round.id ? item : {
+            ...item, debates: item.debates.map((itemDebate) => itemDebate.id === debate.id
+              ? { ...itemDebate, publicActaSubmissionId: submission.id } : itemDebate),
+          }) };
+          seenPublicActas.current.add(submission.id);
+          applied++;
+        }
+        if (applied && !cancelled) {
+          const ok = store.update(() => next, {
+            type: 'acta.save',
+            message: applied + ' acta(s) recibida(s) directamente desde el móvil y sincronizada(s) con Neon.',
+            details: { source: 'public-acta-inbox', count: applied },
+          });
+          if (ok) store.flush();
+        }
+      } catch {
+        // Network errors are retried on the next polling cycle; they do not affect local tabulation.
+      }
+    };
+    void receive();
+    const timer = window.setInterval(() => void receive(), 10000);
+    window.addEventListener('focus', receive);
+    window.addEventListener('online', receive);
+    return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('focus', receive); window.removeEventListener('online', receive); };
+  }, [apiConfigured, remoteToken, tournament?.id, state.readOnly, store]);
 
   useEffect(() => {
     if (!apiConfigured || !remoteToken || !tournament || remoteSync === 'conflict') return;
