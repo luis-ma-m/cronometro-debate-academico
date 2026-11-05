@@ -123,7 +123,7 @@ function JudgeActa({ link }: { link: ActaLink }) {
       } catch { /* If status cannot be checked, keep the form available; sending still enforces uniqueness. */ }
     };
     void refreshStatus();
-    const interval = window.setInterval(() => void refreshStatus(), 5000);
+    const interval = window.setInterval(() => void refreshStatus(), 10000);
     return () => { active = false; window.clearInterval(interval); };
   }, [link]);
 
