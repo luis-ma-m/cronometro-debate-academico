@@ -934,11 +934,17 @@ export default function App() {
     if (!window.confirm('¿Eliminar únicamente la asignación de "' + room.name + '" para esta ronda?' + detail +
       (hasScorecard ? ' Se eliminará también el acta y sus puntuaciones.' : '') +
       ' El enlace permanente de la sala física seguirá existiendo y podrá reutilizarse en otras rondas.')) return;
-    updateData((current) => ({
-      ...current,
-      rooms: current.rooms.filter((item) => item.id !== room.id),
-      scoring: current.scoring ? { ...current.scoring, scorecards: current.scoring.scorecards.filter((card) => card.roomId !== room.id) } : current.scoring,
-    }));
+    const candidate: Tournament = {
+      ...data,
+      rooms: data.rooms.filter((item) => item.id !== room.id),
+      scoring: data.scoring ? { ...data.scoring, scorecards: data.scoring.scorecards.filter((card) => card.roomId !== room.id) } : data.scoring,
+      updatedAt: Date.now(),
+    };
+    // A room deletion is destructive and must reach Neon immediately. Do not
+    // leave it queued behind the global Save button.
+    void persist(candidate).then((saved) => {
+      if (saved) setTabulationNotice('Asignación de "' + room.name + '" eliminada y sincronizada con la base de datos.');
+    });
   };
   const removePhysicalRoom = (physicalRoomId: string) => {
     const physical = data.physicalRooms.find((item) => item.id === physicalRoomId);
@@ -955,20 +961,23 @@ export default function App() {
       'Esta acción no se puede deshacer. Los eventos del registro de actividad se conservarán cuando sea posible, pero perderán la referencia a la asignación eliminada.',
     ].filter(Boolean).join('\n\n');
     if (!window.confirm('¿Eliminar definitivamente la sala física "' + physical.name + '"?\n\n' + consequences)) return;
-    updateData((current) => {
-      const removedAssignmentIds = new Set(current.rooms.filter((room) => room.physicalRoomId === physicalRoomId).map((room) => room.id));
-      return {
-        ...current,
-        physicalRooms: current.physicalRooms.filter((item) => item.id !== physicalRoomId),
-        rooms: current.rooms.filter((room) => room.physicalRoomId !== physicalRoomId),
-        scoring: current.scoring ? { ...current.scoring, scorecards: current.scoring.scorecards.filter((card) => !removedAssignmentIds.has(card.roomId)) } : current.scoring,
-      };
+    const removedAssignmentIds = new Set(assignments.map((room) => room.id));
+    const candidate: Tournament = {
+      ...data,
+      physicalRooms: data.physicalRooms.filter((item) => item.id !== physicalRoomId),
+      rooms: data.rooms.filter((room) => room.physicalRoomId !== physicalRoomId),
+      scoring: data.scoring ? { ...data.scoring, scorecards: data.scoring.scorecards.filter((card) => !removedAssignmentIds.has(card.roomId)) } : data.scoring,
+      updatedAt: Date.now(),
+    };
+    // Persist first; only clean up cached controller links after Neon confirms.
+    void persist(candidate).then((saved) => {
+      if (!saved) return;
+      delete preparedRoomLinksRef.current[physicalRoomId];
+      if (preparedRoomLink?.href.includes('/sala/' + physical.slug)) setPreparedRoomLink(null);
+      try { localStorage.removeItem(pendingTimerKey(physical.slug)); } catch { /* local timer queue is best-effort cleanup */ }
+      setServerError('');
+      setTabulationNotice('Sala física "' + physical.name + '" eliminada y sincronizada con la base de datos, junto con sus asignaciones y actas.');
     });
-    delete preparedRoomLinksRef.current[physicalRoomId];
-    if (preparedRoomLink?.href.includes('/sala/' + physical.slug)) setPreparedRoomLink(null);
-    try { localStorage.removeItem(pendingTimerKey(physical.slug)); } catch { /* local timer queue is best-effort cleanup */ }
-    setServerError('');
-    setTabulationNotice('Sala física "' + physical.name + '" eliminada junto con sus asignaciones e historial de actas asociado.');
   };
   const removeSelectedRound = () => {
     const round = data.rounds.find((item) => item.id === activeRound);
