@@ -97,6 +97,11 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
   const teamBookings = new Map<string, string>();
   const judgeBookings = new Map<string, string>();
   for (const room of tournament.rooms) {
+    // A physical room can exist in the catalog without being assigned to a
+    // debate. Only validate round, format and assignment rules once it has
+    // at least one team or judge assigned.
+    const hasAssignment = Boolean(room.teamFavorId || room.teamContraId || (room.judgeIds?.length ?? 0) > 0);
+    if (!hasAssignment) continue;
     if (!roundIds.has(room.roundId)) errors.push(`${room.name}: no tiene una ronda válida.`);
     if (room.teamFavorId && room.teamFavorId === room.teamContraId) errors.push(`${room.name}: un equipo no puede debatir contra sí mismo.`);
     for (const id of [room.teamFavorId, room.teamContraId].filter(Boolean)) {
@@ -139,7 +144,10 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
   const conflictInput = {
     teams: tournament.teams.map((team) => ({ ...team, active: true, incompatibleJudgeIds: (team as typeof team & { incompatibleJudgeIds?: string[] }).incompatibleJudgeIds ?? [] })),
     judges: tournament.judges.map((judge) => ({ ...judge, active: true, incompatibleJudgeIds: (judge as typeof judge & { incompatibleJudgeIds?: string[] }).incompatibleJudgeIds ?? [] })),
-    rooms: tournament.rooms,
+    rooms: tournament.rooms.filter((room) =>
+      roundIds.has(room.roundId) &&
+      Boolean(room.teamFavorId || room.teamContraId || (room.judgeIds?.length ?? 0) > 0)
+    ),
   } as unknown as Parameters<typeof findAssignmentConflicts>[0];
   const conflictLabels = { institution: 'Conflicto de institución', 'team-judge': 'Incompatibilidad equipo–juez', 'judge-judge': 'Incompatibilidad juez–juez' } as const;
   for (const conflict of findAssignmentConflicts(conflictInput)) {
