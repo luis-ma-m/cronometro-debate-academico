@@ -28,6 +28,21 @@ describe('incompatibility domain rules', () => {
     value.judges[0].incompatibleJudgeIds=['j2'];
     expect(validateAssignments(value).some((message)=>message.includes('Juez 1 y Juez 2 son incompatibles'))).toBe(true);
   });
+
+    it('allows physical rooms with no round or debate assignment to remain in the catalog', () => {
+      const value = base();
+      value.rooms = [
+        { ...room, name: 'Aula 2', roundId: '', teamFavorId: '', teamContraId: '', judgeIds: [], phases: [] },
+        { ...room, id: 'r2', name: 'Aula 3', roundId: 'deleted-round', teamFavorId: '', teamContraId: '', judgeIds: [], phases: [] },
+      ];
+      expect(validateAssignments(value)).toEqual([]);
+    });
+  
+    it('still rejects a room with an actual assignment when its round no longer exists', () => {
+      const value = base();
+      value.rooms[0].roundId = 'deleted-round';
+      expect(validateAssignments(value)).toContain('Sala 1: no tiene una ronda válida.');
+    });
 });
 
 
