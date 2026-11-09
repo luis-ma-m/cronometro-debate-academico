@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo } from 'react';
-import { ChevronRight, ClipboardList, Download, ExternalLink, House, Lock, Projector, ScrollText, Shuffle, SlidersHorizontal, Trophy, Users, X } from 'lucide-react';
+import { ChevronRight, ClipboardList, Download, ExternalLink, House, Lock, Projector, Save, ScrollText, Shuffle, SlidersHorizontal, Trophy, Users, X } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { tournamentProgress } from './progress';
 import { computeTournamentOutcomes } from './results';
@@ -146,9 +146,9 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const [view, setViewState] = useState<ViewId>(readHashView);
   const [projection, setProjection] = useState(false);
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [operatorDraft, setOperatorDraft] = useState(state.operator);
   const [remoteSync, setRemoteSync] = useState<'checking' | 'synced' | 'offline' | 'conflict' | 'error'>('checking');
+  const [manualSaving, setManualSaving] = useState(false);
   const [remoteConflict, setRemoteConflict] = useState<{ remote: import('../api').AuthoritativeTabulationSnapshot; localUpdatedAt: number } | null>(null);
   const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
   const initialRecovery = useRef(false);
@@ -417,8 +417,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   useEffect(() => {
     const onHashChange = () => { const next = readHashView(); setViewState(next); onViewChange?.(next); };
     window.addEventListener('hashchange', onHashChange);
-    const timer = window.setInterval(() => setNow(Date.now()), 5000);
-    return () => { window.removeEventListener('hashchange', onHashChange); window.clearInterval(timer); };
+    return () => { window.removeEventListener('hashchange', onHashChange); };
   }, [onViewChange]);
   useEffect(() => {
     // Every unexpected error is kept in the log (once per message); none of them stops the page.
@@ -513,12 +512,78 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     if (exportTournamentCopy(store) !== null) notify('Copia exportada con el registro. Guárdala fuera del navegador como respaldo adicional a la sincronización con Neon.');
   };
 
-  const saveLabel = remoteSync === 'synced' ? 'Sincronizado con Neon' : remoteSync === 'checking' ? 'Sincronizando…' : remoteSync === 'conflict' ? 'Conflicto entre dispositivos' : remoteSync === 'offline' ? 'Sin conexión con Neon' : remoteSync === 'error' ? 'Error de sincronización' : state.readOnly ? 'Solo lectura'
-    : state.status === 'dirty' ? 'Guardando…'
-      : state.status === 'conflict' ? 'Conflicto con otra pestaña'
-        : state.status === 'error' ? 'Error al guardar'
-          : state.lastSavedAt ? 'Guardado en este navegador · hace ' + Math.max(0, Math.round((now - state.lastSavedAt) / 1000)) + ' s'
-            : tournament ? 'Guardado en este navegador' : 'Sin torneo abierto';
+  const saveToNeon = async () => {
+    if (!apiConfigured || !remoteToken || !tournament || state.readOnly || state.status === 'conflict' || remoteSync === 'conflict' || manualSaving) return;
+    if (!store.flush()) {
+      notify('No se ha podido guardar la copia local. Resuelve primero el error de almacenamiento.', 'error');
+      return;
+    }
+    const latest = store.getState();
+    const snapshot = latest.tournament;
+    if (!snapshot || snapshot.id !== tournament.id || latest.status !== 'saved') {
+      notify('La copia local todavía no está lista para sincronizarse. Vuelve a intentarlo.', 'error');
+      return;
+    }
+    let cursor = remoteCursor.current;
+    if (!cursor || cursor.id !== snapshot.id) {
+      try {
+        const remote = await getTabulationSnapshot(remoteToken, snapshot.id);
+        if (remote) {
+          setRemoteConflict({ remote, localUpdatedAt: snapshot.updatedAt });
+          setRemoteSync('conflict');
+          notify('Neon contiene una revisión que todavía no está vinculada a esta sesión. Revisa las diferencias antes de publicar.', 'error');
+          return;
+        }
+        cursor = { id: snapshot.id, revision: 0, localRevision: -1, inFlight: false };
+        remoteCursor.current = cursor;
+      } catch (error) {
+        setRemoteSync('error');
+        notify(error instanceof Error ? error.message : 'No se ha podido consultar Neon.', 'error');
+        return;
+      }
+    }
+    if (cursor.inFlight) {
+      notify('Ya hay una sincronización en curso. Espera a que termine.', 'warning');
+      return;
+    }
+    cursor.inFlight = true;
+    setManualSaving(true);
+    setRemoteSync('checking');
+    try {
+      const result = await publishTabulationSnapshot(remoteToken, {
+        tabTournamentId: snapshot.id,
+        expectedRevision: cursor.revision,
+        operationId: makeTabId('tabpub'),
+        snapshot,
+      });
+      if (result.tabTournamentId !== snapshot.id || result.snapshot.id !== snapshot.id || result.revision !== cursor.revision + 1) {
+        throw new Error('Neon devolvió una confirmación de publicación incoherente.');
+      }
+      remoteCursor.current = { id: snapshot.id, revision: result.revision, localRevision: snapshot.revision, inFlight: false };
+      setRemoteSync('synced');
+      notify('Tabulación guardada y confirmada en Neon.');
+    } catch (error) {
+      cursor.inFlight = false;
+      const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code) : '';
+      if (code === 'REVISION_CONFLICT') {
+        try {
+          const remote = await getTabulationSnapshot(remoteToken, snapshot.id);
+          if (remote) setRemoteConflict({ remote, localUpdatedAt: snapshot.updatedAt });
+        } catch { /* Preserve the local copy and the original publication error. */ }
+        setRemoteSync('conflict');
+      } else {
+        setRemoteSync('error');
+      }
+      notify(error instanceof Error ? error.message : 'No se ha podido guardar Tabulación en Neon.', 'error');
+      store.logError(error instanceof Error ? error.message : 'No se pudo publicar Tabulación manualmente en Neon.');
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
+  const cursorForStatus = remoteCursor.current;
+  const hasPendingNeonChanges = Boolean(tournament && (state.status === 'dirty' || state.status === 'error' || !cursorForStatus || cursorForStatus.id !== tournament.id || cursorForStatus.localRevision !== tournament.revision));
+  const saveLabel = remoteSync === 'conflict' ? 'Conflicto entre dispositivos' : remoteSync === 'error' ? 'Error de sincronización' : remoteSync === 'offline' ? 'Sin conexión con Neon' : manualSaving ? 'Guardando en Neon…' : hasPendingNeonChanges ? 'Cambios pendientes de guardar en Neon' : remoteSync === 'checking' ? 'Comprobando Neon…' : 'Sincronizado con Neon';
 
   const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store } : null;
 
@@ -544,7 +609,8 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       <header className="topbar">
         <div><span className="eyebrow">TABULACIÓN · ESPACIO DE COMPETICIÓN</span><h1>{tournament?.name ?? 'Tabulación de debate académico'}</h1></div>
         {tournament && <div className="top-actions tab-no-project">
-          <span className="live-status"><i className={state.status === 'conflict' || state.status === 'error' || state.readOnly ? 'disconnected' : ''} /> {saveLabel}</span>
+          <span className="live-status"><i className={state.status === 'conflict' || state.status === 'error' || state.readOnly || remoteSync === 'error' || remoteSync === 'conflict' ? 'disconnected' : ''} /> {saveLabel}</span>
+          <button type="button" className="button primary" onClick={() => void saveToNeon()} disabled={!apiConfigured || !remoteToken || state.readOnly || state.status === 'conflict' || remoteSync === 'conflict' || manualSaving} title="Forzar el guardado de la copia local en Neon"><Save size={16} /> {manualSaving ? 'Guardando…' : 'Guardar en Neon'}</button>
           <button type="button" className="button secondary" onClick={exportCopy}><Download size={16} /> Exportar copia</button>
           <button type="button" className="button secondary" onClick={() => setProjection(true)} title="Pantalla limpia para proyectar (Esc para salir)"><Projector size={16} /> Proyectar</button>
         </div>}
