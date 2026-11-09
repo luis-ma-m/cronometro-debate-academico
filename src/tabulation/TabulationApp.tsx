@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo } from 'react';
-import { ChevronRight, ClipboardList, Download, ExternalLink, House, Lock, Projector, ScrollText, Shuffle, SlidersHorizontal, Trophy, Users, X } from 'lucide-react';
+import { ChevronRight, ClipboardList, Download, ExternalLink, House, Lock, Projector, Save, ScrollText, Shuffle, SlidersHorizontal, Trophy, Users, X } from 'lucide-react';
 import { ErrorBoundary } from './ErrorBoundary';
 import { tournamentProgress } from './progress';
 import { computeTournamentOutcomes } from './results';
@@ -146,9 +146,9 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const [view, setViewState] = useState<ViewId>(readHashView);
   const [projection, setProjection] = useState(false);
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
-  const [now, setNow] = useState(() => Date.now());
   const [operatorDraft, setOperatorDraft] = useState(state.operator);
   const [remoteSync, setRemoteSync] = useState<'checking' | 'synced' | 'offline' | 'conflict' | 'error'>('checking');
+  const [manualSaving, setManualSaving] = useState(false);
   const [remoteConflict, setRemoteConflict] = useState<{ remote: import('../api').AuthoritativeTabulationSnapshot; localUpdatedAt: number } | null>(null);
   const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
   const initialRecovery = useRef(false);
@@ -417,8 +417,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   useEffect(() => {
     const onHashChange = () => { const next = readHashView(); setViewState(next); onViewChange?.(next); };
     window.addEventListener('hashchange', onHashChange);
-    const timer = window.setInterval(() => setNow(Date.now()), 5000);
-    return () => { window.removeEventListener('hashchange', onHashChange); window.clearInterval(timer); };
+    return () => { window.removeEventListener('hashchange', onHashChange);
   }, [onViewChange]);
   useEffect(() => {
     // Every unexpected error is kept in the log (once per message); none of them stops the page.
