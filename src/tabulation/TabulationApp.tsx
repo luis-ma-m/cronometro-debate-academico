@@ -417,7 +417,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   useEffect(() => {
     const onHashChange = () => { const next = readHashView(); setViewState(next); onViewChange?.(next); };
     window.addEventListener('hashchange', onHashChange);
-    return () => { window.removeEventListener('hashchange', onHashChange);
+    return () => { window.removeEventListener('hashchange', onHashChange); };
   }, [onViewChange]);
   useEffect(() => {
     // Every unexpected error is kept in the log (once per message); none of them stops the page.
