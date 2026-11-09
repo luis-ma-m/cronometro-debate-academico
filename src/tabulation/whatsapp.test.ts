@@ -12,6 +12,7 @@ import {
 
 function aduma(): TabTournament {
   const tournament = makeTournament('aduma', ['a', 'b', 'c', 'd'], ['j1', 'j2', 'j3'], 2);
+  tournament.id = 'aduma-acta-test-tournament';
   tournament.judges[0].phone = '600111222';
   tournament.whatsapp = { deskPhone: '34600999888', baseUrl: 'https://debate.example' };
   tournament.speakers.push({ id: 'a-s5', teamId: 'a', name: 'Quinta integrante con un nombre bastante largo' });
