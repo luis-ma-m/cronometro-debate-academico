@@ -357,6 +357,7 @@ export function normalizeTabTournament(raw: unknown): NormalizeResult {
 
 /** Makes an independent copy, rewriting all entity IDs and internal references while retaining tournament data. */
 export function duplicateTabTournament(source: TabTournament, now = Date.now()): TabTournament {
+  source = structuredClone(source);
   const teams = new Map(source.teams.map((x) => [x.id, makeTabId('team')]));
   const speakers = new Map(source.speakers.map((x) => [x.id, makeTabId('speaker')]));
   const judges = new Map(source.judges.map((x) => [x.id, makeTabId('judge')]));
@@ -379,7 +380,7 @@ export function duplicateTabTournament(source: TabTournament, now = Date.now()):
   }
   const copyRound = (round: TabRound): TabRound => ({
     ...round, id: mapped(rounds, round.id),
-    ...(round.timerPhases ? { timerPhases: round.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase') })) } : {}),
+    ...(round.timerPhases ? { timerPhases: round.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase'), warningThresholdsSeconds: [...phase.warningThresholdsSeconds] })) } : {}),
     debates: round.debates.map((debate) => ({
       ...debate, id: mapped(debates, debate.id),
       venueId: mapped(venues, debate.venueId),
@@ -399,7 +400,7 @@ export function duplicateTabTournament(source: TabTournament, now = Date.now()):
           ...(ballot.winnerTeamId ? { winnerTeamId: mapped(teams, ballot.winnerTeamId) } : {}),
         })),
         penalties: teamRecord(debate.result.penalties),
-        ...(debate.result.override ? { override: { ...debate.result.override, winnerTeamId: mapped(teams, debate.result.override.winnerTeamId) } : {}),
+        ...(debate.result.override ? { override: { ...debate.result.override, winnerTeamId: mapped(teams, debate.result.override.winnerTeamId) } } : {}),
         ...(debate.result.joint ? { joint: {
           ...debate.result.joint,
           winnerTeamId: mapped(teams, debate.result.joint.winnerTeamId),
@@ -422,7 +423,9 @@ export function duplicateTabTournament(source: TabTournament, now = Date.now()):
     settings: {
       ...source.settings,
       rubric: source.settings.rubric.map((item) => ({ ...item, id: makeTabId('rubric') })),
-      timerPhases: source.settings.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase') })),
+      tiebreaks: [...source.settings.tiebreaks],
+      bracketSeedOrder: [...source.settings.bracketSeedOrder],
+      timerPhases: source.settings.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase'), warningThresholdsSeconds: [...phase.warningThresholdsSeconds] })),
     },
     teams: source.teams.map((team) => ({ ...team, id: mapped(teams, team.id), incompatibleJudgeIds: team.incompatibleJudgeIds.map((id) => mapped(judges, id)) })),
     speakers: source.speakers.map((speaker) => ({ ...speaker, id: mapped(speakers, speaker.id), teamId: mapped(teams, speaker.teamId) })),
