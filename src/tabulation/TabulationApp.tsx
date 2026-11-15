@@ -148,6 +148,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const [notice, setNotice] = useState<{ kind: NoticeKind; message: string } | null>(null);
   const [operatorDraft, setOperatorDraft] = useState(state.operator);
   const [remoteSync, setRemoteSync] = useState<'checking' | 'synced' | 'offline' | 'conflict' | 'error'>('checking');
+  const activeTournamentId = useRef<string | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
   const [remoteConflict, setRemoteConflict] = useState<{ remote: import('../api').AuthoritativeTabulationSnapshot; localUpdatedAt: number } | null>(null);
   const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
@@ -172,6 +173,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       return;
     }
     initialRecovery.current = true;
+    activeTournamentId.current = tournament?.id ?? null;
     let cancelled = false;
     const recover = async () => {
       try {
@@ -221,16 +223,16 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     return () => { cancelled = true; };
   }, [apiConfigured, remoteToken, tournament?.id, store]);
 
-  // A tournament created locally (including a duplicate) has no remote cursor until recovery
-  // has checked its own ID. This prevents the previous tournament's Neon revision leaking across IDs.
+  // Any tournament switch invalidates the previous remote cursor. A new/duplicated aggregate
+  // must discover its own Neon revision before it can publish, never inherit another ID's cursor.
   useEffect(() => {
     const activeId = tournament?.id ?? null;
-    const cursor = remoteCursor.current;
-    if (cursor && cursor.id !== activeId) {
-      remoteCursor.current = null;
-      setRemoteConflict(null);
-      setRemoteSync(apiConfigured && remoteToken ? 'checking' : 'offline');
-    }
+    if (activeTournamentId.current === activeId) return;
+    activeTournamentId.current = activeId;
+    remoteCursor.current = null;
+    setRemoteConflict(null);
+    setRemoteSync(apiConfigured && remoteToken ? 'checking' : 'offline');
+    initialRecovery.current = false;
   }, [tournament?.id, apiConfigured, remoteToken]);
 
   useEffect(() => {
