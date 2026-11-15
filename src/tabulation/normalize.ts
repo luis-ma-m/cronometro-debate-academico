@@ -380,7 +380,7 @@ export function duplicateTabTournament(source: TabTournament, now = Date.now()):
   }
   const copyRound = (round: TabRound): TabRound => ({
     ...round, id: mapped(rounds, round.id),
-    ...(round.timerPhases ? { timerPhases: round.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase'), warningThresholdsSeconds: [...phase.warningThresholdsSeconds] })) } : {}),
+    ...(round.timerPhases ? { timerPhases: round.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase'), warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })) } : {}),
     debates: round.debates.map((debate) => ({
       ...debate, id: mapped(debates, debate.id),
       venueId: mapped(venues, debate.venueId),
