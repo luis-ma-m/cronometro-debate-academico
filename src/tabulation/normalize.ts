@@ -20,6 +20,7 @@ import {
   type TabSpeakerEntry,
   type TabTournament,
   type TiebreakKey,
+  makeTabId,
 } from './types';
 
 export const TAB_EXPORT_FORMAT = 'ledu-tabulacion';
@@ -352,6 +353,99 @@ export function normalizeTabTournament(raw: unknown): NormalizeResult {
     logSeq: Math.max(int(raw.logSeq, 0), ...logTail.map((entry) => entry.seq)),
   };
   return { tournament, issues };
+}
+
+/** Makes an independent copy, rewriting all entity IDs and internal references while retaining tournament data. */
+export function duplicateTabTournament(source: TabTournament, now = Date.now()): TabTournament {
+  const teams = new Map(source.teams.map((x) => [x.id, makeTabId('team')]));
+  const speakers = new Map(source.speakers.map((x) => [x.id, makeTabId('speaker')]));
+  const judges = new Map(source.judges.map((x) => [x.id, makeTabId('judge')]));
+  const venues = new Map(source.venues.map((x) => [x.id, makeTabId('venue')]));
+  const groups = new Map(source.groups.map((x) => [x.id, makeTabId('group')]));
+  const rounds = new Map<string, string>();
+  const debates = new Map<string, string>();
+  const mapped = (map: Map<string, string>, id: string) => map.get(id) ?? id;
+  const teamRecord = <T,>(record: Record<string, T>) =>
+    Object.fromEntries(Object.entries(record).map(([id, value]) => [mapped(teams, id), value]));
+  const collect = (round: TabRound) => {
+    if (!rounds.has(round.id)) rounds.set(round.id, makeTabId('round'));
+    for (const debate of round.debates) if (!debates.has(debate.id)) debates.set(debate.id, makeTabId('debate'));
+  };
+  source.rounds.forEach(collect);
+  if (source.draftRound) {
+    collect(source.draftRound.round);
+    collect(source.draftRound.generated);
+    source.draftRound.editHistory.forEach(collect);
+  }
+  const copyRound = (round: TabRound): TabRound => ({
+    ...round, id: mapped(rounds, round.id),
+    timerPhases: round.timerPhases?.map((phase) => ({ ...phase, id: makeTabId('phase') })),
+    debates: round.debates.map((debate) => ({
+      ...debate, id: mapped(debates, debate.id),
+      venueId: mapped(venues, debate.venueId),
+      teamIds: debate.teamIds.map((id) => mapped(teams, id)) as [string, string],
+      ...(debate.favorTeamId ? { favorTeamId: mapped(teams, debate.favorTeamId) } : {}),
+      judgeIds: debate.judgeIds.map((id) => mapped(judges, id)),
+      chairId: mapped(judges, debate.chairId),
+      actaLinkSentAt: undefined, publicActaSubmissionId: undefined, publicActaSignedBy: undefined,
+      ...(debate.result ? { result: {
+        ...debate.result,
+        lineup: teamRecord(debate.result.lineup),
+        ballots: debate.result.ballots.map((ballot) => ({
+          ...ballot, judgeId: mapped(judges, ballot.judgeId), totals: teamRecord(ballot.totals),
+          speeches: teamRecord(ballot.speeches),
+          ...(ballot.winnerTeamId ? { winnerTeamId: mapped(teams, ballot.winnerTeamId) } : {}),
+        })),
+        penalties: teamRecord(debate.result.penalties),
+        ...(debate.result.override ? { override: { ...debate.result.override, winnerTeamId: mapped(teams, debate.result.override.winnerTeamId) } : {}),
+        ...(debate.result.joint ? { joint: {
+          ...debate.result.joint,
+          winnerTeamId: mapped(teams, debate.result.joint.winnerTeamId),
+          items: teamRecord(debate.result.joint.items),
+          ...(debate.result.joint.quickTotals ? { quickTotals: teamRecord(debate.result.joint.quickTotals) } : {}),
+          ...(debate.result.joint.writtenTotals ? { writtenTotals: teamRecord(debate.result.joint.writtenTotals) } : {}),
+          speakers: Object.fromEntries(Object.entries(debate.result.joint.speakers).map(([teamId, entries]) => [
+            mapped(teams, teamId), entries.map((entry) => ({ ...entry, speakerId: mapped(speakers, entry.speakerId) })),
+          ])),
+        } } : {}),
+      } } : {}),
+    })),
+  });
+  return {
+    ...source,
+    id: makeTabId('torneo'),
+    name: source.name.endsWith(' (copia)') ? source.name : source.name + ' (copia)',
+    createdAt: now, updatedAt: now, revision: 0,
+    seed: Math.floor(Math.random() * 0x7fffffff),
+    settings: {
+      ...source.settings,
+      rubric: source.settings.rubric.map((item) => ({ ...item, id: makeTabId('rubric') })),
+      timerPhases: source.settings.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase') })),
+    },
+    teams: source.teams.map((team) => ({ ...team, id: mapped(teams, team.id), incompatibleJudgeIds: team.incompatibleJudgeIds.map((id) => mapped(judges, id)) })),
+    speakers: source.speakers.map((speaker) => ({ ...speaker, id: mapped(speakers, speaker.id), teamId: mapped(teams, speaker.teamId) })),
+    judges: source.judges.map((judge) => ({
+      ...judge, id: mapped(judges, judge.id), incompatibleJudgeIds: judge.incompatibleJudgeIds.map((id) => mapped(judges, id)),
+      unavailableRoundIds: judge.unavailableRoundIds.map((id) => mapped(rounds, id)),
+    })),
+    venues: source.venues.map((venue) => ({ ...venue, id: mapped(venues, venue.id) })),
+    groups: source.groups.map((group) => ({ ...group, id: mapped(groups, group.id), teamIds: group.teamIds.map((id) => mapped(teams, id)) })),
+    rounds: source.rounds.map(copyRound),
+    breakSeeds: source.breakSeeds.map((id) => mapped(teams, id)),
+    manualOrder: source.manualOrder.map((id) => mapped(teams, id)),
+    judgeConflicts: source.judgeConflicts.map((conflict) => ({
+      ...conflict, id: makeTabId('conflict'), judgeId: mapped(judges, conflict.judgeId),
+      ...(conflict.teamId ? { teamId: mapped(teams, conflict.teamId) } : {}),
+    })),
+    ...(source.draftRound ? { draftRound: {
+      ...source.draftRound, round: copyRound(source.draftRound.round), generated: copyRound(source.draftRound.generated),
+      editHistory: source.draftRound.editHistory.map(copyRound),
+      breakSeeds: source.draftRound.breakSeeds?.map((id) => mapped(teams, id)),
+      fingerprint: '', createdAt: now,
+    } } : { draftRound: undefined }),
+    panelLink: undefined, whatsapp: undefined, sample: undefined,
+    logTail: [], logSeq: 0,
+  };
 }
 
 export function serializeTournamentExport(tournament: TabTournament, now = Date.now(), log: TabLogEntry[] = []): string {
