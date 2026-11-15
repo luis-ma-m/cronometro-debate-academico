@@ -220,6 +220,11 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
           <div><b>{entry.name}</b><small>Modificado {entry.updatedAt ? new Date(entry.updatedAt).toLocaleString('es-ES') : '—'}</small></div>
           {entry.id === tournament?.id ? <span className="state-pill ready"><Check size={12} /> Abierto</span>
             : <button type="button" className="button secondary" onClick={() => { store.open(entry.id); notify('Torneo abierto.'); }}>Abrir</button>}
+          <button type="button" className="button secondary" disabled={state.readOnly} onClick={() => {
+            if (!window.confirm('Se creará una copia independiente de «' + entry.name + '». Tendrá identidad, participantes, rondas y registro propios. ¿Continuar?')) return;
+            if (store.duplicate(entry.id)) notify('Copia independiente creada. Puedes modificarla sin afectar al torneo original.');
+            else notify('No se ha podido duplicar el torneo. Comprueba el almacenamiento y vuelve a intentarlo.', 'error');
+          }}><ClipboardList size={15} /> Duplicar</button>
           <button type="button" className="icon-button danger-action" aria-label={'Borrar ' + entry.name} disabled={state.readOnly} onClick={() => {
             if (window.confirm('¿Borrar «' + entry.name + '» de este navegador, con su registro y sus copias automáticas? Exporta antes una copia si quieres conservarlo.')) { store.remove(entry.id); notify('Torneo borrado.'); }
           }}><Trash2 size={15} /></button>
