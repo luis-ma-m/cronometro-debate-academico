@@ -106,6 +106,29 @@ describe('tabulation store', () => {
     expect(store.getState().tournament!.name).toBe('dos');
   });
 
+
+  it('duplicates a tournament with fresh identities and no shared mutable state', () => {
+    const { store, storage } = harness();
+    const original = makeTournament('ledu-groups', ['a', 'b']);
+    original.name = 'Original';
+    store.create(original);
+    const originalId = store.getState().tournament!.id;
+    const originalTeamId = store.getState().tournament!.teams[0]!.id;
+    expect(store.duplicate(originalId)).toBe(true);
+    const copy = store.getState().tournament!;
+    expect(copy.id).not.toBe(originalId);
+    expect(copy.name).toBe('Original (copia)');
+    expect(copy.teams[0]!.id).not.toBe(originalTeamId);
+    expect(copy.logSeq).toBe(1);
+    expect(copy.panelLink).toBeUndefined();
+    expect(copy.whatsapp).toBeUndefined();
+    store.update((t) => ({ ...t, teams: t.teams.map((team) => team.id === copy.teams[0]!.id ? { ...team, name: 'Solo en copia' } : team) }));
+    store.flush();
+    const savedOriginal = JSON.parse(storage.getItem(tournamentKey(originalId))!);
+    expect(savedOriginal.teams[0].name).toBe('a');
+    expect(store.getState().tournament!.teams[0]!.name).toBe('Solo en copia');
+  });
+
   it('imports over an existing tournament or as a copy', () => {
     const { store } = harness();
     const original = makeTournament('ledu-groups', ['a']);
