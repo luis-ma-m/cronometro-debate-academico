@@ -387,7 +387,9 @@ export function duplicateTabTournament(source: TabTournament, now = Date.now()):
       ...(debate.favorTeamId ? { favorTeamId: mapped(teams, debate.favorTeamId) } : {}),
       judgeIds: debate.judgeIds.map((id) => mapped(judges, id)),
       chairId: mapped(judges, debate.chairId),
-
+      actaLinkSentAt: undefined,
+      publicActaSubmissionId: undefined,
+      publicActaSignedBy: undefined,
       ...(debate.result ? { result: {
         ...debate.result,
         lineup: teamRecord(debate.result.lineup),
