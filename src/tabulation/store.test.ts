@@ -147,7 +147,7 @@ describe('tabulation store', () => {
     store.update((t) => ({ ...t, teams: t.teams.map((team) => team.id === copy.teams[0]!.id ? { ...team, name: 'Solo en copia' } : team) }));
     store.flush();
     const savedOriginal = JSON.parse(storage.getItem(tournamentKey(originalId))!);
-    expect(savedOriginal.teams[0].name).toBe('a');
+    expect(savedOriginal.teams[0].name).toBe('Equipo a');
     expect(store.getState().tournament!.teams[0]!.name).toBe('Solo en copia');
   });
 
