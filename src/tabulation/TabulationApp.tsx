@@ -221,6 +221,18 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     return () => { cancelled = true; };
   }, [apiConfigured, remoteToken, tournament?.id, store]);
 
+  // A tournament created locally (including a duplicate) has no remote cursor until recovery
+  // has checked its own ID. This prevents the previous tournament's Neon revision leaking across IDs.
+  useEffect(() => {
+    const activeId = tournament?.id ?? null;
+    const cursor = remoteCursor.current;
+    if (cursor && cursor.id !== activeId) {
+      remoteCursor.current = null;
+      setRemoteConflict(null);
+      setRemoteSync(apiConfigured && remoteToken ? 'checking' : 'offline');
+    }
+  }, [tournament?.id, apiConfigured, remoteToken]);
+
   useEffect(() => {
     if (!apiConfigured || !remoteToken || !tournament || state.readOnly || state.status !== 'saved' || remoteSync === 'conflict' || remoteSync === 'error' || remoteSync === 'offline') return;
     const cursor = remoteCursor.current;
