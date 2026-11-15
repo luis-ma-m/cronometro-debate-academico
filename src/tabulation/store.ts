@@ -1,6 +1,6 @@
 import { describeChanges, mergeChanges, summarizeChanges, type Change } from './changes';
 import { adoptLog, appendLogEntry, archivedLastSeq, archiveTail, formatLogTime, readLog, removeLog, verifyLog, type LogInput, type LogVerification } from './log';
-import { normalizeTabTournament, type NormalizeResult } from './normalize';
+import { duplicateTabTournament, normalizeTabTournament, type NormalizeResult } from './normalize';
 import { makeTabId, type TabLogEntry, type TabTournament } from './types';
 import type { WriterLock } from './writerLock';
 
@@ -67,6 +67,7 @@ export interface TabStore {
   /** Saves now; true when everything is stored. */
   flush(): boolean;
   create(tournament: TabTournament): void;
+  duplicate(tournamentId: string): boolean;
   open(id: string): void;
   remove(id: string): void;
   importTournament(tournament: TabTournament, mode: 'replace' | 'copy', log?: TabLogEntry[]): void;
@@ -554,6 +555,22 @@ export function createTabStore(options: TabStoreOptions): TabStore {
     create(tournament) {
       if (state.readOnly) return;
       activateNew(tournament, { type: 'tournament.create', message: 'Torneo creado: ' + tournament.name + '.', details: { presetId: tournament.settings.presetId } });
+    },
+    duplicate(id) {
+      if (state.readOnly || state.status === 'conflict') return false;
+      if (!store.flush()) return false;
+      const source = load(id);
+      if (!source) {
+        emit({ error: 'No se ha podido duplicar el torneo: los datos guardados no son válidos.' });
+        return false;
+      }
+      const copy = duplicateTabTournament(source.tournament, now());
+      activateNew(copy, {
+        type: 'tournament.duplicate',
+        message: 'Copia independiente creada a partir de «' + source.tournament.name + '».',
+        details: { sourceTournamentName: source.tournament.name },
+      });
+      return state.tournament?.id === copy.id && state.status !== 'error';
     },
     open(id) {
       store.flush();
