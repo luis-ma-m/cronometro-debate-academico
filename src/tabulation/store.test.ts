@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeTabTournament, parseTournamentExport, serializeTournamentExport, TabDataError } from './normalize';
 import { createSampleTournament } from './sample';
 import { createTabStore, INDEX_KEY, isQuotaError, memoryStorage, tournamentKey, type KeyValueStorage } from './store';
-import { decided, makeTournament, qualifyingRound } from './test-fixtures';
+import { decided, judge, makeTournament, qualifyingRound } from './test-fixtures';
 
 function harness(storage: KeyValueStorage = memoryStorage()) {
   const pending: Array<() => void> = [];
