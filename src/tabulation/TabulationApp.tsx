@@ -153,6 +153,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const [remoteConflict, setRemoteConflict] = useState<{ remote: import('../api').AuthoritativeTabulationSnapshot; localUpdatedAt: number } | null>(null);
   const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
   const initialRecovery = useRef(false);
+  const recoveredTournamentId = useRef<string | null>(null);
   const componentAlive = useRef(true);
   const seenPublicActas = useRef(new Set<string>());
   useEffect(() => { componentAlive.current = true; return () => { componentAlive.current = false; }; }, []);
@@ -168,10 +169,11 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
 
   // Neon is the durable source of truth. localStorage remains an offline cache and recovery copy.
   useEffect(() => {
-    if (!apiConfigured || !remoteToken || initialRecovery.current) {
+    if (!apiConfigured || !remoteToken || recoveredTournamentId.current === (tournament?.id ?? null)) {
       if (!apiConfigured || !remoteToken) setRemoteSync('offline');
       return;
     }
+    recoveredTournamentId.current = tournament?.id ?? null;
     initialRecovery.current = true;
     activeTournamentId.current = tournament?.id ?? null;
     let cancelled = false;
