@@ -425,7 +425,7 @@ export function duplicateTabTournament(source: TabTournament, now = Date.now()):
       rubric: source.settings.rubric.map((item) => ({ ...item, id: makeTabId('rubric') })),
       tiebreaks: [...source.settings.tiebreaks],
       bracketSeedOrder: [...source.settings.bracketSeedOrder],
-      timerPhases: source.settings.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase'), warningThresholdsSeconds: [...phase.warningThresholdsSeconds] })),
+      timerPhases: source.settings.timerPhases.map((phase) => ({ ...phase, id: makeTabId('phase'), warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] })),
     },
     teams: source.teams.map((team) => ({ ...team, id: mapped(teams, team.id), incompatibleJudgeIds: team.incompatibleJudgeIds.map((id) => mapped(judges, id)) })),
     speakers: source.speakers.map((speaker) => ({ ...speaker, id: mapped(speakers, speaker.id), teamId: mapped(teams, speaker.teamId) })),
