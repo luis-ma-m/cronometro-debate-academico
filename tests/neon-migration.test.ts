@@ -179,7 +179,7 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain('SET LOCAL idle_in_transaction_session_timeout');
     expect(store).toContain('BEGIN READ ONLY');
     expect(store).toContain('code === "57014" || code === "55P03" || code === "40P01"');
-    expect(api).toContain('["DATABASE_CONSTRAINT", "DATABASE_BUSY"].includes(error.code)');
+    expect(api).toContain('["DATABASE_CONSTRAINT", "DATABASE_BUSY", "DUPLICATE_ENTITY_NAME"].includes(error.code)');
   });
 
   it("releases immediate case-insensitive team and judge name indexes before replacement upserts", async () => {
