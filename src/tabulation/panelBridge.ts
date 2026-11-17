@@ -69,10 +69,12 @@ export function buildPanelHandoff(panel: Tournament, now = Date.now()): PanelHan
     version: 1,
     createdAt: now,
     tournamentName: panel.tournamentName,
-    teams: panel.teams.map(({ id, name, institution, active, incompatibleJudgeIds }) => ({ id, name, institution, active, incompatibleJudgeIds: [...incompatibleJudgeIds] })),
-    speakers: (panel.speakers ?? []).map((speaker) => ({ ...speaker })),
-    judges: panel.judges.map(({ id, name, institution, active, incompatibleJudgeIds }) => ({ id, name, institution, active, incompatibleJudgeIds: [...incompatibleJudgeIds] })),
-    venues: panel.physicalRooms.map(({ id, name, active }) => ({ id, name, active })),
+    // Management is a consumer, never a participant catalogue. A new Tabulation
+    // tournament starts empty and all teams, speakers, judges and venues are created there.
+    teams: [],
+    speakers: [],
+    judges: [],
+    venues: [],
   };
 }
 
