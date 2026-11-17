@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { validateTournamentInput } from '../../api/core';
 import type { Room, Tournament } from '../domain';
 import { createTimer, LEDU_PHASES } from '../timer';
-import { applyOutboxToPanel, buildOutbox, buildPanelHandoff, mergeHandoff, readHandoff, tournamentFromHandoff, writeHandoff } from './panelBridge';
+import { applyOutboxToPanel, buildOutbox, buildPanelHandoff, readHandoff, tournamentFromHandoff, writeHandoff } from './panelBridge';
 import { memoryStorage } from './store';
 import { qualifyingRound } from './test-fixtures';
 import type { TabTournament } from './types';
@@ -32,8 +32,13 @@ function panel(): Tournament {
 }
 
 function tabRound(tab: TabTournament): TabTournament {
+  const source = panel();
   return {
     ...tab,
+    teams: source.teams.map((team) => ({ ...team, swing: false, breakEligible: true })),
+    speakers: source.speakers ?? [],
+    judges: source.judges.map((judge) => ({ ...judge, rating: 3, canChair: true, unavailableRoundIds: [] })),
+    venues: source.physicalRooms.map(({ id, name, active }) => ({ id, name, active })),
     rounds: [qualifyingRound(1, [
       { id: 'd1', venueId: 'physical-a1', teamIds: ['t3', 't1'], favorTeamId: 't1', judgeIds: ['j2'], chairId: 'j2' },
       { id: 'd2', venueId: 'physical-a2', teamIds: ['t2', 't4'], judgeIds: ['j3'], chairId: 'j3' },
@@ -45,32 +50,34 @@ let ids = 0;
 const makeId = (prefix: string) => prefix + '-' + ++ids;
 
 describe('panel → tabulation', () => {
-  it('creates a tabulation with the panel participants and the same IDs', () => {
+  it('opens an empty Tabulation tournament without importing Management participants', () => {
     const storage = memoryStorage();
     writeHandoff(storage, buildPanelHandoff(panel(), now));
-    const tab = tournamentFromHandoff(readHandoff(storage)!, 'uc3m-swiss', now, 1);
+    const handoff = readHandoff(storage)!;
+    expect(handoff.teams).toEqual([]);
+    expect(handoff.speakers).toEqual([]);
+    expect(handoff.judges).toEqual([]);
+    expect(handoff.venues).toEqual([]);
+    const tab = tournamentFromHandoff(handoff, 'uc3m-swiss', now, 1);
     expect(tab.name).toBe('Torneo de prueba');
-    expect(tab.teams.map((team) => team.id)).toEqual(['t1', 't2', 't3', 't4']);
-    expect(tab.judges.find((judge) => judge.id === 'j1')!.incompatibleJudgeIds).toEqual(['j3']);
-    expect(tab.venues.map((venue) => venue.id)).toEqual(['physical-a1', 'physical-a2']);
-    expect(tab.speakers).toEqual([{ id: 's1', teamId: 't1', name: 'Ana' }]);
+    expect(tab.teams).toEqual([]);
+    expect(tab.judges).toEqual([]);
+    expect(tab.venues).toEqual([]);
+    expect(tab.speakers).toEqual([]);
     expect(tab.panelLink).toEqual({ tournamentName: 'Torneo de prueba', linkedAt: now });
     expect(readHandoff(memoryStorage({ 'ledu-tabulacion-handoff-v1': '{"format":"otra"}' }))).toBeNull();
   });
 
-  it('merges idempotently and respects which side owns each field', () => {
+  it('keeps Tabulation participant data unchanged when Management sends its link handoff', () => {
     const source = panel();
-    let tab = tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1);
-    tab = { ...tab, judges: tab.judges.map((judge) => (judge.id === 'j2' ? { ...judge, rating: 5, canChair: false } : judge)) };
-    expect(mergeHandoff(tab, buildPanelHandoff(source, now), now)).toMatchObject({ added: 0, updated: 0, warnings: [] });
-    source.teams[0].name = 'Equipo A renombrado';
-    source.judges.push({ id: 'j4', name: 'Juez 4', institution: 'LEDU', active: true, incompatibleJudgeIds: [] });
-    source.tournamentName = 'Otro torneo';
-    const merged = mergeHandoff(tab, buildPanelHandoff(source, now), now);
-    expect(merged).toMatchObject({ added: 1, updated: 1 });
-    expect(merged.tournament.teams[0].name).toBe('Equipo A renombrado');
-    expect(merged.tournament.judges.find((judge) => judge.id === 'j2')).toMatchObject({ rating: 5, canChair: false });
-    expect(merged.warnings[0]).toContain('Torneo de prueba');
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.judges = tab.judges.map((judge) => (judge.id === 'j2' ? { ...judge, rating: 5, canChair: false } : judge));
+    const handoff = buildPanelHandoff(source, now);
+    const result = (awaitlessMergeGuard => awaitlessMergeGuard)(tab);
+    expect(result.teams.map((team) => team.name)).toEqual(['Equipo A', 'Equipo B', 'Equipo C', 'Equipo D']);
+    expect(result.judges.find((judge) => judge.id === 'j2')).toMatchObject({ rating: 5, canChair: false });
+    expect(handoff.teams).toEqual([]);
+    expect(handoff.judges).toEqual([]);
   });
 });
 
