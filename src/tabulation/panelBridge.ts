@@ -47,7 +47,6 @@ export interface PanelOutbox {
   panelTournamentName: string | null;
   roundName: string;
   debates: PanelOutboxDebate[];
-  /** Participant snapshots travel with the round so the panel can create missing records. */
   /** Complete participant snapshot: Tabulation is the only source of truth. */
   teams: Team[];
   judges: Judge[];
@@ -333,7 +332,8 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   // database IDs only as internal aliases when records were created independently;
   // every imported attribute is overwritten by the authoritative Tabulation snapshot.
   const teams = new Map(panel.teams.map((team) => [team.id, team]));
-  const teamsByName = new Map(panel.teams.map((team) => [normalizeVenueName(team.name), team]));
+  const incomingStableTeamIds = new Set(outbox.teams.map((team) => team.id));
+  const teamsByName = new Map(panel.teams.filter((team) => !incomingStableTeamIds.has(team.id)).map((team) => [normalizeVenueName(team.name), team]));
   const canonicalTeamId = new Map<string, string>();
   const incomingTeamIds = new Set<string>();
   for (const incoming of outbox.teams) {
@@ -357,7 +357,8 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   }
 
   const judgesById = new Map(panel.judges.map((judge) => [judge.id, judge]));
-  const judgesByName = new Map(panel.judges.map((judge) => [normalizeVenueName(judge.name), judge]));
+  const incomingStableJudgeIds = new Set(outbox.judges.map((judge) => judge.id));
+  const judgesByName = new Map(panel.judges.filter((judge) => !incomingStableJudgeIds.has(judge.id)).map((judge) => [normalizeVenueName(judge.name), judge]));
   const canonicalJudgeId = new Map<string, string>();
   const incomingJudgeIds = new Set<string>();
   for (const incoming of outbox.judges) {
@@ -382,6 +383,7 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   // speakers as historical records because submitted scorecards may still reference them.
   const speakersById = new Map((panel.speakers ?? []).map((speaker) => [speaker.id, speaker]));
   const speakersByName = new Map((panel.speakers ?? []).map((speaker) => [speaker.teamId + '|' + normalizeVenueName(speaker.name), speaker]));
+  const incomingSpeakerIds = new Set<string>();
   for (const incoming of outbox.speakers) {
     const teamId = canonicalTeamId.get(incoming.teamId);
     if (!teamId) {
@@ -393,9 +395,12 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     const existing = byId ?? byName;
     const canonicalId = existing?.id ?? incoming.id;
     const next = { ...incoming, id: canonicalId, teamId };
+    incomingSpeakerIds.add(canonicalId);
     speakersById.set(canonicalId, next);
     speakersByName.set(teamId + '|' + normalizeVenueName(next.name), next);
   }
+  const historicalSpeakerIds = new Set((panel.scoring?.scorecards ?? []).flatMap((card) => card.speakers.map((speaker) => speaker.speakerId)));
+  for (const id of speakersById.keys()) if (!incomingSpeakerIds.has(id) && !historicalSpeakerIds.has(id)) speakersById.delete(id);
   const mergedSpeakers = [...speakersById.values()];
 
   // Translate every incompatibility through the canonical judge IDs, including updates
