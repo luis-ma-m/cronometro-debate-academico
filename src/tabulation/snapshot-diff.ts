@@ -44,3 +44,15 @@ export function findSnapshotDifferences(local: unknown, remote: unknown): Snapsh
   return differences;
 }
 
+
+
+/** Only presentation/contact metadata can be reconciled automatically. Anything that can affect
+ * pairings, eligibility, scoring, results, or tournament progression remains a functional conflict. */
+export function isMetadataOnlySnapshotDifference(differences: SnapshotDifference[]): boolean {
+  if (differences.length === 0) return false;
+  const metadataFields = new Set(['name', 'phone', 'note', 'tournamentName', 'deskPhone', 'baseUrl']);
+  return differences.every(({ path }) => {
+    const leaf = path.split(/[.[]/).filter(Boolean).at(-1) ?? '';
+    return metadataFields.has(leaf);
+  });
+}

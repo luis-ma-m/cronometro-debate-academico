@@ -17,7 +17,7 @@ import { RoundsView } from './views/RoundsView';
 import { RulesView } from './views/RulesView';
 import { StandingsView } from './views/StandingsView';
 import { applyReceivedActa, readActaCode } from './whatsapp';
-import { findSnapshotDifferences, type SnapshotDifference } from './snapshot-diff';
+import { findSnapshotDifferences, isMetadataOnlySnapshotDifference, type SnapshotDifference } from './snapshot-diff';
 
 const VIEWS = [
   { id: 'inicio', label: 'Inicio', icon: House },
@@ -180,7 +180,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           throw new Error('La copia de Neon no supera la validación de identidad e integridad.');
         }
         remoteCursor.current = { id: remote.tabTournamentId, revision: remote.revision, localRevision: -1, inFlight: false };
-        if (remote.updatedAt >= tournament.updatedAt) {
+        if (remote.snapshot.updatedAt >= tournament.updatedAt) {
           store.backup('Antes de recuperar el snapshot de Neon r' + remote.revision);
           store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Snapshot recuperado desde Neon', details: { revision: remote.revision, sha256: remote.snapshotSha256 } });
           store.flush();
@@ -536,35 +536,62 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     return [...groups.entries()];
   }, [remoteDifferences]);
 
-  // Neon is authoritative when only sync metadata/revision bookkeeping differs.
-  // Keep a local backup, replace the cache silently, and advance the remote cursor.
+  // Reconcile presentation/contact metadata without asking the operator to resolve a false conflict.
+  // Keep the newer side; publish local changes with Neon CAS when this device is ahead.
   useEffect(() => {
-    if (!remoteConflict || !tournament || remoteDifferences.length > 0 || state.readOnly || state.status === 'conflict') return;
+    if (!remoteConflict || !tournament || state.readOnly || state.status !== 'saved') return;
+    if (remoteConflict.remote.tabTournamentId !== tournament.id || remoteConflict.remote.snapshot.id !== tournament.id) return;
+    if (!isMetadataOnlySnapshotDifference(remoteDifferences)) return;
     const { remote } = remoteConflict;
-    if (remote.tabTournamentId !== tournament.id || remote.snapshot.id !== tournament.id) return;
-    const conflictKey = tournament.id + ':' + remote.revision + ':' + remote.snapshotSha256;
+    const conflictKey = tournament.id + ':' + remote.revision + ':' + remote.snapshotSha256 + ':' + tournament.updatedAt;
     if (autoResolvedConflict.current === conflictKey) return;
-    autoResolvedConflict.current = conflictKey;
-    store.backup('Antes de sincronizar metadatos desde Neon');
-    const applied = store.update(() => remote.snapshot, {
-      type: 'sync.remote',
-      message: 'Metadatos sincronizados desde Neon',
-      details: { revision: remote.revision, sha256: remote.snapshotSha256 },
-    });
-    if (!applied || !store.flush()) {
-      setRemoteSync('error');
-      store.logError('No se pudo aplicar automáticamente la versión de Neon porque falló el guardado local.');
-      return;
-    }
-    remoteCursor.current = {
-      id: tournament.id,
-      revision: remote.revision,
-      localRevision: store.getState().tournament?.revision ?? remote.snapshot.revision,
-      inFlight: false,
+    let cancelled = false;
+    const reconcile = async () => {
+      try {
+        if (remote.snapshot.updatedAt > tournament.updatedAt) {
+          store.backup('Antes de sincronizar metadatos desde Neon');
+          const applied = store.update(() => remote.snapshot, {
+            type: 'sync.remote',
+            message: 'Metadatos más recientes recuperados desde Neon',
+            details: { revision: remote.revision, sha256: remote.snapshotSha256 },
+          });
+          if (!applied || !store.flush()) throw new Error('No se pudo guardar localmente la versión de metadatos de Neon.');
+          if (cancelled) return;
+          const saved = store.getState().tournament;
+          remoteCursor.current = {
+            id: tournament.id, revision: remote.revision,
+            localRevision: saved?.revision ?? remote.snapshot.revision, inFlight: false,
+          };
+        } else {
+          // Local is newer (or timestamps tie): preserve this device's snapshot and advance Neon
+          // with optimistic concurrency. A concurrent remote write becomes a real conflict.
+          if (!store.flush()) throw new Error('No se pudo confirmar la copia local antes de sincronizar con Neon.');
+          const local = store.getState().tournament;
+          if (!local || local.id !== tournament.id || store.getState().status !== 'saved') {
+            throw new Error('La copia local ha cambiado durante la reconciliación; se mantiene el conflicto.');
+          }
+          const result = await publishTabulationSnapshot(remoteToken!, {
+            tabTournamentId: local.id, expectedRevision: remote.revision,
+            operationId: makeTabId('tabpub'), snapshot: local,
+          });
+          if (result.tabTournamentId !== local.id || result.snapshot.id !== local.id || result.revision !== remote.revision + 1) {
+            throw new Error('Neon devolvió una confirmación incoherente al publicar los metadatos locales.');
+          }
+          if (cancelled) return;
+          remoteCursor.current = { id: local.id, revision: result.revision, localRevision: local.revision, inFlight: false };
+        }
+        autoResolvedConflict.current = conflictKey;
+        setRemoteConflict(null);
+        setRemoteSync('synced');
+      } catch (error) {
+        if (cancelled) return;
+        setRemoteSync('error');
+        store.logError(error instanceof Error ? error.message : 'No se pudieron reconciliar automáticamente los metadatos.');
+      }
     };
-    setRemoteConflict(null);
-    setRemoteSync('synced');
-  }, [remoteConflict, remoteDifferences, tournament?.id, state.readOnly, state.status, store]);
+    void reconcile();
+    return () => { cancelled = true; };
+  }, [remoteConflict, remoteDifferences, tournament?.id, tournament?.updatedAt, state.readOnly, state.status, remoteToken, store]);
 
   const badges: Partial<Record<ViewId, { text: string; kind: string; title: string }>> = {
     ...(tournament?.draftRound ? { rondas: { text: 'Borrador', kind: 'info', title: 'Hay un borrador de ronda pendiente de confirmar' } } : {}),
