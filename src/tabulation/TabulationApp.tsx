@@ -17,6 +17,7 @@ import { RoundsView } from './views/RoundsView';
 import { RulesView } from './views/RulesView';
 import { StandingsView } from './views/StandingsView';
 import { applyReceivedActa, readActaCode } from './whatsapp';
+import { findSnapshotDifferences, type SnapshotDifference } from './snapshot-diff';
 
 const VIEWS = [
   { id: 'inicio', label: 'Inicio', icon: House },
@@ -30,7 +31,6 @@ const VIEWS = [
 export type TabulationViewId = (typeof VIEWS)[number]['id'];
 type ViewId = TabulationViewId;
 
-import { findSnapshotDifferences, type SnapshotDifference } from './snapshot-diff';
 
 const SNAPSHOT_LABELS: Record<string, string> = {
   name: 'Nombre', seed: 'Semilla del torneo', settings: 'Configuración',
@@ -652,7 +652,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           <button type="button" className="button secondary" onClick={() => store.reloadFromStorage()}>Cargar la otra versión</button>
           <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Sobrescribir la versión guardada por la otra pestaña con la de esta pestaña?')) store.overwrite(); }}>Mantener esta versión</button>
         </div>}
-        {remoteSync === 'conflict' && remoteConflict && <section className="notice error-notice tab-remote-conflict" role="alert" aria-labelledby="tab-remote-conflict-title">
+        {remoteSync === 'conflict' && remoteConflict && remoteDifferences.length > 0 && <section className="notice error-notice tab-remote-conflict" role="alert" aria-labelledby="tab-remote-conflict-title">
           <div className="tab-remote-conflict-heading">
             <div>
               <strong id="tab-remote-conflict-title">Hay dos versiones distintas del torneo</strong>

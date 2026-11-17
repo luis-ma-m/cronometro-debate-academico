@@ -1,3 +1,5 @@
+export type SnapshotDifference = { path: string; localValue: unknown; remoteValue: unknown };
+
 /** Compares persisted tournament content while ignoring revision and timestamps used only for sync bookkeeping. */
 export function findSnapshotDifferences(local: unknown, remote: unknown): SnapshotDifference[] {
   const differences: SnapshotDifference[] = [];
