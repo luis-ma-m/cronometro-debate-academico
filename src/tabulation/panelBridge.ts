@@ -113,6 +113,21 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   if (!round) return { outbox: null, issues: ['La ronda no existe.'], warnings: [] };
   const issues: string[] = [];
   const warnings: string[] = [];
+  const teamNames = new Map<string, string>();
+  for (const team of tournament.teams) {
+    const key = team.name.trim().toLocaleLowerCase('es-ES');
+    const previous = teamNames.get(key);
+    if (previous) issues.push('Hay dos equipos con el mismo nombre («' + previous + '» y «' + team.name + '»). Corrige los nombres en Participantes antes de enviar la ronda.');
+    else teamNames.set(key, team.name);
+  }
+  const judgeNames = new Map<string, string>();
+  for (const judge of tournament.judges) {
+    const key = judge.name.trim().toLocaleLowerCase('es-ES');
+    const previous = judgeNames.get(key);
+    if (previous) issues.push('Hay dos jueces con el mismo nombre («' + previous + '» y «' + judge.name + '»). Corrige los nombres en Participantes antes de enviar la ronda.');
+    else judgeNames.set(key, judge.name);
+  }
+  if (issues.length) return { outbox: null, issues: [...new Set(issues)], warnings };
   const timerPhases = round.timerPhases?.length ? round.timerPhases : tournament.settings.timerPhases;
   if (!timerPhases.length || timerPhases.some((phase) => !phase.id.trim() || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) {
     return { outbox: null, issues: ['Configura al menos una intervención con nombre y duración válida en Reglas del torneo antes de enviar la ronda.'], warnings };
