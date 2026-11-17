@@ -168,7 +168,9 @@ describe('tabulation → panel', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
     tab.rounds[0].debates[0].judgeIds = ['j1', 'j3'];
-    expect(applyOutboxToPanel(source, 'r2', buildOutbox(tab, 'r1', now).outbox!, { makeId, now }).issues.join(' ')).toContain('incompatibles');
+    const conflict = buildOutbox(tab, 'r1', now);
+    expect(conflict.outbox).toBeNull();
+    expect(conflict.issues.join(' ')).toContain('incompatibles');
     tab.rounds[0].debates[0].judgeIds = ['j2'];
     tab.rounds[0].debates[0].venueId = 'tab-sala';
     tab.venues.push({ id: 'tab-sala', name: 'Aula nueva', active: true });
