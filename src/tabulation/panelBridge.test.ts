@@ -142,6 +142,35 @@ describe('tabulation → panel', () => {
     });
   });
 
+  it('reuses existing teams and judges by normalized name when imported IDs differ', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.teams = [
+      { id: 'tab-t1', name: '  EQUIPO A ', institution: 'Universidad A', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] },
+      { id: 'tab-t2', name: 'Equipo B', institution: 'Universidad B', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] },
+    ];
+    tab.judges = [
+      { id: 'tab-j2', name: 'JUEZ 2', institution: 'LEDU', active: true, rating: 3, canChair: true, incompatibleJudgeIds: [], unavailableRoundIds: [] },
+    ];
+    tab.rounds[0].debates = [{
+      ...tab.rounds[0].debates[0],
+      teamIds: ['tab-t1', 'tab-t2'],
+      favorTeamId: 'tab-t1',
+      judgeIds: ['tab-j2'],
+      chairId: 'tab-j2',
+    }];
+    const outbox = buildOutbox(tab, 'r1', now).outbox!;
+    const applied = applyOutboxToPanel(source, 'r2', outbox, { makeId, now });
+    expect(applied.issues).toEqual([]);
+    expect(applied.addedTeams).toBe(0);
+    expect(applied.addedJudges).toBe(0);
+    expect(applied.teams).toHaveLength(source.teams.length);
+    expect(applied.judges).toHaveLength(source.judges.length);
+    expect(applied.rooms!.find((room) => room.roundId === 'r2')).toMatchObject({
+      teamFavorId: 't1', teamContraId: 't2', judgeIds: ['j2'],
+    });
+  });
+
   it('reuses and empties the existing assignments of the round', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
