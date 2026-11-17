@@ -95,7 +95,7 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
   const teamIds = new Map(tournament.teams.map((team) => [team.id, team.name]));
   const judgeIds = new Map(tournament.judges.map((judge) => [judge.id, judge.name]));
   const teamBookings = new Map<string, string>();
-  const judgeBookings = new Map<string, string>();
+  const judgeBookings = new Map<string, { roomId: string; roomName: string }>();
   for (const room of tournament.rooms) {
     // A physical room can exist in the catalog without being assigned to a
     // debate. Only validate round, format and assignment rules once it has
@@ -118,8 +118,8 @@ export function validateAssignments(tournament: { rounds: { id: string; name: st
       seenJudges.add(id);
       const key = room.roundId + ':' + id;
       const other = judgeBookings.get(key);
-      if (other && other !== room.name) errors.push(`${judgeIds.get(id) ?? id} está asignado a ${other} y ${room.name} en la misma ronda.`);
-      else judgeBookings.set(key, room.name);
+      if (other && other.roomId !== room.id) errors.push(`${judgeIds.get(id) ?? id} está asignado a ${other.roomName} y ${room.name} en la misma ronda.`);
+      else judgeBookings.set(key, { roomId: room.id, roomName: room.name });
 
       const judge = tournament.judges.find((item) => item.id === id);
       const judgeInstitution = judge?.institution?.trim().toLocaleLowerCase('es-ES') ?? '';
