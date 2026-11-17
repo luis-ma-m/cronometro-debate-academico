@@ -957,11 +957,6 @@ export default function App() {
     void persist(candidate).then((saved) => {
       if (!saved) return;
       setExpandedRoomIds((current) => current.filter((id) => !removedAssignmentIds.has(id)));
-      setRoomConnectionStatuses((current) => {
-        const next = { ...current };
-        for (const room of assignments) delete next[room.physicalRoomId];
-        return next;
-      });
       setTabulationNotice('Se han eliminado ' + assignments.length + ' sala(s) de "' + round.name + '". Sus cronómetros se han detenido y los cambios están sincronizados.');
     });
   };
