@@ -57,7 +57,7 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
 
 
 export interface ActaShortLink { id:string; tournamentId:string; debateId:string; createdAt:number; expiresAt:number|null; revokedAt:number|null; }
-export const createActaShortLink=(token:string,tournamentId:string,debateId:string,snapshot:unknown,expiryDays=30,idempotencyKey:string)=>apiCall<ActaShortLink>('createActaShortLink',{token,tournamentId,debateId,snapshot,expiryDays,idempotencyKey});
+export const createActaShortLink=(token:string,tournamentId:string,debateId:string,snapshot:unknown,expiryDays:number,idempotencyKey:string)=>apiCall<ActaShortLink>('createActaShortLink',{token,tournamentId,debateId,snapshot,expiryDays,idempotencyKey});
 export async function resolveActaShortLink(id:string):Promise<{snapshot:unknown;expiresAt:number|null}>{
   if(!API_URL)throw new ApiError('No hay backend disponible para resolver este enlace.','NOT_CONFIGURED');
   const url=new URL(API_URL,window.location.origin);url.searchParams.set('action','resolveActaShortLink');url.searchParams.set('id',id);
