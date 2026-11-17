@@ -236,10 +236,40 @@ describe('ADUMA rounds sent to the panel', () => {
     expect(applyOutboxToPanel(source, 'r2', outbox!, { makeId, now }).issues).toEqual([]);
   });
 
-  it('keeps sending conflicts as they are under the hard policy, so the panel refuses them', () => {
+  it('blocks incompatible judges before creating an outbox under the hard policy', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
     tab.rounds[0].debates[0].judgeIds = ['j1', 'j3'];
-    expect(buildOutbox(tab, 'r1', now).outbox!.debates[0].judgeIds).toEqual(['j1', 'j3']);
+    const result = buildOutbox(tab, 'r1', now);
+    expect(result.outbox).toBeNull();
+    expect(result.issues.join(' ')).toContain('incompatibles');
+  });
+
+  it('blocks a judge assigned to two debates even when the room names are identical', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.venues.find((venue) => venue.id === 'physical-a2')!.name = 'Sala A1';
+    tab.rounds[0].debates[1].judgeIds = ['j2'];
+    const result = buildOutbox(tab, 'r1', now);
+    expect(result.outbox).toBeNull();
+    expect(result.issues.join(' ')).toContain('Juez 2 está asignado a Sala A1 y a Sala A1');
+  });
+
+  it('blocks a team assigned to two debates in the same round', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.rounds[0].debates[1].teamIds = ['t1', 't4'];
+    const result = buildOutbox(tab, 'r1', now);
+    expect(result.outbox).toBeNull();
+    expect(result.issues.join(' ')).toContain('Equipo A aparece en');
+  });
+
+  it('blocks a favor side that references a team outside the debate', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.rounds[0].debates[0].favorTeamId = 't4';
+    const result = buildOutbox(tab, 'r1', now);
+    expect(result.outbox).toBeNull();
+    expect(result.issues.join(' ')).toContain('no pertenece a este debate');
   });
 });
