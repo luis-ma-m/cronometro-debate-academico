@@ -6,7 +6,7 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
-import { apiConfigured, getTabulationSnapshot, listPublicActas, listTabulationSnapshots, publishTabulationSnapshot } from '../api';
+import { apiConfigured, deleteTabulationSnapshot, getTabulationSnapshot, listPublicActas, listTabulationSnapshots, publishTabulationSnapshot } from '../api';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 import { BallotsView } from './views/BallotsView';
@@ -154,6 +154,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
   const initialRecovery = useRef(false);
   const recoveredTournamentId = useRef<string | null>(null);
+  const skipNextEmptyRecovery = useRef(false);
   const componentAlive = useRef(true);
   const seenPublicActas = useRef(new Set<string>());
   useEffect(() => { componentAlive.current = true; return () => { componentAlive.current = false; }; }, []);
@@ -165,10 +166,27 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   }, []);
   const tournament = state.tournament;
   const operatorMissing = !state.operator.trim();
+  const deleteTournament = useCallback(async (id: string) => {
+    if (apiConfigured && remoteToken) await deleteTabulationSnapshot(remoteToken, id);
+    if (remoteCursor.current?.id === id) remoteCursor.current = null;
+    if (tournament?.id === id) {
+      skipNextEmptyRecovery.current = true;
+      recoveredTournamentId.current = null;
+      setRemoteSync('synced');
+      setRemoteConflict(null);
+    }
+    store.remove(id);
+  }, [remoteToken, store, tournament?.id]);
   useEffect(() => { if (state.operator.trim()) setOperatorDraft(state.operator); }, [state.operator]);
 
   // Neon is the durable source of truth. localStorage remains an offline cache and recovery copy.
   useEffect(() => {
+    if (apiConfigured && remoteToken && !tournament && skipNextEmptyRecovery.current) {
+      skipNextEmptyRecovery.current = false;
+      recoveredTournamentId.current = null;
+      setRemoteSync('synced');
+      return;
+    }
     if (!apiConfigured || !remoteToken || recoveredTournamentId.current === (tournament?.id ?? null)) {
       if (!apiConfigured || !remoteToken) setRemoteSync('offline');
       return;
@@ -681,7 +699,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         {notice && <Notice kind={notice.kind} onClose={() => setNotice(null)}>{notice.message}</Notice>}
       </div>
       <ErrorBoundary resetKey={activeView} onError={onViewError}>
-        {activeView === 'inicio' && <HomeView store={store} state={state} outcomes={outcomes} notify={notify} onNavigate={(id) => setView(id as ViewId)} />}
+        {activeView === 'inicio' && <HomeView store={store} state={state} outcomes={outcomes} notify={notify} onNavigate={(id) => setView(id as ViewId)} onDeleteTournament={deleteTournament} />}
         {props && activeView === 'reglas' && <RulesView {...props} />}
         {props && activeView === 'participantes' && <ParticipantsView {...props} />}
         {props && activeView === 'rondas' && <RoundsView {...props} projection={projection} onProject={() => setProjection(true)} onNavigate={(id) => setView(id as ViewId)} />}

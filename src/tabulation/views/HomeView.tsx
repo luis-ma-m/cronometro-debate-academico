@@ -47,12 +47,13 @@ function nextStep(tournament: TabTournament, outcomes: Map<string, DebateOutcome
   return { text: 'Genera la siguiente eliminatoria.', ...rounds };
 }
 
-export function HomeView({ store, state, outcomes, notify, onNavigate }: {
+export function HomeView({ store, state, outcomes, notify, onNavigate, onDeleteTournament }: {
   store: TabStore;
   state: TabStoreState;
   outcomes: Map<string, DebateOutcome>;
   notify: (message: string, kind?: NoticeKind) => void;
   onNavigate: (view: string) => void;
+  onDeleteTournament: (id: string) => Promise<void>;
 }) {
   const tournament = state.tournament;
   const [name, setName] = useState('');
@@ -226,7 +227,10 @@ export function HomeView({ store, state, outcomes, notify, onNavigate }: {
             else notify('No se ha podido duplicar el torneo. Comprueba el almacenamiento y vuelve a intentarlo.', 'error');
           }}><ClipboardList size={15} /> Duplicar</button>
           <button type="button" className="icon-button danger-action" aria-label={'Borrar ' + entry.name} disabled={state.readOnly} onClick={() => {
-            if (window.confirm('¿Borrar «' + entry.name + '» de este navegador, con su registro y sus copias automáticas? Exporta antes una copia si quieres conservarlo.')) { store.remove(entry.id); notify('Torneo borrado.'); }
+            if (!window.confirm('¿Borrar «' + entry.name + '» de este navegador y de la copia sincronizada en Neon, con su registro y sus copias automáticas? Esta acción no se puede deshacer. Exporta antes una copia si quieres conservarlo.')) return;
+            void onDeleteTournament(entry.id).then(() => notify('Torneo borrado del navegador y de Neon.')).catch((error: unknown) => {
+              notify(error instanceof Error ? 'No se ha podido borrar el torneo: ' + error.message : 'No se ha podido borrar el torneo. No se han eliminado los datos locales.', 'error');
+            });
           }}><Trash2 size={15} /></button>
         </li>)}</ul>
       </section>

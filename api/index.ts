@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FeaturedMessage, FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
 import { checkDatabase, databaseConfigured } from "./db.js";
-import { getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from "./tabulation-snapshots.js";
+import { deleteTabulationSnapshot, getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from "./tabulation-snapshots.js";
 import { listPublicActas, publicActaAlreadySubmitted, submitPublicActa } from "./public-actas.js";
 import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
@@ -381,6 +381,9 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "publishTabulationSnapshot":
       await requireSession(payload.token);
       return publishTabulationSnapshot(payload, "authenticated-manager");
+    case "deleteTabulationSnapshot":
+      await requireSession(payload.token);
+      return deleteTabulationSnapshot(str(payload.tabTournamentId), "authenticated-manager");
     case "submitPublicActa": {
       const key = "ledu:public-acta-submissions:" + sha256(requestIp(req));
       const count = num(await redisCommand(["INCR", key]));
