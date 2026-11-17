@@ -188,20 +188,26 @@ export function validateTournamentInput(value: unknown): asserts value is Tourna
   if (typeof tournament.tournamentName !== "string" || tournament.tournamentName.length > 200) {
     throw new ApiError("INVALID_PAYLOAD", "El nombre del torneo es obligatorio y no puede superar 200 caracteres.");
   }
-  const assertUniqueRecords = (items: Array<{ id: string; name: string }>, label: string) => {
+  const assertUniqueRecords = (items: Array<{ id: string; name: string }>, label: string, uniqueNames = false) => {
     const ids = new Set<string>();
+    const names = new Set<string>();
     for (const item of items) {
       const id = str(item?.id).trim();
       const name = str(item?.name).trim();
+      const normalizedName = name.toLocaleLowerCase("es-ES");
       if (!id || !name || id.length > 100 || name.length > 200 || ids.has(id)) {
         throw new ApiError("INVALID_PAYLOAD", label + " deben tener identificadores únicos y nombres no vacíos de hasta 200 caracteres.");
       }
+      if (uniqueNames && names.has(normalizedName)) {
+        throw new ApiError("DUPLICATE_ENTITY_NAME", label + " contienen más de un registro llamado «" + name + "» (sin distinguir mayúsculas y minúsculas). Corrige el catálogo en Tabulación antes de guardar.");
+      }
       ids.add(id);
+      names.add(normalizedName);
     }
   };
   assertUniqueRecords(tournament.rounds, "Las rondas");
-  assertUniqueRecords(tournament.teams, "Los equipos");
-  assertUniqueRecords(tournament.judges, "Los jueces");
+  assertUniqueRecords(tournament.teams, "Los equipos", true);
+  assertUniqueRecords(tournament.judges, "Los jueces", true);
   assertUniqueRecords(tournament.formats, "Los formatos");
   const physicalIds = new Set<string>();
   const physicalSlugs = new Set<string>();
