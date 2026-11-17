@@ -151,8 +151,6 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
   const judges = new Map(tournament.judges.map((judge) => [judge.id, judge]));
   const debates: PanelOutboxDebate[] = [];
-  const usedTeamIds = new Set<string>();
-  const usedJudgeIds = new Set<string>();
   const venueBookings = new Map<string, string>();
   const teamBookings = new Map<string, string>();
   const judgeBookings = new Map<string, string>();
@@ -177,7 +175,6 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       const previous = teamBookings.get(id);
       if (previous) issues.push((teams.get(id)?.name ?? id) + ' aparece en ' + previous + ' y en ' + venueName + ' dentro de la misma ronda.');
       else teamBookings.set(id, venueName);
-      usedTeamIds.add(id);
     }
     const panel = tournament.settings.conflictPolicy === 'lastResort' ? panelAcceptedJudges(tournament, debate, venueName, warnings) : debate;
     const localJudges = new Set<string>();
@@ -195,7 +192,6 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       const previous = judgeBookings.get(id);
       if (previous) issues.push(judge.name + ' está asignado a ' + previous + ' y a ' + venueName + ' en la misma ronda.');
       else judgeBookings.set(id, venueName);
-      usedJudgeIds.add(id);
       if (tournament.settings.conflictPolicy === 'hard') {
         for (const teamId of [a, b]) {
           const team = teams.get(teamId);
