@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import type { AuthoritativeTabulationListing } from '../../api';
 import { ArrowRight, Check, ClipboardList, Database, Download, Flag, Gavel, Plus, RotateCcw, ShieldCheck, Sparkles, Stethoscope, Trash2, Trophy, Upload, Users } from 'lucide-react';
 import { tournamentChampion } from '../bracket';
 import { parseBackupFile } from '../emergency';
@@ -47,13 +48,19 @@ function nextStep(tournament: TabTournament, outcomes: Map<string, DebateOutcome
   return { text: 'Genera la siguiente eliminatoria.', ...rounds };
 }
 
-export function HomeView({ store, state, outcomes, notify, onNavigate, onDeleteTournament }: {
+export function HomeView({ store, state, outcomes, notify, onNavigate, onDeleteTournament, remoteTournaments, remoteListLoading, remoteListError, onRefreshRemoteTournaments, onRestoreRemoteTournament, onDuplicateRemoteTournament }: {
   store: TabStore;
   state: TabStoreState;
   outcomes: Map<string, DebateOutcome>;
   notify: (message: string, kind?: NoticeKind) => void;
   onNavigate: (view: string) => void;
   onDeleteTournament: (id: string) => Promise<void>;
+  remoteTournaments: AuthoritativeTabulationListing[];
+  remoteListLoading: boolean;
+  remoteListError: string | null;
+  onRefreshRemoteTournaments: () => void;
+  onRestoreRemoteTournament: (id: string) => Promise<void>;
+  onDuplicateRemoteTournament: (id: string) => Promise<void>;
 }) {
   const tournament = state.tournament;
   const [name, setName] = useState('');
@@ -157,6 +164,7 @@ export function HomeView({ store, state, outcomes, notify, onNavigate, onDeleteT
   };
 
   const sortedTournaments = [...state.tournaments].sort((x, y) => y.updatedAt - x.updatedAt);
+  const localTournamentIds = new Set(state.tournaments.map((entry) => entry.id));
 
   return <>
     <div className="page-heading"><div><p className="eyebrow">INICIO</p><h2>Tabulación del torneo</h2><p className="muted">Emparejamientos, jueces, actas, clasificación y eliminatorias para debate académico. Todo se calcula y se guarda en este navegador, sin servidor.</p></div></div>
@@ -235,6 +243,50 @@ export function HomeView({ store, state, outcomes, notify, onNavigate, onDeleteT
         </li>)}</ul>
       </section>
     </div>
+
+    <section className="panel">
+      <div className="panel-title">
+        <div><h3><Database size={18} /> Torneos guardados en Neon</h3>
+          <p>Biblioteca compartida entre dispositivos. Recupera una copia en este navegador, crea una copia independiente o elimina el torneo remoto.</p>
+        </div>
+        <button type="button" className="button secondary" onClick={onRefreshRemoteTournaments} disabled={remoteListLoading}>
+          <RotateCcw size={15} /> {remoteListLoading ? 'Actualizando…' : 'Actualizar'}
+        </button>
+      </div>
+      {remoteListError && <Notice kind="warning">{remoteListError}</Notice>}
+      {!remoteListError && !remoteTournaments.length && !remoteListLoading && <p className="muted">No hay torneos guardados en Neon.</p>}
+      {remoteTournaments.length > 0 && <ul className="tab-list">
+        {remoteTournaments.map((entry) => {
+          const isLocal = localTournamentIds.has(entry.tabTournamentId);
+          const isOpen = tournament?.id === entry.tabTournamentId;
+          return <li key={entry.tabTournamentId} className={isOpen ? 'current' : ''}>
+            <div><b>{entry.tournamentName}</b><small>Neon · revisión {entry.revision} · Modificado {entry.updatedAt ? new Date(entry.updatedAt).toLocaleString('es-ES') : '—'}{isLocal ? ' · También en este navegador' : ''}</small></div>
+            {isOpen && isLocal
+              ? <span className="state-pill ready"><Check size={12} /> Abierto</span>
+              : <button type="button" className="button secondary" disabled={state.readOnly} onClick={() => {
+                void onRestoreRemoteTournament(entry.tabTournamentId)
+                  .then(() => notify(isLocal ? 'Se ha abierto/comprobado la copia de Neon.' : 'Torneo recuperado desde Neon en este navegador.'))
+                  .catch((error: unknown) => notify(error instanceof Error ? error.message : 'No se ha podido recuperar el torneo.', 'error'));
+              }}><Download size={15} /> {isLocal ? 'Abrir / recuperar' : 'Recuperar'}</button>}
+            <button type="button" className="button secondary" disabled={state.readOnly} onClick={() => {
+              if (!window.confirm('Se creará una copia independiente de «' + entry.tournamentName + '» a partir de la versión guardada en Neon. La copia tendrá una identidad nueva y podrá modificarse sin afectar al original. ¿Continuar?')) return;
+              void onDuplicateRemoteTournament(entry.tabTournamentId)
+                .then(() => notify('Copia independiente creada desde Neon. Se guardará como un torneo nuevo.'))
+                .catch((error: unknown) => notify(error instanceof Error ? error.message : 'No se ha podido duplicar el torneo.', 'error'));
+            }}><ClipboardList size={15} /> Duplicar</button>
+            <button type="button" className="icon-button danger-action" aria-label={'Borrar ' + entry.tournamentName + ' de Neon'} disabled={state.readOnly} onClick={() => {
+              if (!window.confirm('¿Borrar «' + entry.tournamentName + '» de Neon y también su copia local, si existe, con su registro y copias automáticas? Esta acción no se puede deshacer. Exporta antes una copia si quieres conservarlo.')) return;
+              void onDeleteTournament(entry.tabTournamentId).then(() => {
+                notify('Torneo eliminado de Neon y de este navegador.');
+                onRefreshRemoteTournaments();
+              }).catch((error: unknown) => {
+                notify(error instanceof Error ? 'No se ha podido borrar el torneo: ' + error.message : 'No se ha podido borrar el torneo.', 'error');
+              });
+            }}><Trash2 size={15} /></button>
+          </li>;
+        })}
+      </ul>}
+    </section>
 
     {tournament && <section className="panel">
       <div className="panel-title"><div><h3><Stethoscope size={18} /> Diagnóstico</h3><p>Comprueba que los datos son coherentes (identificadores, referencias, dobles reservas, instituciones escritas de dos formas…) y que el registro no se ha alterado. Hazlo antes de cada ronda.</p></div></div>
