@@ -156,6 +156,22 @@ describe('LEDU timer state machine', () => {
     expect(errors.some((error) => error.includes('Equipo 1') && error.includes('misma ronda'))).toBe(true);
   });
 
+  it('rejects a judge assigned to two distinct rooms even if their display names match', () => {
+    const room = (id: string, teamFavorId: string, teamContraId: string) => ({
+      id, name: 'Sala repetida', roundId: 'r1', teamFavorId, teamContraId, judgeIds: ['j1'], phases: LEDU_PHASES,
+    });
+    const errors = validateAssignments({
+      rounds: [{ id: 'r1', name: 'Ronda 1' }],
+      teams: [
+        { id: 't1', name: 'Equipo 1' }, { id: 't2', name: 'Equipo 2' },
+        { id: 't3', name: 'Equipo 3' }, { id: 't4', name: 'Equipo 4' },
+      ],
+      judges: [{ id: 'j1', name: 'Juez 1' }],
+      rooms: [room('a1', 't1', 't2'), room('a2', 't3', 't4')],
+    });
+    expect(errors.some((error) => error.includes('Juez 1 está asignado a Sala repetida y Sala repetida'))).toBe(true);
+  });
+
   it('validates duplicate assignments and room completeness', () => {
     const room = (id: string, favor: string, judges: string[]) => ({ id, name: id.toUpperCase(), roundId: 'r1', teamFavorId: favor, teamContraId: 't2', judgeIds: judges, phases: LEDU_PHASES });
     const errors = validateAssignments({
