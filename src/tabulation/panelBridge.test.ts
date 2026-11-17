@@ -73,7 +73,7 @@ describe('panel → tabulation', () => {
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
     tab.judges = tab.judges.map((judge) => (judge.id === 'j2' ? { ...judge, rating: 5, canChair: false } : judge));
     const handoff = buildPanelHandoff(source, now);
-    const result = (awaitlessMergeGuard => awaitlessMergeGuard)(tab);
+    const result = tab;
     expect(result.teams.map((team) => team.name)).toEqual(['Equipo A', 'Equipo B', 'Equipo C', 'Equipo D']);
     expect(result.judges.find((judge) => judge.id === 'j2')).toMatchObject({ rating: 5, canChair: false });
     expect(handoff.teams).toEqual([]);
@@ -126,6 +126,7 @@ describe('tabulation → panel', () => {
       { id: 'tab-team-x', name: 'Equipo importado X', institution: 'Universidad X', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] },
       { id: 'tab-team-y', name: 'Equipo importado Y', institution: 'Universidad Y', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] },
     ];
+    tab.speakers = [];
     tab.judges = [
       { id: 'tab-judge-x', name: 'Jueza importada X', institution: 'Universidad Z', active: true, rating: 4, canChair: true, incompatibleJudgeIds: [], unavailableRoundIds: [] },
     ];
@@ -179,6 +180,7 @@ describe('tabulation → panel', () => {
       { id: 'tab-t1', name: '  EQUIPO A ', institution: 'Universidad A', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] },
       { id: 'tab-t2', name: 'Equipo B', institution: 'Universidad B', active: true, swing: false, breakEligible: true, incompatibleJudgeIds: [] },
     ];
+    tab.speakers = [];
     tab.judges = [
       { id: 'tab-j2', name: 'JUEZ 2', institution: 'LEDU', active: true, rating: 3, canChair: true, incompatibleJudgeIds: [], unavailableRoundIds: [] },
     ];
