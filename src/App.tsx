@@ -1234,7 +1234,7 @@ export default function App() {
     }
     setView('tabulation');
     window.history.replaceState(null, '', '/tabulacion' + window.location.hash);
-    setTabulationNotice('Equipos, oradores, jueces y salas enviados a Tabulación.');
+    setTabulationNotice('Tabulación abierta. Crea y administra allí los equipos, debatientes, jueces y salas.');
   };
   const loadFromTabulation = () => {
     const round = data.rounds.find((item) => item.id === activeRound);
@@ -1248,7 +1248,7 @@ export default function App() {
       ? '\n\nAtención: la tabulación se preparó para el torneo «' + outbox.panelTournamentName + '».' : '';
     const overwriteWarning = '\n\n⚠️ SOBRESCRITURA TOTAL: se sustituirán todas las asignaciones de esta ronda. Se reiniciarán ' + result.resetTimers + ' cronómetros que no estén en su estado inicial y se eliminarán ' + result.removedScorecards + ' actas/puntuaciones existentes. Las salas que no aparezcan en Tabulación quedarán vacías. Esta operación no se puede deshacer.';
     if (!window.confirm('¿Cargar «' + outbox.roundName + '» de la tabulación («' + outbox.tabTournamentName + '», enviada el ' + new Date(outbox.createdAt).toLocaleString('es-ES') + ') en ' + round.name + '?' + otherTournament + overwriteWarning
-      + (result.addedTeams || result.addedJudges || result.addedPhysicalRooms ? '\n\nSe añadirán al panel: ' + result.addedTeams + ' equipos, ' + result.addedJudges + ' jueces y ' + result.addedPhysicalRooms + ' aulas.' : '')
+      + (result.addedTeams || result.addedJudges || result.addedPhysicalRooms ? '\n\nSe incorporarán a Gestión: ' + result.addedTeams + ' equipos, ' + result.addedJudges + ' jueces y ' + result.addedPhysicalRooms + ' aulas.' : '')
       + '\n\n' + result.summary.join('\n') + '\n\nLas salas de esta ronda que no aparecen quedarán vacías.')) return;
     const rooms = result.rooms;
     const replacedRoomIds = new Set(data.rooms.filter((room) => room.roundId === round.id).map((room) => room.id));
