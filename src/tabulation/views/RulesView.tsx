@@ -146,7 +146,7 @@ export function RulesView({ tournament, update, notify, store, managerMode = fal
     </section>
 
     {settings.ballotMode === 'joint' && !managerMode && <section className="panel">
-      <div className="panel-title"><div><h3>Actas por WhatsApp</h3><p>Cada juez principal recibe por WhatsApp el enlace de su debate, rellena el acta en el móvil y la envía a la mesa con un código que la tabulación comprueba. No usa ningún servidor: basta con que esta página esté publicada.</p></div></div>
+      <div className="panel-title"><div><h3>Actas por WhatsApp</h3><p>Cada juez principal recibe por WhatsApp un enlace corto de ocho caracteres, abre el acta en el móvil y la envía a la mesa con un código que la tabulación comprueba. La creación y resolución de enlaces necesita el backend; los datos del torneo siguen guardándose localmente.</p></div></div>
       <div className="tab-form-grid">
         <Field label="Móvil de la mesa de tabulación (WhatsApp)" hint={whatsAppNumber(tournament.whatsapp?.deskPhone ?? '') ? 'Las actas llegarán al +' + whatsAppNumber(tournament.whatsapp?.deskPhone ?? '') + '.' : 'Vacío: el juez elige el chat al enviar.'}>
           <input type="tel" value={tournament.whatsapp?.deskPhone ?? ''} placeholder="600 11 22 33" onChange={(event) => setWhatsApp({ deskPhone: event.target.value })} />

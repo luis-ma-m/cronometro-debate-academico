@@ -29,7 +29,7 @@ async function audit(page: Page, label: string) {
   expect(report.overflow, label + ': desborde horizontal').toBeLessThanOrEqual(1);
 }
 
-test('todas las pantallas: sin errores en consola, controles con nombre y sin desbordes', async ({ page, context }) => {
+test('todas las pantallas: sin errores en consola, controles con nombre y sin desbordes', async ({ page }) => {
   const problems: string[] = [];
   const watch = (target: Page) => {
     target.on('console', (message) => { if (message.type() === 'error' || message.type() === 'warning') problems.push(message.type() + ': ' + message.text().slice(0, 200)); });
@@ -82,38 +82,13 @@ test('todas las pantallas: sin errores en consola, controles con nombre y sin de
   await audit(page, 'Proyección a ciegas');
   await page.keyboard.press('Escape');
 
-  // The judges' page on a phone, and a broken link.
+  // Without a manager session the short-only policy must disable link actions.
   await nav(page, 'Rondas');
   await page.locator('.tab-whatsapp summary').click();
-  const actaRows = page.locator('.tab-whatsapp tbody tr');
-  const openActaUrl = async (index: number) => {
-    const popupPromise = page.waitForEvent('popup');
-    await actaRows.nth(index).getByRole('button', { name: 'Abrir el acta' }).click();
-    const popup = await popupPromise;
-    await expect.poll(() => popup.url()).toContain('/acta#A2');
-    const url = popup.url();
-    await popup.close();
-    return url;
-  };
-  const actaUrl = await openActaUrl(0);
-  const otherUrl = await openActaUrl(1);
-  const phone = await context.newPage();
-  watch(phone);
-  await phone.setViewportSize({ width: 360, height: 740 });
-  await phone.goto(actaUrl);
-  await expect(phone.getByRole('heading', { level: 1 })).toContainText('Ronda 1');
-  await audit(phone, 'Acta en el móvil');
-  // Another link in the same tab only changes the hash: the page must switch to that debate.
-  await phone.locator('.acta-option').first().click();
-  await phone.goto(otherUrl);
-  await expect(phone.getByRole('heading', { level: 1 })).toContainText('Aula 2');
-  await expect(phone.locator('.acta-option input').first()).not.toBeChecked();
-  await phone.goto(actaUrl);
-  await expect(phone.getByRole('heading', { level: 1 })).toContainText('Aula 1');
-  await expect(phone.locator('.acta-option input').first()).toBeChecked();
-  await phone.goto(actaUrl.slice(0, actaUrl.length - 30));
-  await expect(phone.getByText(/enlace del acta está incompleto o dañado/)).toBeVisible();
-  await audit(phone, 'Enlace roto');
+  await expect(page.getByRole('button', { name: 'Abrir el acta' }).first()).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Enviar enlace' }).first()).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Copiar todos los enlaces para el grupo de jueces' })).toBeDisabled();
+  await expect(page.locator('.tab-whatsapp')).toContainText('No se envían enlaces autocontenidos como alternativa.');
 
   expect(problems).toEqual([]);
 });

@@ -147,3 +147,17 @@
 3. El contador de reescrituras debe ser una proyección del historial de versiones confirmado en servidor, no un campo incrementado en cliente.
 4. La agregación de papeletas no puede decidirse mediante una media arbitraria: debe respetar la regla de puntuación configurada y conservar todas las fuentes.
 5. La aplicación retroactiva de reglas puede cambiar clasificaciones históricas y resultados publicados. Debe ser una operación deliberada, auditable y recuperable, nunca una consecuencia automática de guardar configuración.
+
+
+## 9. Política vigente de enlaces de WhatsApp — 17/11/2026
+
+Esta decisión posterior sustituye cualquier referencia anterior a A2 como fallback automático al compartir enlaces:
+
+- El único formato que se puede generar, abrir desde la vista de rondas o enviar por WhatsApp es S8: exactamente ocho caracteres Crockford Base32, resueltos por el backend.
+- Si falta la sesión del gestor, la URL pública no es accesible o falla la creación en backend, la operación se detiene con un error visible. No se abre WhatsApp, no se copia un enlace alternativo y no se genera A2.
+- La copia grupal debe ser atómica desde el punto de vista del usuario: si no se pueden crear todos los S8, no se copia una lista parcial ni se sustituye ningún enlace por A2.
+- Los lectores A1/A2 y los códigos ACTA1/ACTA2 se conservan para que enlaces y actas ya distribuidos sigan siendo compatibles. Esta compatibilidad de lectura no autoriza generar nuevos A1/A2.
+- La política se controla mediante una única constante explícita en `src/tabulation/views/RoundsView.tsx`: `ACTA_WHATSAPP_LINK_POLICY`. Su valor actual es `'short-only'`. Para revertir el comportamiento de distribución offline, cambiarlo a `'short-with-offline-fallback'`; el generador A2 y su decodificador permanecen intactos.
+- No se cambia el esquema S8, la persistencia Neon, la caducidad, la revocación ni la resolución pública. Tampoco se migran ni invalidan enlaces existentes.
+
+**Criterio de aceptación:** ningún flujo nuevo de WhatsApp o apertura desde la vista de rondas debe distribuir una URL cuyo identificador no sea S8 de ocho caracteres. Ante indisponibilidad, debe informar del problema y no enviar nada.

@@ -23,6 +23,8 @@ import { actaLinkMessage, buildActaLink, whatsAppNumber, whatsAppUrl } from '../
 import { createActaShortLink, listActaShortLinks, revokeActaShortLinks, updateActaShortLinkExpiry, type ActaShortLink } from '../../api';
 
 const DRAFT_TAB = '__borrador__';
+// Rollback switch: set to 'short-with-offline-fallback' to restore A2 generation when S8 is unavailable.
+const ACTA_WHATSAPP_LINK_POLICY: 'short-only' | 'short-with-offline-fallback' = 'short-only';
 type Look = ReturnType<typeof lookups>;
 type Compute = (current: TabTournament) => { next: TabTournament; meta: LogInput } | null;
 
@@ -586,7 +588,7 @@ function DebateTable({ tournament, round, problems, look, outcomes, onEdit }: {
   </div>;
 }
 
-/** Short links are the online default; the compact A2 snapshot is the offline fallback. */
+/** WhatsApp actas use server-resolved S8 links exclusively while the short-only policy is active. */
 function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken }: {
   tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void; managerSessionToken?: string;
 }) {
@@ -616,8 +618,17 @@ function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken 
     catch (error) { setRefreshError(errorText(error)); }
   };
   useEffect(() => { void refreshLinks(); }, [managerSessionToken, tournament.id]);
-  const getUrl = async (row: typeof rows[number]): Promise<{ url: string; online: boolean }> => {
-    if (!managerSessionToken || unreachable) return { url: row.fallbackUrl, online: false };
+  const unavailableTarget = (row: typeof rows[number], reason: string): { url: string; online: boolean } | null => {
+    if (ACTA_WHATSAPP_LINK_POLICY === 'short-with-offline-fallback') {
+      notify(reason + ' Se utilizará A2 autocontenido, que no necesita backend para abrirse.', 'warning');
+      return { url: row.fallbackUrl, online: false };
+    }
+    notify(reason + ' No se ha enviado ningún enlace. Inicia sesión y comprueba que el backend y la dirección pública estén disponibles.', 'error');
+    return null;
+  };
+  const getUrl = async (row: typeof rows[number]): Promise<{ url: string; online: boolean } | null> => {
+    if (!managerSessionToken) return unavailableTarget(row, 'Necesitas una sesión activa del gestor para crear enlaces cortos.');
+    if (unreachable) return unavailableTarget(row, 'La dirección configurada no es accesible desde los móviles.');
     const snapshotKey = cyrb53(JSON.stringify(row.link));
     const keyName = 'acta-short-link-idem:' + tournament.id + ':' + row.debate.id + ':' + snapshotKey;
     const getKey = () => {
@@ -638,13 +649,13 @@ function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken 
       setLinks((current) => [result, ...current.filter((item) => item.id !== result.id)]);
       return { url: baseUrl + '/acta#S8-' + result.id, online: true };
     } catch (error) {
-      notify('No se pudo crear el enlace corto (' + errorText(error) + '). Se utilizará A2 autocontenido, que no necesita backend para abrirse.', 'warning');
-      return { url: row.fallbackUrl, online: false };
+      return unavailableTarget(row, 'No se pudo crear el enlace corto (' + errorText(error) + ').');
     }
   };
   const openWhatsApp = async (row: typeof rows[number]) => {
     const popup = window.open('about:blank', '_blank');
     const target = await getUrl(row);
+    if (!target) { popup?.close(); return; }
     const message = actaLinkMessage(row.link, target.url);
     const href = whatsAppUrl(row.phone, message);
     if (popup) popup.location.href = href;
@@ -655,6 +666,7 @@ function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken 
   const openActa = async (row: typeof rows[number]) => {
     const popup = window.open('about:blank', '_blank');
     const target = await getUrl(row);
+    if (!target) { popup?.close(); return; }
     if (popup) popup.location.href = target.url;
     else window.location.href = target.url;
     if (target.online) void refreshLinks();
@@ -664,11 +676,12 @@ function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken 
     try {
       const generated = await Promise.all(rows.map(async (row) => {
         const target = await getUrl(row);
-        return row.label + (row.link.jury[0] ? ' · ' + row.link.jury[0] : '') + '\n' + target.url;
+        return target ? row.label + (row.link.jury[0] ? ' · ' + row.link.jury[0] : '') + '\n' + target.url : null;
       }));
+      if (generated.some((item) => item === null)) return;
       const message = 'Actas de ' + round.name + ' · ' + tournament.name + '. Cada juez principal abre el enlace de su sala, rellena el acta y la envía por WhatsApp a la mesa:\n\n' + generated.join('\n\n');
       const copied = await copyText(message);
-      notify(copied ? 'Enlaces copiados: enlaces cortos cuando el backend responde y A2 solo como contingencia.' : 'No se han podido copiar los enlaces.', copied ? 'success' : 'error');
+      notify(copied ? 'Enlaces cortos copiados.' : 'No se han podido copiar los enlaces.', copied ? 'success' : 'error');
       if (managerSessionToken) void refreshLinks();
     } finally { setBusy(false); }
   };
@@ -709,10 +722,10 @@ function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken 
   const revocableLinks = links.filter((item) => !item.revokedAt);
   return <details className="tab-whatsapp tab-no-project">
     <summary><MessageCircle size={16} /> Actas por WhatsApp · enlaces cortos de 8 caracteres</summary>
-    {unreachable && <Notice kind="warning">Los móviles no pueden abrir {baseUrl}: configura una dirección pública.</Notice>}
-    <p className="muted">Con backend y sesión activa se crea un enlace corto de ocho caracteres que guarda el snapshot completo en Neon. Si no hay conexión, se genera el formato A2 autocontenido. Los enlaces cortos necesitan backend para resolverse; A2 puede abrirse sin conexión. El juez enviará el acta por WhatsApp {desk ? 'al +' + desk : 'al chat que elija (configura el móvil de mesa en Reglas)'}.</p>
+    {unreachable && <Notice kind="warning">Los móviles no pueden abrir {baseUrl}: configura una dirección pública antes de generar enlaces cortos.</Notice>}
+    <p className="muted">Se generan exclusivamente enlaces cortos de ocho caracteres. El snapshot completo se guarda en Neon y el enlace necesita el backend para resolverse. No se envían enlaces autocontenidos como alternativa. El juez enviará el acta por WhatsApp {desk ? 'al +' + desk : 'al chat que elija (configura el móvil de mesa en Reglas)'}.</p>
     <label className="tab-field"><span>Caducidad de los nuevos enlaces</span><select value={expiryDays} onChange={(event) => setExpiryDays(Number(event.target.value))}><option value={1}>1 día</option><option value={7}>7 días</option><option value={30}>30 días</option><option value={90}>90 días</option><option value={365}>365 días</option></select></label>
-    {!managerSessionToken && <Notice kind="info">Inicia sesión en el panel de organización para crear y administrar enlaces cortos. Mientras tanto se utilizará A2 offline.</Notice>}
+    {!managerSessionToken && <Notice kind="info">Inicia sesión en el panel de organización para crear y administrar enlaces cortos. No se enviará un enlace alternativo autocontenido.</Notice>}
     {refreshError && <Notice kind="warning">No se ha podido cargar el inventario de enlaces: {refreshError}</Notice>}
     <div className="tournament-table-wrap"><table>
       <thead><tr><th>Sala</th><th>Debate</th><th>Juez principal</th><th>Enlace</th></tr></thead>
@@ -720,12 +733,12 @@ function WhatsAppLinks({ tournament, round, notify, onSent, managerSessionToken 
         <td>{row.link.venue || '—'}</td><td>{row.link.teams[0].name} – {row.link.teams[1].name}</td>
         <td>{row.link.jury[0] ?? 'sin juez'}<small className="tab-cell-sub">{row.phone ? '+' + row.phone : 'sin móvil: WhatsApp pedirá el chat'}</small></td>
         <td className="tab-whatsapp-actions">
-          <button type="button" className="button secondary" disabled={busy} onClick={() => void openWhatsApp(row)}><Send size={14} /> Enviar enlace</button>
-          <button type="button" className="text-button" disabled={busy} onClick={() => void openActa(row)}>Abrir el acta</button>
+          <button type="button" className="button secondary" disabled={busy || (ACTA_WHATSAPP_LINK_POLICY === 'short-only' && (!managerSessionToken || unreachable))} onClick={() => void openWhatsApp(row)}><Send size={14} /> Enviar enlace</button>
+          <button type="button" className="text-button" disabled={busy || (ACTA_WHATSAPP_LINK_POLICY === 'short-only' && (!managerSessionToken || unreachable))} onClick={() => void openActa(row)}>Abrir el acta</button>
         </td>
       </tr>)}</tbody>
     </table></div>
-    <button type="button" className="button ghost" disabled={busy} onClick={() => void copyGroup()}><Copy size={16} /> Copiar todos los enlaces para el grupo de jueces</button>
+    <button type="button" className="button ghost" disabled={busy || (ACTA_WHATSAPP_LINK_POLICY === 'short-only' && (!managerSessionToken || unreachable))} onClick={() => void copyGroup()}><Copy size={16} /> Copiar todos los enlaces para el grupo de jueces</button>
     {managerSessionToken && <section className="tab-panel" aria-label="Gestión de enlaces cortos">
       <h4>Enlaces cortos de este torneo ({links.length})</h4>
       <p className="muted">La revocación impide nuevas consultas del enlace, pero no elimina las actas ni los mensajes ya recibidos.</p>
