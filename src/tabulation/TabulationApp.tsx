@@ -192,16 +192,30 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         }
       } catch (error) {
         if (!cancelled) {
+          // Do not memoize a failed recovery: the next online/focus/poll attempt must retry it.
+          recoveredTournamentId.current = undefined;
           if (tournament && !remoteCursor.current) {
             remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
           }
-          setRemoteSync('error');
+          setRemoteSync('offline');
           store.logError(error instanceof Error ? error.message : 'No se pudo recuperar Tabulación desde Neon.');
         }
       }
     };
     void recover();
-    return () => { cancelled = true; };
+    // An empty browser cache must keep trying: otherwise a single startup outage leaves this device blank forever.
+    const retry = !tournament ? window.setInterval(() => {
+      if (document.visibilityState === 'visible' && !cancelled && !store.getState().tournament) void recover();
+    }, 15000) : null;
+    const retryOnReturn = () => { if (!cancelled && document.visibilityState === 'visible' && !store.getState().tournament) void recover(); };
+    window.addEventListener('online', retryOnReturn);
+    window.addEventListener('focus', retryOnReturn);
+    return () => {
+      cancelled = true;
+      if (retry !== null) window.clearInterval(retry);
+      window.removeEventListener('online', retryOnReturn);
+      window.removeEventListener('focus', retryOnReturn);
+    };
   }, [apiConfigured, remoteToken, tournament?.id, store]);
 
   // Any tournament switch invalidates the previous remote cursor. A new/duplicated aggregate
@@ -333,14 +347,38 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       if (document.visibilityState !== 'visible') return;
       try {
         const remote = await getTabulationSnapshot(remoteToken, tournament.id);
-        const cursor = remoteCursor.current;
-        if (!cursor) return;
+        let cursor = remoteCursor.current;
+        if (!cursor || cursor.id !== tournament.id) {
+          // Rebuild a lost cursor after a transient outage instead of leaving the client permanently offline.
+          if (!remote) {
+            cursor = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
+            remoteCursor.current = cursor;
+            setRemoteSync('checking');
+            return;
+          }
+          const differences = findSnapshotDifferences(tournament, remote.snapshot);
+          if (differences.length === 0) {
+            store.backup('Antes de recuperar Neon tras una desconexión');
+            const applied = store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Sincronización recuperada desde Neon', details: { revision: remote.revision } });
+            if (!applied || !store.flush()) throw new Error('No se pudo guardar localmente la versión recuperada desde Neon.');
+            remoteCursor.current = { id: tournament.id, revision: remote.revision, localRevision: store.getState().tournament?.revision ?? remote.snapshot.revision, inFlight: false };
+            setRemoteConflict(null);
+            setRemoteSync('synced');
+            return;
+          }
+          remoteCursor.current = { id: tournament.id, revision: remote.revision, localRevision: -1, inFlight: false };
+          setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
+          setRemoteSync('conflict');
+          return;
+        }
         if (!remote) {
           if (cursor.localRevision !== tournament.revision) setRemoteSync('checking');
+          else setRemoteSync('synced');
           return;
         }
         if (remote.revision <= cursor.revision) {
-          if (cursor.localRevision !== tournament.revision) setRemoteSync('checking');
+          if (cursor.localRevision === tournament.revision) setRemoteSync('synced');
+          else setRemoteSync('checking');
           return;
         }
         if (cursor.localRevision === tournament.revision && store.getState().status === 'saved') {
@@ -652,6 +690,25 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           <button type="button" className="button secondary" onClick={() => store.reloadFromStorage()}>Cargar la otra versión</button>
           <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Sobrescribir la versión guardada por la otra pestaña con la de esta pestaña?')) store.overwrite(); }}>Mantener esta versión</button>
         </div>}
+        {remoteSync === 'conflict' && !remoteConflict && <section className="notice error-notice tab-remote-conflict" role="alert">
+          <strong>Conflicto de sincronización pendiente de comprobar</strong>
+          <p>La sesión detectó una revisión distinta, pero todavía no ha podido recuperar sus detalles. Tus datos locales se conservan.</p>
+          <div className="tab-remote-conflict-actions">
+            <button type="button" className="button secondary" onClick={() => {
+              if (!remoteToken || !tournament) return;
+              setRemoteSync('checking');
+              void getTabulationSnapshot(remoteToken, tournament.id).then((remote) => {
+                if (!remote) {
+                  remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
+                  setRemoteSync('checking');
+                  return;
+                }
+                setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
+                setRemoteSync('conflict');
+              }).catch(() => setRemoteSync('offline'));
+            }}>Volver a comprobar y resolver</button>
+          </div>
+        </section>}
         {remoteSync === 'conflict' && remoteConflict && remoteDifferences.length > 0 && <section className="notice error-notice tab-remote-conflict" role="alert" aria-labelledby="tab-remote-conflict-title">
           <div className="tab-remote-conflict-heading">
             <div>
@@ -680,7 +737,18 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           </div>
         </section>}
         {remoteSync === 'error' && <Notice kind="error">No se ha podido confirmar el guardado en Neon. La copia local sigue disponible; revisa la conexión y vuelve a intentarlo.</Notice>}
-        {remoteSync === 'offline' && apiConfigured && <Notice kind="warning">Sin conexión con Neon. Los cambios permanecen en el almacenamiento local y se intentarán sincronizar al recuperar la conexión.</Notice>}
+        {remoteSync === 'offline' && apiConfigured && <Notice kind="warning">Sin conexión con Neon. Los cambios permanecen en el almacenamiento local y se intentarán sincronizar al recuperar la conexión. <button type="button" className="button secondary tab-retry" onClick={() => {
+          setRemoteSync('checking');
+          if (tournament && remoteToken) void getTabulationSnapshot(remoteToken, tournament.id).then((remote) => {
+            if (remote) {
+              setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
+              setRemoteSync('conflict');
+            } else {
+              remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
+              setRemoteSync('checking');
+            }
+          }).catch(() => setRemoteSync('offline'));
+        }}>Reintentar conexión</button></Notice>}
         {state.error && <Notice kind="error">{state.error}{state.status === 'error' && <> <button type="button" className="button secondary tab-retry" onClick={() => {
           if (store.flush()) notify('Guardado correctamente.');
         }}>Reintentar el guardado</button></>}</Notice>}
