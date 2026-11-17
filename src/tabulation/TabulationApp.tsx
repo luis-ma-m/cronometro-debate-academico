@@ -153,7 +153,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const [remoteConflict, setRemoteConflict] = useState<{ remote: import('../api').AuthoritativeTabulationSnapshot; localUpdatedAt: number } | null>(null);
   const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
   const initialRecovery = useRef(false);
-  const recoveredTournamentId = useRef<string | null>(null);
+  const recoveredTournamentId = useRef<string | null | undefined>(undefined);
   const skipNextEmptyRecovery = useRef(false);
   const componentAlive = useRef(true);
   const seenPublicActas = useRef(new Set<string>());
