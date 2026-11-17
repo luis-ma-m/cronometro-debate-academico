@@ -594,7 +594,6 @@ function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent, managerS
 }) {
   const baseUrl = (tournament.whatsapp?.baseUrl.trim() || window.location.origin).replace(/\/+$/, '');
   const unreachable = /^https?:\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[)/.test(baseUrl);
-  const desk = whatsAppNumber(tournament.whatsapp?.deskPhone ?? '');
   const rows = useMemo(() => {
     const fallen = fallenTeamIds(tournament.teams, round.number);
     const judges = new Map(tournament.judges.map((judge) => [judge.id, judge]));
@@ -609,8 +608,8 @@ function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent, managerS
   const getShortUrl = async (row: typeof rows[number]) => {
     if (!managerSessionToken) throw new Error('Inicia sesión en el gestor para generar enlaces S8.');
     if (unreachable) throw new Error('La dirección pública configurada no es accesible desde los móviles.');
-    const fingerprint = cyrb53(JSON.stringify(row.link)).toString(36);
-    const idempotencyKey = 's8_' + fingerprint + '_' + cyrb53(row.debate.id).toString(36);
+    const fingerprint = cyrb53(JSON.stringify(row.link));
+    const idempotencyKey = 's8_' + fingerprint + '_' + cyrb53(row.debate.id);
     let result = await createActaShortLink(managerSessionToken, tournament.id, row.debate.id, row.link, 30, idempotencyKey);
     if (result.revokedAt || (result.expiresAt !== null && result.expiresAt <= Date.now())) {
       result = await createActaShortLink(managerSessionToken, tournament.id, row.debate.id, row.link, 30, idempotencyKey + '_' + Date.now().toString(36));
