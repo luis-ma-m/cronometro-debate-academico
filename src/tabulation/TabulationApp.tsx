@@ -849,7 +849,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         {activeView === 'inicio' && <HomeView store={store} state={state} outcomes={outcomes} notify={notify} onNavigate={(id) => setView(id as ViewId)} onDeleteTournament={deleteTournament} remoteTournaments={remoteTournaments} remoteListLoading={remoteListLoading} remoteListError={remoteListError} onRefreshRemoteTournaments={() => void refreshRemoteTournaments()} onRestoreRemoteTournament={restoreRemoteTournament} onDuplicateRemoteTournament={duplicateRemoteTournament} />}
         {props && activeView === 'reglas' && <RulesView {...props} />}
         {props && activeView === 'participantes' && <ParticipantsView {...props} />}
-        {props && activeView === 'rondas' && <RoundsView {...props} projection={projection} onProject={() => setProjection(true)} onNavigate={(id) => setView(id as ViewId)} />}
+        {props && activeView === 'rondas' && <RoundsView {...props} managerSessionToken={remoteToken ?? undefined} projection={projection} onProject={() => setProjection(true)} onNavigate={(id) => setView(id as ViewId)} />}
         {props && activeView === 'actas' && <BallotsView {...props} />}
         {props && activeView === 'clasificacion' && <StandingsView {...props} projection={projection} onProject={() => setProjection(true)} />}
         {props && activeView === 'registro' && <LogView {...props} />}
