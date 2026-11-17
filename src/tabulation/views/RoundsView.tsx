@@ -618,21 +618,38 @@ function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent, managerS
     return baseUrl + '/acta#S8-' + result.id;
   };
   const openWhatsApp = async (row: typeof rows[number]) => {
+    // Open synchronously during the click: browsers may block a new window after an await.
     const popup = window.open('about:blank', '_blank');
     setBusyId(row.debate.id);
     try {
       const url = await getShortUrl(row);
       const message = actaLinkMessage(row.link, url);
       const href = whatsAppUrl(row.phone, message);
-      if (popup) popup.location.href = href;
-      else {
+
+      if (popup) {
+        // Navigate before touching local history/state. A logging or persistence error must never close WhatsApp.
+        popup.location.replace(href);
+      } else {
         await copyText(message);
         notify('El navegador ha bloqueado la ventana de WhatsApp. Se ha copiado el mensaje con el enlace S8.', 'warning');
       }
-      onSent(round.name + ' · enlace S8 del acta de ' + row.label + ' preparado para WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.');
-      onMarkSent(row.debate.id);
+
+      // These are secondary bookkeeping operations, not part of opening WhatsApp.
+      // Keep them isolated so a failure cannot undo or close the external navigation.
+      try {
+        onSent(round.name + ' · enlace S8 del acta de ' + row.label + ' preparado para WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.');
+      } catch (error) {
+        console.error('No se ha podido registrar la preparación del enlace de WhatsApp:', error);
+      }
+      try {
+        onMarkSent(row.debate.id);
+      } catch (error) {
+        console.error('No se ha podido actualizar el estado del enlace del acta:', error);
+        notify('WhatsApp se ha abierto, pero no se ha podido actualizar el estado del enlace en la tabulación.', 'warning');
+      }
     } catch (error) {
-      popup?.close();
+      // Only close the blank window if link creation failed before navigation.
+      if (popup && !popup.closed) popup.close();
       notify((error instanceof Error ? error.message : String(error)) + ' No se ha enviado ningún enlace alternativo.', 'error');
     } finally { setBusyId(''); }
   };
