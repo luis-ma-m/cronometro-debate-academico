@@ -38,7 +38,7 @@ export interface PanelOutboxDebate {
 
 export interface PanelOutbox {
   format: 'ledu-tabulacion-outbox';
-  version: 2;
+  version: 3;
   createdAt: number;
   presetId: PresetId;
   roundKind: 'qualifying' | 'elimination';
@@ -48,14 +48,16 @@ export interface PanelOutbox {
   roundName: string;
   debates: PanelOutboxDebate[];
   /** Participant snapshots travel with the round so the panel can create missing records. */
-  teams?: Team[];
-  judges?: Judge[];
+  /** Complete participant snapshot: Tabulation is the only source of truth. */
+  teams: Team[];
+  judges: Judge[];
+  speakers: Speaker[];
 }
 
 function readJson<T>(storage: SimpleStorage, key: string, format: string): T | null {
   try {
     const value = JSON.parse(storage.getItem(key) ?? 'null') as { format?: string; version?: number } | null;
-    return value && value.format === format && (value.version === 1 || value.version === 2) ? (value as T) : null;
+    return value && value.format === format && (value.version === 1 || value.version === 2 || value.version === 3) ? (value as T) : null;
   } catch {
     return null;
   }
@@ -233,7 +235,7 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   return {
     outbox: {
       format: 'ledu-tabulacion-outbox',
-      version: 2,
+      version: 3,
       createdAt: now,
       presetId: tournament.settings.presetId,
       roundKind: round.kind,
@@ -242,14 +244,15 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
       panelTournamentName: tournament.panelLink?.tournamentName ?? null,
       roundName: round.name,
       debates,
-      teams: tournament.teams.filter((team) => usedTeamIds.has(team.id)).map((team) => ({
+      teams: tournament.teams.map((team) => ({
         id: team.id, name: team.name, institution: team.institution, active: team.active,
         incompatibleJudgeIds: [...team.incompatibleJudgeIds],
       })),
-      judges: tournament.judges.filter((judge) => usedJudgeIds.has(judge.id)).map((judge) => ({
+      judges: tournament.judges.map((judge) => ({
         id: judge.id, name: judge.name, institution: judge.institution, active: judge.active,
         incompatibleJudgeIds: [...judge.incompatibleJudgeIds],
       })),
+      speakers: tournament.speakers.map((speaker) => ({ ...speaker })),
     },
     issues,
     warnings,
@@ -280,7 +283,7 @@ function panelAcceptedJudges(tournament: TabTournament, debate: TabDebate, venue
   return { judgeIds, chairId: judgeIds.includes(debate.chairId) ? debate.chairId : pickChair(judgeIds, judges) };
 }
 
-export interface ApplyOutboxResult { rooms: Room[] | null; rounds: Tournament['rounds']; formats: Tournament['formats']; physicalRooms: Tournament['physicalRooms']; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; addedPhysicalRooms: number; overwrittenRooms: number; resetTimers: number; removedScorecards: number; issues: string[]; summary: string[]; changed: number }
+export interface ApplyOutboxResult { rooms: Room[] | null; speakers: Speaker[]; rounds: Tournament['rounds']; formats: Tournament['formats']; physicalRooms: Tournament['physicalRooms']; teams: Team[]; judges: Judge[]; institutions: string[]; addedTeams: number; addedJudges: number; addedPhysicalRooms: number; overwrittenRooms: number; resetTimers: number; removedScorecards: number; issues: string[]; summary: string[]; changed: number }
 
 const sameSet = (left: string[], right: string[]) => left.length === right.length && [...left].sort().join('|') === [...right].sort().join('|');
 const normalizeVenueName = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es');
@@ -296,10 +299,10 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const now = options.now ?? Date.now();
   const issues: string[] = [];
   const round = panel.rounds.find((item) => item.id === panelRoundId);
-  const empty = { rounds: panel.rounds, formats: panel.formats, physicalRooms: panel.physicalRooms, teams: panel.teams, judges: panel.judges, institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, addedPhysicalRooms: 0, overwrittenRooms: 0, resetTimers: 0, removedScorecards: 0, issues: [] as string[], summary: [] as string[], changed: 0 };
+  const empty = { rounds: panel.rounds, formats: panel.formats, physicalRooms: panel.physicalRooms, teams: panel.teams, judges: panel.judges, speakers: panel.speakers ?? [], institutions: panel.institutions ?? [], addedTeams: 0, addedJudges: 0, addedPhysicalRooms: 0, overwrittenRooms: 0, resetTimers: 0, removedScorecards: 0, issues: [] as string[], summary: [] as string[], changed: 0 };
   if (!round) return { ...empty, rooms: null, issues: ['Selecciona una ronda del panel.'] };
 
-  if (outbox.version !== 2 || !Array.isArray(outbox.timerPhases) || !outbox.timerPhases.length || outbox.timerPhases.some((phase) => !phase.id || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) return { ...empty, rooms: null, issues: ['La ronda no contiene un formato de cronómetro válido. Vuelve a generarla desde Tabulación.'] };
+  if (outbox.version !== 3 || !Array.isArray(outbox.teams) || !Array.isArray(outbox.judges) || !Array.isArray(outbox.speakers) || !Array.isArray(outbox.timerPhases) || !outbox.timerPhases.length || outbox.timerPhases.some((phase) => !phase.id || !phase.name.trim() || !Number.isFinite(phase.durationSeconds) || phase.durationSeconds <= 0)) return { ...empty, rooms: null, issues: ['La ronda no contiene un formato de cronómetro válido. Vuelve a generarla desde Tabulación.'] };
 
   const importedPhases = outbox.timerPhases.map((phase) => ({ ...phase, warningThresholdsSeconds: [...(phase.warningThresholdsSeconds ?? [])] }));
   const formatId = 'tabulation-' + outbox.presetId;
@@ -324,67 +327,96 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     resolved.set(debate.physicalRoomId, physical);
   }
 
-  // Tabulation and Management may contain the same participant with different IDs
-  // (e.g. independently created/imported copies). Resolve by stable ID first, then by
-  // normalized name, so an existing entity is reused instead of violating Neon’s
-  // case-insensitive unique-name index.
+  // Tabulation owns participant identity and attributes. Keep Management's existing
+  // database IDs only as internal aliases when records were created independently;
+  // every imported attribute is overwritten by the authoritative Tabulation snapshot.
   const teams = new Map(panel.teams.map((team) => [team.id, team]));
   const teamsByName = new Map(panel.teams.map((team) => [normalizeVenueName(team.name), team]));
   const canonicalTeamId = new Map<string, string>();
-  for (const incoming of outbox.teams ?? []) {
+  const incomingTeamIds = new Set<string>();
+  for (const incoming of outbox.teams) {
     const byId = teams.get(incoming.id);
     const byName = teamsByName.get(normalizeVenueName(incoming.name));
     if (byId && byName && byId.id !== byName.id) {
-      issues.push('El equipo «' + incoming.name + '» tiene identificadores distintos en Gestión y Tabulación y su nombre también está duplicado en Gestión. Corrige los participantes antes de importar.');
+      issues.push('El equipo «' + incoming.name + '» coincide por ID y por nombre con dos equipos distintos de Gestión. No se puede reconciliar de forma segura.');
       continue;
     }
     const existing = byId ?? byName;
-    if (existing) {
-      canonicalTeamId.set(incoming.id, existing.id);
-      continue;
-    }
-    const added = { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] };
-    teams.set(added.id, added);
-    teamsByName.set(normalizeVenueName(added.name), added);
-    canonicalTeamId.set(incoming.id, added.id);
+    const canonicalId = existing?.id ?? incoming.id;
+    canonicalTeamId.set(incoming.id, canonicalId);
+    incomingTeamIds.add(canonicalId);
+    const next = { ...incoming, id: canonicalId, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] };
+    teams.set(canonicalId, next);
+    teamsByName.set(normalizeVenueName(next.name), next);
   }
+  // Retain removed records as inactive tombstones because historic assignments and
+  // scorecards have restrictive foreign keys. They are no longer assignable in Management.
+  for (const [id, team] of teams) {
+    if (!incomingTeamIds.has(id) && team.active) teams.set(id, { ...team, active: false, incompatibleJudgeIds: [] });
+  }
+
   const judgesById = new Map(panel.judges.map((judge) => [judge.id, judge]));
   const judgesByName = new Map(panel.judges.map((judge) => [normalizeVenueName(judge.name), judge]));
   const canonicalJudgeId = new Map<string, string>();
-  for (const incoming of outbox.judges ?? []) {
+  const incomingJudgeIds = new Set<string>();
+  for (const incoming of outbox.judges) {
     const byId = judgesById.get(incoming.id);
     const byName = judgesByName.get(normalizeVenueName(incoming.name));
     if (byId && byName && byId.id !== byName.id) {
-      issues.push('El juez «' + incoming.name + '» tiene identificadores distintos en Gestión y Tabulación y su nombre también está duplicado en Gestión. Corrige los participantes antes de importar.');
+      issues.push('El juez «' + incoming.name + '» coincide por ID y por nombre con dos jueces distintos de Gestión. No se puede reconciliar de forma segura.');
       continue;
     }
     const existing = byId ?? byName;
-    if (existing) {
-      canonicalJudgeId.set(incoming.id, existing.id);
+    const canonicalId = existing?.id ?? incoming.id;
+    canonicalJudgeId.set(incoming.id, canonicalId);
+    incomingJudgeIds.add(canonicalId);
+    const next = { ...incoming, id: canonicalId, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] };
+    judgesById.set(canonicalId, next);
+    judgesByName.set(normalizeVenueName(next.name), next);
+  }
+  for (const [id, judge] of judgesById) {
+    if (!incomingJudgeIds.has(id) && judge.active) judgesById.set(id, { ...judge, active: false, incompatibleJudgeIds: [] });
+  }
+
+  // Resolve speakers by ID, then by (canonical team, normalized name). Keep removed
+  // speakers as historical records because submitted scorecards may still reference them.
+  const speakersById = new Map((panel.speakers ?? []).map((speaker) => [speaker.id, speaker]));
+  const speakersByName = new Map((panel.speakers ?? []).map((speaker) => [speaker.teamId + '|' + normalizeVenueName(speaker.name), speaker]));
+  const incomingSpeakerIds = new Set<string>();
+  for (const incoming of outbox.speakers) {
+    const teamId = canonicalTeamId.get(incoming.teamId);
+    if (!teamId) {
+      issues.push('El orador «' + incoming.name + '» referencia un equipo que no está en la copia enviada desde Tabulación.');
       continue;
     }
-    const added = { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] };
-    judgesById.set(added.id, added);
-    judgesByName.set(normalizeVenueName(added.name), added);
-    canonicalJudgeId.set(incoming.id, added.id);
+    const byId = speakersById.get(incoming.id);
+    const byName = speakersByName.get(teamId + '|' + normalizeVenueName(incoming.name));
+    if (byId && byName && byId.id !== byName.id) {
+      issues.push('El orador «' + incoming.name + '» coincide por ID y por nombre con dos registros distintos de Gestión.');
+      continue;
+    }
+    const existing = byId ?? byName;
+    const canonicalId = existing?.id ?? incoming.id;
+    incomingSpeakerIds.add(canonicalId);
+    const next = { ...incoming, id: canonicalId, teamId };
+    speakersById.set(canonicalId, next);
+    speakersByName.set(teamId + '|' + normalizeVenueName(next.name), next);
   }
-  // New entities may carry incompatibility references using Tabulation IDs.
-  // Translate those references through the same canonical-ID maps before persisting.
-  const existingPanelTeamIds = new Set(panel.teams.map((team) => team.id));
-  for (const incoming of outbox.teams ?? []) {
+  const mergedSpeakers = [...speakersById.values()];
+
+  // Translate every incompatibility through the canonical judge IDs, including updates
+  // to records that already existed in Management.
+  for (const incoming of outbox.teams) {
     const id = canonicalTeamId.get(incoming.id);
-    if (id && !existingPanelTeamIds.has(id)) {
-      const team = teams.get(id)!;
-      teams.set(id, { ...team, incompatibleJudgeIds: incoming.incompatibleJudgeIds.map((judgeId) => canonicalJudgeId.get(judgeId) ?? judgeId) });
-    }
+    if (!id) continue;
+    const team = teams.get(id)!;
+    teams.set(id, { ...team, incompatibleJudgeIds: incoming.incompatibleJudgeIds.map((judgeId) => canonicalJudgeId.get(judgeId) ?? judgeId) });
   }
-  const existingPanelJudgeIds = new Set(panel.judges.map((judge) => judge.id));
-  for (const incoming of outbox.judges ?? []) {
+  for (const incoming of outbox.judges) {
     const id = canonicalJudgeId.get(incoming.id);
-    if (id && !existingPanelJudgeIds.has(id)) {
-      const judge = judgesById.get(id)!;
-      judgesById.set(id, { ...judge, incompatibleJudgeIds: incoming.incompatibleJudgeIds.map((judgeId) => canonicalJudgeId.get(judgeId) ?? judgeId) });
-    }
+    if (!id) continue;
+    const judge = judgesById.get(id)!;
+    judgesById.set(id, { ...judge, incompatibleJudgeIds: incoming.incompatibleJudgeIds.map((judgeId) => canonicalJudgeId.get(judgeId) ?? judgeId) });
   }
   const judges = new Set(judgesById.keys());
   const seenRooms = new Set<string>();
@@ -404,9 +436,12 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
 
   const minimumJudges = panel.minimumJudgesPerRoom ?? 1;
   const scored = new Set((panel.scoring?.scorecards ?? []).map((card) => card.roomId));
-  const addedTeams = teams.size - panel.teams.length;
-  const addedJudges = judgesById.size - panel.judges.length;
-  let changed = addedTeams + addedJudges + addedPhysicalRooms + Number(round.defaultFormatId !== formatId || round.scoreType !== outbox.roundKind || JSON.stringify(panel.formats.find((item) => item.id === formatId)?.phases ?? []) !== JSON.stringify(importedPhases));
+  const addedTeams = [...teams.keys()].filter((id) => !panel.teams.some((team) => team.id === id)).length;
+  const addedJudges = [...judgesById.keys()].filter((id) => !panel.judges.some((judge) => judge.id === id)).length;
+  const participantsChanged = JSON.stringify([...teams.values()]) !== JSON.stringify(panel.teams)
+    || JSON.stringify([...judgesById.values()]) !== JSON.stringify(panel.judges)
+    || JSON.stringify(mergedSpeakers) !== JSON.stringify(panel.speakers ?? []);
+  let changed = Number(participantsChanged) + addedPhysicalRooms + Number(round.defaultFormatId !== formatId || round.scoreType !== outbox.roundKind || JSON.stringify(panel.formats.find((item) => item.id === formatId)?.phases ?? []) !== JSON.stringify(importedPhases));
   let overwrittenRooms = 0;
   let resetTimers = 0;
   let removedScorecards = 0;
@@ -449,5 +484,5 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   const name = (id: string) => teams.get(id)?.name ?? id;
   const summary = outbox.debates.map((debate) => debate.venueName + ': ' + name(debate.teamFavorId) + ' (A favor) – ' + name(debate.teamContraId) + ' (En contra) · '
     + debate.judgeIds.length + (debate.judgeIds.length === 1 ? ' juez' : ' jueces') + (debate.sidesProvisional ? ' · postura provisional' : ''));
-  return { rooms, rounds, formats, physicalRooms, teams: mergedTeams, judges: mergedJudges, institutions, addedTeams, addedJudges, addedPhysicalRooms, overwrittenRooms, resetTimers, removedScorecards, issues: [], summary, changed };
+  return { rooms, rounds, formats, physicalRooms, teams: mergedTeams, judges: mergedJudges, speakers: mergedSpeakers, institutions, addedTeams, addedJudges, addedPhysicalRooms, overwrittenRooms, resetTimers, removedScorecards, issues: [], summary, changed };
 }
