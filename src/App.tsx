@@ -927,6 +927,39 @@ export default function App() {
     setSelectedRound(newRound.id);
   };
 
+  const clearSelectedRoundRooms = () => {
+    const round = data.rounds.find((item) => item.id === activeRound);
+    if (!round) return;
+    const assignments = data.rooms.filter((room) => room.roundId === round.id);
+    if (assignments.length === 0) {
+      setTabulationNotice('La ronda "' + round.name + '" ya está vacía.');
+      return;
+    }
+    const activeTimers = assignments.filter((room) => room.timer.status === 'running' || room.timer.status === 'paused');
+    const scorecards = (data.scoring?.scorecards ?? []).filter((card) => assignments.some((room) => room.id === card.roomId));
+    const details = [
+      assignments.length + ' sala(s) y sus asignaciones desaparecerán de esta ronda.',
+      activeTimers.length ? activeTimers.length + ' cronómetro(s) iniciado(s) o pausado(s) se detendrán y dejarán de estar disponibles.' : 'No hay cronómetros iniciados ni pausados.',
+      scorecards.length ? scorecards.length + ' acta(s) asociada(s), con sus puntuaciones, también se eliminarán.' : 'No hay actas asociadas a estas salas.',
+      'Los registros de equipos, jueces, la ronda y las salas físicas (incluidos sus enlaces permanentes) se conservarán. Las demás rondas no se modificarán.',
+      'Esta operación se guardará inmediatamente en la base de datos y no se puede deshacer.',
+    ];
+    if (!window.confirm('¿Vaciar todas las salas de "' + round.name + '"?\\n\\n' + details.join('\\n\\n'))) return;
+    const removedAssignmentIds = new Set(assignments.map((room) => room.id));
+    const candidate: Tournament = {
+      ...data,
+      rooms: data.rooms.filter((room) => room.roundId !== round.id),
+      scoring: data.scoring
+        ? { ...data.scoring, scorecards: data.scoring.scorecards.filter((card) => !removedAssignmentIds.has(card.roomId)) }
+        : data.scoring,
+      updatedAt: Date.now(),
+    };
+    void persist(candidate).then((saved) => {
+      if (!saved) return;
+      setExpandedRoomIds((current) => current.filter((id) => !removedAssignmentIds.has(id)));
+      setTabulationNotice('Se han eliminado ' + assignments.length + ' sala(s) de "' + round.name + '". Sus cronómetros se han detenido y los cambios están sincronizados.');
+    });
+  };
   const removeRoom = (room: Room) => {
     const active = room.timer.status === 'running' || room.timer.status === 'paused';
     const detail = active ? ' El cronómetro está iniciado o pausado.' : '';
@@ -1301,7 +1334,7 @@ export default function App() {
         saving={savingScores}
       />}
 
-      {view === 'rooms' && <>{featuredMessageManagerOpen && <FeaturedMessageManager rooms={data.physicalRooms.filter((room) => room.active)} activeMessage={data.featuredMessage} saving={saving} onClose={() => setFeaturedMessageManagerOpen(false)} onPublish={async (message) => { const ok = await saveFeaturedMessage(message); if (ok) setFeaturedMessageManagerOpen(false); return ok; }} onClear={async () => { const ok = await saveFeaturedMessage(undefined); if (ok) setFeaturedMessageManagerOpen(false); return ok; }} />}<div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setFeaturedMessageManagerOpen(true)}><Activity size={16} /> Mensaje destacado</button><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div>
+      {view === 'rooms' && <>{featuredMessageManagerOpen && <FeaturedMessageManager rooms={data.physicalRooms.filter((room) => room.active)} activeMessage={data.featuredMessage} saving={saving} onClose={() => setFeaturedMessageManagerOpen(false)} onPublish={async (message) => { const ok = await saveFeaturedMessage(message); if (ok) setFeaturedMessageManagerOpen(false); return ok; }} onClear={async () => { const ok = await saveFeaturedMessage(undefined); if (ok) setFeaturedMessageManagerOpen(false); return ok; }} />}<div className="page-heading"><div><p className="eyebrow">ASIGNACIÓN</p><h2>Rondas y salas</h2><p className="muted">Los jueces y equipos de cada sala se sincronizan con los cronómetros. Las salas nuevas heredarán el formato definido en Configuración.</p></div><div className="top-actions"><button className="button secondary" onClick={() => setFeaturedMessageManagerOpen(true)}><Activity size={16} /> Mensaje destacado</button><button className="button secondary" onClick={() => setView('settings')}><Settings size={16} /> Configurar intervenciones</button><button className="button secondary" onClick={addRound}><Plus size={16} /> Nueva ronda</button></div></div><div className="round-tabs">{data.rounds.map((round) => <button key={round.id} className={round.id === activeRound ? 'selected' : ''} onClick={() => setSelectedRound(round.id)}>{round.name}{round.id === data.activeRoundId || round.active ? ' · Activa' : ''}</button>)}<button onClick={addRoom}><Plus size={15} /> Sala nueva</button><button onClick={assignExistingPhysicalRoom}><Plus size={15} /> Asignar sala existente</button><button onClick={loadFromTabulation} disabled={!activeRound} title="Carga los equipos y jueces de una ronda enviada desde la tabulación local"><ClipboardList size={15} /> Cargar desde tabulación</button><button onClick={renameSelectedRound} disabled={!activeRound}>Renombrar ronda</button><button className="danger-action" onClick={clearSelectedRoundRooms} disabled={!activeRound || rooms.length === 0 || saving} title="Eliminar todas las salas de esta ronda y detener sus cronómetros"><Trash2 size={15} /> Vaciar salas</button><button className="button primary" onClick={() => void requestRoundActivation(activeRound)} disabled={!activeRound || activeRound === data.activeRoundId || activatingRound || saving}>{activatingRound ? 'Activando…' : 'Activar ronda'}</button><button className="danger-action" onClick={removeSelectedRound} disabled={!activeRound || activeRound === data.activeRoundId || data.rounds.length <= 1} title="Eliminar ronda y sus asignaciones"><Trash2 size={15} /> Eliminar ronda</button></div><div className="round-format-row"><label>Formato predeterminado de {data.rounds.find((round) => round.id === activeRound)?.name ?? 'la ronda'}<select value={data.rounds.find((round) => round.id === activeRound)?.defaultFormatId ?? ''} onChange={(event) => setRoundFormat(activeRound, event.target.value)}>{data.formats.map((format) => <option key={format.id} value={format.id}>{format.name}</option>)}</select></label><span className="muted">Las salas pueden heredar este formato o elegir una excepción.</span></div>
       <section className="panel physical-room-catalog"><button type="button" className="physical-room-catalog-toggle" aria-expanded={physicalCatalogExpanded} onClick={() => setPhysicalCatalogExpanded((expanded) => !expanded)}><span><b>Catálogo de salas físicas</b><small>{data.physicalRooms.length} {data.physicalRooms.length === 1 ? 'sala generada' : 'salas generadas'}</small></span><ChevronRight size={17} className={physicalCatalogExpanded ? 'expanded' : ''} /></button>{physicalCatalogExpanded && <><p className="muted physical-room-catalog-description">Estas salas conservan su identidad y enlace permanente entre rondas. Elimina desde aquí también las que ya no tengan asignación en la ronda seleccionada.</p><div className="room-list">{data.physicalRooms.map((physical) => {
         const assignments = data.rooms.filter((room) => room.physicalRoomId === physical.id);
         const scored = (data.scoring?.scorecards ?? []).filter((card) => assignments.some((room) => room.id === card.roomId));
