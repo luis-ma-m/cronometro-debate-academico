@@ -390,6 +390,15 @@ async function releaseUniqueNamesForReplacement(client: PoolClient, table: "team
 
 async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolean): Promise<void> {
   const table = judges ? "judges" : "teams";
+  const seenNames = new Set<string>();
+  for (const row of rows) {
+    const name = str(row.name).trim();
+    const key = name.toLocaleLowerCase("es-ES");
+    if (seenNames.has(key)) {
+      throw new ApiError("DUPLICATE_ENTITY_NAME", "No se puede guardar: hay más de un " + (judges ? "juez" : "equipo") + " llamado «" + name + "» (sin distinguir mayúsculas y minúsculas). Corrige el catálogo en Tabulación.", 409);
+    }
+    seenNames.add(key);
+  }
   await releaseUniqueNamesForReplacement(client, table);
   for (const row of rows) {
     const institution = await upsertInstitution(client, row.institution);
