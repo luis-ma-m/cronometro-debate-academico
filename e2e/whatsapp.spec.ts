@@ -1,19 +1,19 @@
-import type { Page } from '@playwright/test';
-import { expect, test } from './fixtures';
+import { expect, mockActaShortLinks, nav, seedManagerSession, test } from './fixtures';
 
-async function nav(page: Page, name: string) {
-  await page.getByRole('navigation').getByRole('button', { name }).click();
-}
-
-test('un juez rellena el acta en el móvil y la mesa la recibe por WhatsApp', async ({ context }) => {
+test('un juez rellena el acta desde un enlace S8 de ocho caracteres y la mesa la recibe por WhatsApp', async ({ context, baseURL }) => {
+  await mockActaShortLinks(context);
+  await context.route('https://debate.example/**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><title>Public acta link</title></head><body>Public short-link URL</body></html>' });
+  });
   const desk = await context.newPage();
   desk.on('dialog', (dialog) => void dialog.accept());
+  await seedManagerSession(desk);
   await desk.goto('/tabulacion');
   await desk.getByRole('button', { name: /Crear ensayo ADUMA/ }).click();
 
-  // The desk's number, so the judge's button opens the desk's chat directly.
   await nav(desk, 'Reglas');
   await desk.getByLabel('Móvil de la mesa de tabulación (WhatsApp)').fill('600 11 22 33');
+  await desk.getByLabel('Dirección pública de la página del acta').fill('https://debate.example');
   await expect(desk.getByText('Las actas llegarán al +34600112233.')).toBeVisible();
 
   await nav(desk, 'Rondas');
@@ -24,7 +24,6 @@ test('un juez rellena el acta en el móvil y la mesa la recibe por WhatsApp', as
   await desk.getByRole('button', { name: 'Confirmar ronda' }).click();
   await download;
 
-  // Link for the chair of the first room.
   await desk.locator('.tab-whatsapp summary').click();
   const sendPopupPromise = desk.waitForEvent('popup');
   await desk.getByRole('button', { name: 'Enviar enlace' }).first().click();
@@ -34,17 +33,19 @@ test('un juez rellena el acta en el móvil y la mesa la recibe por WhatsApp', as
   const actaPopupPromise = desk.waitForEvent('popup');
   await desk.getByRole('button', { name: 'Abrir el acta' }).first().click();
   const actaPopup = await actaPopupPromise;
-  await expect.poll(() => actaPopup.url()).toContain('/acta#A2');
+  await expect.poll(() => actaPopup.url()).toMatch(/\/acta#S8-[0-9A-HJKMNP-TV-Z]{8}$/);
   const actaUrl = actaPopup.url();
   await expect.poll(() => new URL(sendLink).searchParams.get('text') ?? '').toContain(actaUrl);
-  // WhatsApp iOS must see the entire fragment as one URL: no separators after #A2.
-  expect(actaUrl).toMatch(/#A2[0-9A-Za-z]+$/);
-  expect(actaUrl.slice(actaUrl.indexOf('#A2'))).not.toContain('-');
+  const shortId = actaUrl.slice(actaUrl.indexOf('#S8-') + 4);
+  expect(shortId).toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+  await actaPopup.close();
+  await sendPopup.close();
 
-  // The judge's phone.
   const phone = await context.newPage();
   await phone.setViewportSize({ width: 390, height: 844 });
-  await phone.goto(actaUrl);
+  const localActaUrl = new URL('/acta', baseURL!);
+  localActaUrl.hash = 'S8-' + shortId;
+  await phone.goto(localActaUrl.toString());
   await expect(phone.getByRole('heading', { level: 1 })).toContainText('Ronda 1');
   await phone.locator('.acta-option').first().click();
   const items = phone.locator('.acta-items input');
@@ -58,9 +59,9 @@ test('un juez rellena el acta en el móvil y la mesa la recibe por WhatsApp', as
   expect(waUrl.startsWith('https://wa.me/34600112233?text=')).toBe(true);
   const message = decodeURIComponent(waUrl.split('?text=')[1]);
   expect(message).toContain('44 – 33 ítems netos');
+  // ACTA2 is the judge's submitted score payload, not the shared URL format.
   expect(message).toMatch(/ACTA2-[0-9A-Za-z]+-[0-9a-f]{14}/);
 
-  // Back at the desk: paste the WhatsApp message and accept the acta.
   await nav(desk, 'Actas');
   await desk.locator('.tab-whatsapp-inbox summary').click();
   const box = desk.getByLabel('Mensajes de WhatsApp con actas');

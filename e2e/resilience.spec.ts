@@ -1,6 +1,6 @@
-import { confirmOpenDraft, expect, fillActaOnPhone, guardNetwork, nav, openAdumaRehearsal, test } from './fixtures';
+import { confirmOpenDraft, expect, guardNetwork, nav, openAdumaRehearsal, test } from './fixtures';
 
-test('sin conexión: la mesa hace una ronda entera y el juez solo necesita red para abrir el enlace', async ({ context, page }) => {
+test('sin conexión: la mesa mantiene el flujo local y nunca genera un enlace largo como fallback', async ({ context, page }) => {
   await page.goto('/tabulacion');
   await expect(page.getByRole('button', { name: 'Crear Torneo ADUMA' })).toBeVisible();
   await context.setOffline(true);
@@ -9,32 +9,15 @@ test('sin conexión: la mesa hace una ronda entera y el juez solo necesita red p
   await page.getByRole('button', { name: 'Nueva ronda (Ronda 1)' }).click();
   await confirmOpenDraft(page);
   await expect(page.locator('.tab-round-screen')).toContainText('frente a');
-  // The desk can generate the snapshot offline; opening the public acta URL
-  // is a network navigation, so reconnect before testing that hand-off.
+
+  // Short-only: without a manager session there is no WhatsApp/A2 fallback.
   await context.setOffline(false);
   await page.locator('.tab-whatsapp summary').click();
-  const actaPopupPromise = page.waitForEvent('popup');
-  await page.getByRole('button', { name: 'Abrir el acta' }).first().click();
-  const actaPopup = await actaPopupPromise;
-  await expect.poll(() => actaPopup.url()).toContain('/acta#A2');
-  const actaUrl = actaPopup.url();
-  await actaPopup.close();
+  await expect(page.locator('.tab-whatsapp')).toContainText('No se envían enlaces autocontenidos como alternativa.');
+  await expect(page.getByRole('button', { name: 'Abrir el acta' }).first()).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Enviar enlace' }).first()).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Copiar todos los enlaces para el grupo de jueces' })).toBeDisabled();
 
-  await context.setOffline(false);
-  const phone = await context.newPage();
-  await phone.setViewportSize({ width: 390, height: 844 });
-  await phone.goto(actaUrl);
-  await expect(phone.getByRole('heading', { level: 1 })).toContainText('Ronda 1');
-  await context.setOffline(true);
-  const message = await fillActaOnPhone(phone);
-  await phone.reload().catch(() => undefined);
-  expect(message).toMatch(/ACTA2-/);
-
-  await nav(page, 'Actas');
-  await page.locator('.tab-whatsapp-inbox summary').click();
-  await page.getByLabel('Mensajes de WhatsApp con actas').fill(message);
-  await page.locator('.tab-inbox').getByRole('button', { name: 'Aceptar' }).click();
-  await expect(page.locator('.tab-inbox')).toContainText('Ya registrada');
   await nav(page, 'Rondas');
   await page.getByRole('button', { name: 'Simular resultados' }).click();
   await page.getByRole('button', { name: 'Nueva ronda (Ronda 2)' }).click();
@@ -46,7 +29,6 @@ test('sin conexión: la mesa hace una ronda entera y el juez solo necesita red p
   await expect(page.getByText(/El registro verifica/)).toBeVisible();
   await context.setOffline(false);
 });
-
 test('otro portátil continúa el torneo importando la copia exportada, con su registro', async ({ page, browser, baseURL }) => {
   await openAdumaRehearsal(page);
   await page.getByRole('button', { name: 'Nueva ronda (Ronda 1)' }).click();

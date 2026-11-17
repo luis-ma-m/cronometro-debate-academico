@@ -77,3 +77,53 @@ export async function fillActaOnPhone(phone: Page): Promise<string> {
   const href = await phone.getByRole('link', { name: 'Enviar por WhatsApp' }).getAttribute('href');
   return decodeURIComponent(href!.split('?text=')[1]);
 }
+
+
+/** Installs an isolated manager session for tests that exercise server-backed S8 links. */
+export async function seedManagerSession(page: Page) {
+  await page.addInitScript(() => localStorage.setItem('ledu-admin-session', JSON.stringify({ token: 'e2e-manager-token', expiresAt: Date.now() + 60 * 60 * 1000 })));
+}
+
+/** Mocks the short-link API while exercising the real UI, request contract and public resolver. */
+export async function mockActaShortLinks(context: BrowserContext) {
+  const links = new Map<string, { id: string; tournamentId: string; debateId: string; createdAt: number; expiresAt: number | null; revokedAt: null; snapshot: unknown }>();
+  const idempotency = new Map<string, string>();
+  let next = 0;
+  await context.route('**/api**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'GET' && url.searchParams.get('action') === 'health') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: { ok: true } }) }); return;
+    }
+    if (request.method() === 'GET' && url.searchParams.get('action') === 'resolveActaShortLink') {
+      const item = links.get(url.searchParams.get('id') ?? '');
+      if (!item) { await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { code: 'NOT_FOUND', message: 'Enlace no encontrado.' } }) }); return; }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: { snapshot: item.snapshot, expiresAt: item.expiresAt } }) }); return;
+    }
+    if (request.method() === 'POST') {
+      const body = request.postDataJSON() as { action?: string; payload?: Record<string, unknown> };
+      const payload = body.payload ?? {};
+      if (body.action === 'listActaShortLinks') {
+        const tournamentId = String(payload.tournamentId ?? '');
+        const result = [...links.values()].filter((item) => item.tournamentId === tournamentId).map((item) => ({
+          id: item.id, tournamentId: item.tournamentId, debateId: item.debateId, createdAt: item.createdAt, expiresAt: item.expiresAt, revokedAt: item.revokedAt,
+        }));
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: result }) }); return;
+      }
+      if (body.action === 'createActaShortLink') {
+        const key = String(payload.idempotencyKey ?? '');
+        let id = idempotency.get(key);
+        if (!id) {
+          id = 'ABCDEFG' + '0123456789ABCDEFGHJKMNPQRSTVWXYZ'[next++ % 32];
+          idempotency.set(key, id);
+          links.set(id, { id, tournamentId: String(payload.tournamentId ?? ''), debateId: String(payload.debateId ?? ''), createdAt: Date.now(), expiresAt: null, revokedAt: null, snapshot: payload.snapshot });
+        }
+        const item = links.get(id)!;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: {
+          id: item.id, tournamentId: item.tournamentId, debateId: item.debateId, createdAt: item.createdAt, expiresAt: item.expiresAt, revokedAt: item.revokedAt,
+        } }) }); return;
+      }
+    }
+    await route.fulfill({ status: 501, contentType: 'application/json', body: JSON.stringify({ ok: false, error: { code: 'E2E_UNEXPECTED_API', message: 'Unexpected API request: ' + request.method() + ' ' + url.href } }) });
+  });
+}
