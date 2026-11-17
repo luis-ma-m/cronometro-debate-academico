@@ -222,11 +222,12 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           throw new Error('La copia de Neon no supera la validación de identidad e integridad.');
         }
         remoteCursor.current = { id: remote.tabTournamentId, revision: remote.revision, localRevision: -1, inFlight: false };
-        const differences = findSnapshotDifferences(tournament, remote.snapshot);
-        if (differences.length === 0) {
+        const current = store.getState();
+        const differences = findSnapshotDifferences(current.tournament, remote.snapshot);
+        if (differences.length === 0 && current.status === 'saved' && !current.readOnly) {
           store.backup('Antes de recuperar el snapshot de Neon r' + remote.revision);
-          store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Snapshot de Neon reconciliado', details: { revision: remote.revision, sha256: remote.snapshotSha256 } });
-          store.flush();
+          const applied = store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Snapshot de Neon reconciliado', details: { revision: remote.revision, sha256: remote.snapshotSha256 } });
+          if (!applied || !store.flush()) throw new Error('No se ha podido aplicar de forma segura el snapshot de Neon.');
           remoteCursor.current.localRevision = store.getState().tournament?.revision ?? remote.snapshot.revision;
           setRemoteSync('synced');
         } else {
