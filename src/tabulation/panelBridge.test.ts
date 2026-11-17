@@ -137,6 +137,8 @@ describe('tabulation → panel', () => {
       judgeIds: ['tab-judge-x'],
       chairId: 'tab-judge-x',
     }];
+    tab.speakers = [];
+    tab.rounds[0].debates = [tab.rounds[0].debates[0]];
     const outbox = buildOutbox(tab, 'r1', now).outbox!;
     expect(outbox.teams?.map((team) => team.id)).toEqual(['tab-team-x', 'tab-team-y']);
     expect(outbox.judges?.map((judge) => judge.id)).toEqual(['tab-judge-x']);
@@ -153,6 +155,8 @@ describe('tabulation → panel', () => {
   it('applies the complete Tabulation participant snapshot and updates existing attributes', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    source.teams.push({ id: 'legacy-team', name: 'Equipo retirado', institution: 'Universidad antigua', active: true, incompatibleJudgeIds: [] });
+    source.judges.push({ id: 'legacy-judge', name: 'Juez retirado', institution: 'LEDU', active: true, incompatibleJudgeIds: [] });
     tab.teams[0] = { ...tab.teams[0], name: 'Equipo A actualizado', institution: 'Universidad nueva', active: true };
     tab.judges[1] = { ...tab.judges[1], name: 'Juez 2 actualizado', institution: 'Institución nueva', active: true };
     tab.speakers = [
@@ -167,8 +171,8 @@ describe('tabulation → panel', () => {
     expect(applied.issues).toEqual([]);
     expect(applied.teams.find((team) => team.id === 't1')).toMatchObject({ name: 'Equipo A actualizado', institution: 'Universidad nueva', active: true });
     expect(applied.judges.find((judge) => judge.id === 'j2')).toMatchObject({ name: 'Juez 2 actualizado', institution: 'Institución nueva', active: true });
-    expect(applied.teams.find((team) => team.id === 't3')?.active).toBe(false);
-    expect(applied.judges.find((judge) => judge.id === 'j1')?.active).toBe(false);
+    expect(applied.teams.find((team) => team.id === 'legacy-team')?.active).toBe(false);
+    expect(applied.judges.find((judge) => judge.id === 'legacy-judge')?.active).toBe(false);
     expect(applied.speakers).toContainEqual({ id: 's1', teamId: 't1', name: 'Debatiente actualizado' });
     expect(applied.speakers).toContainEqual({ id: 's2', teamId: 't1', name: 'Debatiente nuevo' });
   });
