@@ -86,48 +86,18 @@ export const readOutbox = (storage: SimpleStorage) => readJson<PanelOutbox>(stor
 export interface MergeSummary { tournament: TabTournament; added: number; updated: number; warnings: string[] }
 
 /**
- * Brings the panel participants into a tabulation (same IDs). The panel owns names, institutions and
- * incompatibilities; the tabulation keeps its own judge levels, chairs, availability, swing, break eligibility
- * and active flags. Nothing is ever deleted.
+ * Links the two workspaces without importing participants. Management is a consumer
+ * of Tabulation snapshots and must never seed or overwrite Tabulation's participant catalogue.
  */
 export function mergeHandoff(tournament: TabTournament, handoff: PanelHandoff, now = Date.now()): MergeSummary {
-  let added = 0;
-  let updated = 0;
   const warnings: string[] = [];
   if (tournament.panelLink && tournament.panelLink.tournamentName !== handoff.tournamentName) {
-    warnings.push('Este torneo se enlazó con «' + tournament.panelLink.tournamentName + '» y los datos vienen de «' + handoff.tournamentName + '».');
+    warnings.push('Este torneo se enlazó con «' + tournament.panelLink.tournamentName + '» y el panel apunta a «' + handoff.tournamentName + '».');
   }
-  const merge = <T extends { id: string }>(current: T[], incoming: T[], update: (existing: T, next: T) => T) => {
-    const result = [...current];
-    for (const item of incoming) {
-      const index = result.findIndex((existing) => existing.id === item.id);
-      if (index < 0) { result.push(item); added++; continue; }
-      const next = update(result[index], item);
-      if (JSON.stringify(next) !== JSON.stringify(result[index])) { result[index] = next; updated++; }
-    }
-    return result;
-  };
-  const teams = merge<TabTeam>(
-    tournament.teams,
-    handoff.teams.map((team) => ({ ...team, swing: false, breakEligible: true })),
-    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, incompatibleJudgeIds: next.incompatibleJudgeIds }),
-  );
-  const teamIds = new Set(teams.map((team) => team.id));
-  const speakers = merge(
-    tournament.speakers,
-    handoff.speakers.filter((speaker) => teamIds.has(speaker.teamId)),
-    (existing, next) => ({ ...existing, name: next.name, teamId: next.teamId }),
-  );
-  const judges = merge<TabJudge>(
-    tournament.judges,
-    handoff.judges.map((judge) => ({ ...judge, rating: 3, canChair: true, unavailableRoundIds: [] })),
-    (existing, next) => ({ ...existing, name: next.name, institution: next.institution, incompatibleJudgeIds: next.incompatibleJudgeIds }),
-  );
-  const venues = merge(tournament.venues, handoff.venues, (existing, next) => ({ ...existing, name: next.name }));
   return {
-    tournament: { ...tournament, teams, speakers, judges, venues, panelLink: { tournamentName: handoff.tournamentName, linkedAt: now } },
-    added,
-    updated,
+    tournament: { ...tournament, panelLink: { tournamentName: handoff.tournamentName, linkedAt: now } },
+    added: 0,
+    updated: 0,
     warnings,
   };
 }
