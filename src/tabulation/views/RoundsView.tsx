@@ -592,8 +592,8 @@ function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent, managerS
   tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void;
   onMarkSent: (debateId: string) => void; managerSessionToken?: string;
 }) {
-  const baseUrl = (tournament.whatsapp?.baseUrl.trim() || window.location.origin).replace(/\\/+$/, '');
-  const unreachable = /^https?:\\/\\/(localhost|127\\.|0\\.0\\.0\\.|10\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.|\\[)/.test(baseUrl);
+  const baseUrl = (tournament.whatsapp?.baseUrl.trim() || window.location.origin).replace(/\/+$/, '');
+  const unreachable = /^https?:\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[)/.test(baseUrl);
   const desk = whatsAppNumber(tournament.whatsapp?.deskPhone ?? '');
   const rows = useMemo(() => {
     const fallen = fallenTeamIds(tournament.teams, round.number);
