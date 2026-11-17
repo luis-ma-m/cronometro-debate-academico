@@ -54,6 +54,16 @@ function groupByString<T extends Record<string, unknown>>(rows: T[], key: string
   return groups;
 }
 
+const DB_STATEMENT_TIMEOUT_MS = 12_000;
+const DB_LOCK_TIMEOUT_MS = 3_000;
+const DB_IDLE_TRANSACTION_TIMEOUT_MS = 15_000;
+
+async function setTransactionTimeouts(client: PoolClient): Promise<void> {
+  await client.query("SET LOCAL statement_timeout = '" + DB_STATEMENT_TIMEOUT_MS + "ms'");
+  await client.query("SET LOCAL lock_timeout = '" + DB_LOCK_TIMEOUT_MS + "ms'");
+  await client.query("SET LOCAL idle_in_transaction_session_timeout = '" + DB_IDLE_TRANSACTION_TIMEOUT_MS + "ms'");
+}
+
 async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
   const [settingsQ, institutionsQ, roundsQ, teamsQ, teamIncompatQ, judgesQ, judgeIncompatQ, speakersQ, physicalQ, formatsQ, formatPhasesQ, assignmentsQ, assignmentJudgesQ, assignmentPhasesQ, categoriesQ, cardsQ, teamScoresQ, categoryScoresQ, cardJudgesQ, speakerScoresQ, eventsQ] = await Promise.all([
     client.query("SELECT * FROM tournament_settings WHERE id=1"),
@@ -225,6 +235,7 @@ export async function loadPostgresSheetData(): Promise<PostgresSheetData> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    await setTransactionTimeouts(client);
     const data = await readSnapshot(client);
     await client.query("COMMIT");
     return data;
@@ -605,11 +616,19 @@ async function persistEvent(client: PoolClient, event: unknown[]): Promise<void>
 export async function readIdempotentResponse(operationKey: string, scope: string): Promise<unknown | null> {
   const client = await getPool().connect();
   try {
+    await client.query("BEGIN READ ONLY");
+    await setTransactionTimeouts(client);
     const result = await client.query("SELECT scope,response FROM idempotency_keys WHERE operation_key=$1", [operationKey]);
-    if (!result.rows.length) return null;
+    if (!result.rows.length) {
+      await client.query("COMMIT");
+      return null;
+    }
     if (str(result.rows[0].scope) !== scope) throw new ApiError("IDEMPOTENCY_KEY_REUSED", "La clave de idempotencia ya se utilizó para otra operación.", 409);
-    return result.rows[0].response ?? null;
+    const response = result.rows[0].response ?? null;
+    await client.query("COMMIT");
+    return response;
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof ApiError) throw error;
     throw new ApiError("DATABASE_UNAVAILABLE", "No se ha podido comprobar la idempotencia de la operación.", 503);
   } finally {
@@ -662,6 +681,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await setTransactionTimeouts(client);
     await client.query("SET CONSTRAINTS ALL DEFERRED");
     if (replacements.Config) await persistConfig(client, data.rows.Config, replacements.Config);
     // Parent rows must exist before rounds and assignments reference them.
@@ -737,6 +757,9 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof ApiError) throw error;
     const code = (error as { code?: string })?.code;
+    if (code === "57014" || code === "55P03" || code === "40P01") {
+      throw new ApiError("DATABASE_BUSY", "PostgreSQL no pudo completar el guardado dentro del tiempo seguro (consulta bloqueada o demasiado lenta). No se ha confirmado ningún cambio; vuelve a intentarlo.", 503);
+    }
     if (code === "23505" || code === "23503" || code === "23514") {
       throw new ApiError("DATABASE_CONSTRAINT", describeDatabaseConstraint(error), 409);
     }
