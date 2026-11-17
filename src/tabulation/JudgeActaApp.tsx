@@ -7,7 +7,8 @@ import { ADUMA_RUBRIC, presetSettings } from './presets';
 import { SPEAKER_ROLES, type SpeakerRole, type TabJointActa, type TabPenalties, type TabSettings, type TabSpeaker } from './types';
 import { copyText, formatNumber, parseDecimal } from './ui';
 import { actaCodeMessage, decodeActaLink, encodeActaCode, whatsAppUrl, type ActaEntry, type ActaLink } from './whatsapp';
-import { apiConfigured, getPublicActaStatus, submitPublicActa } from '../api';
+import { apiConfigured, getPublicActaStatus, resolveActaShortLink, submitPublicActa } from '../api';
+import { isActaLinkSnapshot } from './actaShortLink';
 
 interface PhoneDraft {
   favor: string;
@@ -85,15 +86,37 @@ export default function JudgeActaApp() {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
+  const [resolvedShortLink, setResolvedShortLink] = useState<{ hash: string; link: ActaLink | null; error: string | null } | null>(null);
+  useEffect(() => {
+    const match = /^#?S8-([0-9A-HJKMNP-TV-Z]{8})$/i.exec(hash.trim());
+    if (!match) { setResolvedShortLink(null); return; }
+    let active = true;
+    setResolvedShortLink({ hash, link: null, error: null });
+    void resolveActaShortLink(match[1].toUpperCase()).then(({ snapshot }) => {
+      if (!active) return;
+      if (!isActaLinkSnapshot(snapshot)) {
+        setResolvedShortLink({ hash, link: null, error: 'El contenido del enlace corto no es válido. Pide a la mesa que genere otro.' });
+        return;
+      }
+      setResolvedShortLink({ hash, link: snapshot, error: null });
+    }).catch((error: unknown) => {
+      if (active) setResolvedShortLink({ hash, link: null, error: error instanceof Error ? error.message : 'No se ha podido recuperar el acta.' });
+    });
+    return () => { active = false; };
+  }, [hash]);
   const parsed = useMemo(() => {
+    if (/^#?S8-/i.test(hash.trim())) {
+      if (!resolvedShortLink || resolvedShortLink.hash !== hash) return { link: null, error: 'Recuperando el acta…' };
+      return { link: resolvedShortLink.link, error: resolvedShortLink.error };
+    }
     try {
       return { link: decodeActaLink(hash), error: null };
     } catch (error) {
       return { link: null, error: error instanceof Error ? error.message : 'El enlace no es válido.' };
     }
-  }, [hash]);
+  }, [hash, resolvedShortLink]);
   if (!parsed.link) {
-    return <main className="acta-shell"><section className="acta-card acta-error" role="alert"><TriangleAlert size={22} /><h1>No se puede abrir el acta</h1><p>{parsed.error}</p></section></main>;
+    return <main className="acta-shell"><section className="acta-card acta-error" role="alert"><TriangleAlert size={22} /><h1>{parsed.error === 'Recuperando el acta…' ? 'Recuperando el acta' : 'No se puede abrir el acta'}</h1><p>{parsed.error}</p></section></main>;
   }
   return <JudgeActa key={parsed.link.debate} link={parsed.link} />;
 }

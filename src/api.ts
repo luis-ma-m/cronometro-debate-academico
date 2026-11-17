@@ -55,6 +55,21 @@ export async function apiCall<T>(action: string, payload: Record<string, unknown
   return result.data;
 }
 
+
+export interface ActaShortLink { id:string; tournamentId:string; debateId:string; createdAt:number; expiresAt:number|null; revokedAt:number|null; }
+export const createActaShortLink=(token:string,tournamentId:string,debateId:string,snapshot:unknown,expiryDays:number,idempotencyKey:string)=>apiCall<ActaShortLink>('createActaShortLink',{token,tournamentId,debateId,snapshot,expiryDays,idempotencyKey});
+export async function resolveActaShortLink(id:string):Promise<{snapshot:unknown;expiresAt:number|null}>{
+  if(!API_URL)throw new ApiError('No hay backend disponible para resolver este enlace.','NOT_CONFIGURED');
+  const url=new URL(API_URL,window.location.origin);url.searchParams.set('action','resolveActaShortLink');url.searchParams.set('id',id);
+  let response:Response;
+  try{response=await fetch(url.toString(),{method:'GET',cache:'no-store',credentials:'same-origin'});}
+  catch{throw new ApiError('No hay conexión para recuperar este enlace corto.','NETWORK_ERROR');}
+  let body:{ok?:boolean;data?:{snapshot?:unknown;expiresAt?:number|null};error?:{message?:string;code?:string}};
+  try{body=await response.json() as typeof body;}catch{throw new ApiError('El servidor no devolvió una respuesta válida.','INVALID_RESPONSE');}
+  if(!response.ok||body.ok!==true||!body.data?.snapshot)throw new ApiError(body.error?.message??'No se ha podido recuperar el acta.',body.error?.code??'SHORT_LINK_ERROR');
+  return{snapshot:body.data.snapshot,expiresAt:body.data.expiresAt??null};
+}
+
 export const login = (password: string) => apiCall<{ token: string; expiresAt: number }>('login', { password });
 export const logout = (token: string) => apiCall<{ loggedOut: boolean }>('logout', { token });
 export const getTournament = (token: string) => apiCall<Tournament>('getTournament', { token });

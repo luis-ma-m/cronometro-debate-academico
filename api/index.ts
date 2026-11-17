@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FeaturedMessage, FormatPreset, Phase, PhysicalRoom, Room, Round, TimerState, Tournament } from "../src/domain.js";
-import { checkDatabase, databaseConfigured } from "./db.js";
+import { checkDatabase, databaseConfigured, getPool } from "./db.js";
 import { deleteTabulationSnapshot, getTabulationSnapshot, listTabulationSnapshots, publishTabulationSnapshot } from "./tabulation-snapshots.js";
 import { listPublicActas, publicActaAlreadySubmitted, submitPublicActa } from "./public-actas.js";
 import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
@@ -372,6 +372,7 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "logout":
       if (payload.token) await redisCommand(["DEL", "ledu:session:" + sha256(str(payload.token))]);
       return { loggedOut: true };
+    case "createActaShortLink": await requireSession(payload.token); return createActaShortLink(payload);
     case "listTabulationSnapshots":
       await requireSession(payload.token);
       return listTabulationSnapshots();
@@ -1099,6 +1100,126 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
 }
 
 
+
+type ShortLinkRow = { id:string; tournament_id:string; debate_id:string; snapshot:unknown; snapshot_sha256:string; idempotency_key:string; expires_at:Date|string|null; revoked_at:Date|string|null; created_at:Date|string };
+function canonicalShortLinkJson(value:unknown):string {
+  if(Array.isArray(value)) return "["+value.map(canonicalShortLinkJson).join(",")+"]";
+  if(value && typeof value==="object"){const r=value as Record<string,unknown>;return "{"+Object.keys(r).sort().map(k=>JSON.stringify(k)+":"+canonicalShortLinkJson(r[k])).join(",")+"}";}
+  return JSON.stringify(value) ?? "null";
+}
+function validActaSnapshot(value:unknown):value is Record<string,unknown>{
+  if(!value||typeof value!=="object"||Array.isArray(value))return false;
+  const v=value as Record<string,unknown>;
+  const round=v.round&&typeof v.round==="object"&&!Array.isArray(v.round)?v.round as Record<string,unknown>:null;
+  const rules=v.rules&&typeof v.rules==="object"&&!Array.isArray(v.rules)?v.rules as Record<string,unknown>:null;
+  if((v.version!==1&&v.version!==2)||typeof v.tournament!=="string"||v.tournament.length>160
+    ||typeof v.debate!=="string"||!v.debate.trim()||v.debate.length>200
+    ||typeof v.key!=="string"||!v.key||v.key.length>100
+    ||!round||!Number.isSafeInteger(round.number)||(round.number as number)<1||(round.number as number)>10000
+    ||typeof round.name!=="string"||!round.name.trim()||round.name.length>160||typeof round.elimination!=="boolean"
+    ||typeof v.venue!=="string"||v.venue.length>240||typeof v.desk!=="string"||v.desk.length>40
+    ||!Array.isArray(v.teams)||v.teams.length!==2||!Array.isArray(v.jury)||v.jury.length>20
+    ||!v.jury.every(n=>typeof n==="string"&&n.length<=160)||!rules)return false;
+  const teamIds=new Set<string>(),speakerIds=new Set<string>();
+  for(const rawTeam of v.teams){
+    if(!rawTeam||typeof rawTeam!=="object"||Array.isArray(rawTeam))return false;
+    const team=rawTeam as Record<string,unknown>;
+    if(typeof team.id!=="string"||!team.id.trim()||team.id.length>128||teamIds.has(team.id)
+      ||typeof team.name!=="string"||!team.name.trim()||team.name.length>200
+      ||!Array.isArray(team.members)||team.members.length>32)return false;
+    teamIds.add(team.id);
+    for(const rawSpeaker of team.members){
+      if(!rawSpeaker||typeof rawSpeaker!=="object"||Array.isArray(rawSpeaker))return false;
+      const speaker=rawSpeaker as Record<string,unknown>;
+      if(typeof speaker.id!=="string"||!speaker.id.trim()||speaker.id.length>128||speakerIds.has(speaker.id)
+        ||typeof speaker.name!=="string"||!speaker.name.trim()||speaker.name.length>160)return false;
+      speakerIds.add(speaker.id);
+    }
+  }
+  if(rules.rubric!==undefined){
+    if(!Array.isArray(rules.rubric)||rules.rubric.length>100)return false;
+    const ids=new Set<string>();
+    for(const item of rules.rubric){
+      if(!item||typeof item!=="object"||Array.isArray(item))return false;
+      const x=item as Record<string,unknown>;
+      if(typeof x.id!=="string"||!x.id.trim()||ids.has(x.id)||typeof x.name!=="string"||!x.name.trim()||typeof x.section!=="string"||!x.section.trim())return false;
+      ids.add(x.id);
+    }
+  }
+  return true;
+}
+function newShortLinkId():string{
+  const alphabet="0123456789ABCDEFGHJKMNPQRSTVWXYZ";let n=0n;
+  for(const b of randomBytes(5))n=(n<<8n)|BigInt(b);
+  let out="";for(let i=0;i<8;i++){out=alphabet[Number(n&31n)]+out;n>>=5n;}return out;
+}
+function shortLinkExpiry(value:unknown):Date{
+  const days=Number(value??30);
+  if(![1,7,30,90,365].includes(days))throw new ApiError("INVALID_EXPIRY","Elige una caducidad de 1, 7, 30, 90 o 365 días.");
+  return new Date(Date.now()+days*86400000);
+}
+function shortLinkPublic(r:ShortLinkRow){return{id:r.id,tournamentId:r.tournament_id,debateId:r.debate_id,createdAt:new Date(r.created_at).getTime(),expiresAt:r.expires_at?new Date(r.expires_at).getTime():null,revokedAt:r.revoked_at?new Date(r.revoked_at).getTime():null};}
+async function createActaShortLink(p:Record<string,unknown>):Promise<unknown>{
+  const tournamentId=str(p.tournamentId).trim(),debateId=str(p.debateId).trim(),snapshot=p.snapshot;
+  if(!/^[a-zA-Z0-9_-]{1,128}$/.test(tournamentId)||!/^[a-zA-Z0-9_-]{1,200}$/.test(debateId)||!validActaSnapshot(snapshot))throw new ApiError("INVALID_SHORT_LINK","El snapshot del acta no es válido.");
+  const json=canonicalShortLinkJson(snapshot);
+  if(new TextEncoder().encode(json).byteLength>32768)throw new ApiError("SHORT_LINK_TOO_LARGE","El acta supera el tamaño máximo permitido.");
+  const rawKey=str(p.idempotencyKey).trim();
+  if(!/^[a-zA-Z0-9_-]{8,128}$/.test(rawKey))throw new ApiError("INVALID_IDEMPOTENCY_KEY","Clave de idempotencia no válida.");
+  const hash=sha256(json),idem=sha256("acta-short-link:v1|"+tournamentId+"|"+debateId+"|"+rawKey),expires=shortLinkExpiry(p.expiryDays),client=await getPool().connect();
+  try{
+    await client.query("BEGIN");
+    const prior=await client.query("SELECT * FROM acta_short_links WHERE tournament_id=$1 AND idempotency_key=$2 FOR UPDATE",[tournamentId,idem]);
+    if(prior.rows[0]){
+      const row=prior.rows[0] as ShortLinkRow;
+      if(row.snapshot_sha256!==hash)throw new ApiError("IDEMPOTENCY_CONFLICT","La clave de idempotencia tiene otro contenido.",409);
+      await client.query("COMMIT");return shortLinkPublic(row);
+    }
+    let created:ShortLinkRow|undefined;
+    for(let i=0;i<8&&!created;i++){
+      const inserted=await client.query("INSERT INTO acta_short_links(id,tournament_id,debate_id,snapshot,snapshot_sha256,idempotency_key,created_by,expires_at) VALUES($1,$2,$3,$4::jsonb,$5,$6,'manager',$7) ON CONFLICT DO NOTHING RETURNING *",[newShortLinkId(),tournamentId,debateId,json,hash,idem,expires]);
+      if(inserted.rows[0])created=inserted.rows[0] as ShortLinkRow;
+      else {
+        const raced=await client.query("SELECT * FROM acta_short_links WHERE tournament_id=$1 AND idempotency_key=$2 FOR UPDATE",[tournamentId,idem]);
+        if(raced.rows[0]){
+          const existing=raced.rows[0] as ShortLinkRow;
+          if(existing.snapshot_sha256!==hash)throw new ApiError("IDEMPOTENCY_CONFLICT","La clave de idempotencia tiene otro contenido.",409);
+          await client.query("COMMIT");return shortLinkPublic(existing);
+        }
+      }
+    }
+    if(!created)throw new ApiError("SHORT_LINK_COLLISION","No se ha podido reservar un identificador único.",503);
+    await client.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'created','manager',$2::jsonb)",[created.id,JSON.stringify({expiresAt:expires.toISOString(),snapshotHash:hash})]);
+    await client.query("COMMIT");return shortLinkPublic(created);
+  }catch(error){await client.query("ROLLBACK").catch(()=>undefined);throw error;}finally{client.release();}
+}
+async function resolveActaShortLink(req:RequestLike):Promise<unknown>{
+  if(!databaseConfigured())throw new ApiError("NOT_CONFIGURED","La base de datos de enlaces no está configurada.",503);
+  const ipHash=sha256(requestIp(req)),pool=getPool();
+  let rate;
+  try{
+    rate=await pool.query(`INSERT INTO acta_short_link_resolution_limits(ip_hash,window_started_at,request_count)
+      VALUES($1,date_trunc('minute',now()),1)
+      ON CONFLICT(ip_hash) DO UPDATE SET
+      request_count=CASE WHEN acta_short_link_resolution_limits.window_started_at<date_trunc('minute',now()) THEN 1 ELSE acta_short_link_resolution_limits.request_count+1 END,
+      window_started_at=CASE WHEN acta_short_link_resolution_limits.window_started_at<date_trunc('minute',now()) THEN date_trunc('minute',now()) ELSE acta_short_link_resolution_limits.window_started_at END
+      RETURNING request_count`,[ipHash]);
+  }catch(error){
+    if(error&&typeof error==="object"&&"code" in error&&String((error as {code?:unknown}).code)==="42P01")throw new ApiError("MIGRATION_REQUIRED","Falta aplicar la migración de límites de enlaces S8.",503);
+    throw error;
+  }
+  if(num(rate.rows[0]?.request_count)>60)throw new ApiError("RATE_LIMITED","Demasiadas consultas de enlaces. Espera al siguiente minuto.",429);
+  const raw=Array.isArray(req.query?.id)?req.query?.id[0]:req.query?.id,id=str(raw).toUpperCase();
+  if(!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(id))throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);
+  const result=await pool.query("SELECT * FROM acta_short_links WHERE id=$1",[id]);
+  const row=result.rows[0] as ShortLinkRow|undefined;
+  if(!row)throw new ApiError("SHORT_LINK_NOT_FOUND","El enlace no existe o no está disponible.",404);
+  if(row.revoked_at)throw new ApiError("SHORT_LINK_REVOKED","Este enlace ha sido revocado por la mesa.",410);
+  if(row.expires_at&&new Date(row.expires_at).getTime()<=Date.now())throw new ApiError("SHORT_LINK_EXPIRED","Este enlace ha caducado. Pide a la mesa que genere uno nuevo.",410);
+  if(!validActaSnapshot(row.snapshot)||sha256(canonicalShortLinkJson(row.snapshot))!==row.snapshot_sha256)throw new ApiError("SHORT_LINK_CORRUPT","El contenido del enlace no supera la comprobación de integridad.",500);
+  return{snapshot:row.snapshot,expiresAt:row.expires_at?new Date(row.expires_at).getTime():null};
+}
+
 async function health(): Promise<unknown> {
   ensureConfigured();
   const database = await checkDatabase();
@@ -1136,6 +1257,11 @@ export default async function handler(req: RequestLike, res: ResponseLike): Prom
   try {
     if (req.method === "GET") {
       const action = Array.isArray(req.query?.action) ? req.query?.action[0] : req.query?.action;
+      if (action === "resolveActaShortLink") {
+        const result = await resolveActaShortLink(req);
+        res.status(200).json({ ok: true, data: result });
+        return;
+      }
       if (action !== "health") throw new ApiError("METHOD_NOT_ALLOWED", "Usa POST para operar con la API.", 405);
       const result = await health();
       res.status(200).json({ ok: true, data: result });
