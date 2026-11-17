@@ -382,7 +382,6 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   // speakers as historical records because submitted scorecards may still reference them.
   const speakersById = new Map((panel.speakers ?? []).map((speaker) => [speaker.id, speaker]));
   const speakersByName = new Map((panel.speakers ?? []).map((speaker) => [speaker.teamId + '|' + normalizeVenueName(speaker.name), speaker]));
-  const incomingSpeakerIds = new Set<string>();
   for (const incoming of outbox.speakers) {
     const teamId = canonicalTeamId.get(incoming.teamId);
     if (!teamId) {
@@ -397,7 +396,6 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     }
     const existing = byId ?? byName;
     const canonicalId = existing?.id ?? incoming.id;
-    incomingSpeakerIds.add(canonicalId);
     const next = { ...incoming, id: canonicalId, teamId };
     speakersById.set(canonicalId, next);
     speakersByName.set(teamId + '|' + normalizeVenueName(next.name), next);
