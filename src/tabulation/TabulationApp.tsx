@@ -167,7 +167,10 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const tournament = state.tournament;
   const operatorMissing = !state.operator.trim();
   const deleteTournament = useCallback(async (id: string) => {
-    if (apiConfigured && remoteToken) await deleteTabulationSnapshot(remoteToken, id);
+    if (apiConfigured) {
+      if (!remoteToken) throw new Error('Inicia sesión en Gestión para eliminar también la copia sincronizada en Neon.');
+      await deleteTabulationSnapshot(remoteToken, id);
+    }
     if (remoteCursor.current?.id === id) remoteCursor.current = null;
     if (tournament?.id === id) {
       skipNextEmptyRecovery.current = true;

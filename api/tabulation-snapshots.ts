@@ -36,7 +36,7 @@ async function ensureSnapshotSchema(): Promise<void> {
         "snapshot_sha256 char(64) NOT NULL CHECK (snapshot_sha256 ~ '^[a-f0-9]{64}$'),",
         "published_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())",
       ].join(" ");
-      const operationsTable = [
+      const deletionTable = [
         "CREATE TABLE IF NOT EXISTS tabulation_tournament_deletions (",
         "tab_tournament_id text PRIMARY KEY CHECK (length(btrim(tab_tournament_id)) BETWEEN 1 AND 200),",
         "deleted_by text NOT NULL, deleted_at timestamptz NOT NULL DEFAULT now())",
@@ -53,7 +53,7 @@ async function ensureSnapshotSchema(): Promise<void> {
       await pool.query(tournamentTable);
       await pool.query("CREATE INDEX IF NOT EXISTS tabulation_tournaments_updated_idx ON tabulation_tournaments(updated_at DESC)");
       await pool.query(operationsTable);
-      await pool.query("CREATE TABLE IF NOT EXISTS tabulation_tournament_deletions (tab_tournament_id text PRIMARY KEY CHECK (length(btrim(tab_tournament_id)) BETWEEN 1 AND 200), deleted_by text NOT NULL, deleted_at timestamptz NOT NULL DEFAULT now())");
+      await pool.query(deletionTable);
     })().catch((error) => { schemaReady = null; throw error; });
   }
   await schemaReady;
