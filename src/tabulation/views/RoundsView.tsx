@@ -19,6 +19,8 @@ import { simulateRoundResults } from '../sample';
 import { eliminationRounds, qualifyingRounds, type TabDebate, type TabJudge, type TabRound, type TabRoundDraft, type TabTournament } from '../types';
 import { copyText, downloadBytes, Empty, IssueList, lookups, Notice, STATUS_LABELS, type ViewProps } from '../ui';
 import { actaLinkMessage, buildActaLink, whatsAppNumber, whatsAppUrl } from '../whatsapp';
+import { cyrb53 } from '../hash';
+import { createActaShortLink } from '../../api';
 
 const DRAFT_TAB = '__borrador__';
 type Look = ReturnType<typeof lookups>;
@@ -37,7 +39,8 @@ function seedFrom(text: string): number {
   return /^\d{1,9}$/.test(trimmed) ? Number(trimmed) : hashSeed(trimmed);
 }
 
-export function RoundsView({ tournament, outcomes, update, notify, store, projection, onProject, onNavigate }: ViewProps & {
+export function RoundsView({ tournament, outcomes, update, notify, store, projection, onProject, onNavigate, managerSessionToken }: ViewProps & {
+  managerSessionToken?: string;
   projection: boolean;
   onProject: () => void;
   onNavigate: (view: string) => void;
@@ -584,27 +587,84 @@ function DebateTable({ tournament, round, problems, look, outcomes, onEdit }: {
   </div>;
 }
 
-/** Links for the chairs: each one opens the acta of its debate on the phone, to be sent back by WhatsApp. */
-function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent }: { tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void; onMarkSent: (debateId: string) => void }) {
-  const baseUrl = (tournament.whatsapp?.baseUrl.trim() || window.location.origin).replace(/\/+$/, '');
-  const unreachable = /^https?:\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[)/.test(baseUrl);
+/** WhatsApp actas are shared only through server-resolved S8 identifiers. */
+function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent, managerSessionToken }: {
+  tournament: TabTournament; round: TabRound; notify: ViewProps['notify']; onSent: (message: string) => void;
+  onMarkSent: (debateId: string) => void; managerSessionToken?: string;
+}) {
+  const baseUrl = (tournament.whatsapp?.baseUrl.trim() || window.location.origin).replace(/\\/+$/, '');
+  const unreachable = /^https?:\\/\\/(localhost|127\\.|0\\.0\\.0\\.|10\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.|\\[)/.test(baseUrl);
   const desk = whatsAppNumber(tournament.whatsapp?.deskPhone ?? '');
   const rows = useMemo(() => {
     const fallen = fallenTeamIds(tournament.teams, round.number);
     const judges = new Map(tournament.judges.map((judge) => [judge.id, judge]));
     return round.debates.filter((debate) => !debate.teamIds.some((id) => fallen.has(id))).map((debate) => {
-      const { url, link } = buildActaLink(tournament, round, debate, baseUrl);
+      const { link } = buildActaLink(tournament, round, debate, baseUrl);
       const phone = whatsAppNumber(judges.get(debate.chairId)?.phone ?? '');
       const label = (link.venue || 'Debate') + ' (' + link.teams.map((team) => team.name).join(' – ') + ')';
-      return { debate, url, link, phone, label, href: whatsAppUrl(phone, actaLinkMessage(link, url)), onSent: () => onMarkSent(debate.id) };
+      return { debate, link, phone, label };
     });
   }, [tournament, round, baseUrl]);
-  const groupMessage = 'Actas de ' + round.name + ' · ' + tournament.name + '. Cada juez principal abre el enlace de su sala, rellena el acta y la envía por WhatsApp a la mesa:\n\n'
-    + rows.map((row) => row.label + (row.link.jury[0] ? ' · ' + row.link.jury[0] : '') + '\n' + row.url).join('\n\n');
+  const [busyId, setBusyId] = useState('');
+  const getShortUrl = async (row: typeof rows[number]) => {
+    if (!managerSessionToken) throw new Error('Inicia sesión en el gestor para generar enlaces S8.');
+    if (unreachable) throw new Error('La dirección pública configurada no es accesible desde los móviles.');
+    const fingerprint = cyrb53(JSON.stringify(row.link)).toString(36);
+    const idempotencyKey = 's8_' + fingerprint + '_' + cyrb53(row.debate.id).toString(36);
+    const result = await createActaShortLink(managerSessionToken, tournament.id, row.debate.id, row.link, 30, idempotencyKey);
+    if (!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(result.id)) throw new Error('El backend no ha devuelto un identificador S8 válido.');
+    return baseUrl + '/acta#S8-' + result.id;
+  };
+  const openWhatsApp = async (row: typeof rows[number]) => {
+    const popup = window.open('about:blank', '_blank');
+    setBusyId(row.debate.id);
+    try {
+      const url = await getShortUrl(row);
+      const message = actaLinkMessage(row.link, url);
+      const href = whatsAppUrl(row.phone, message);
+      if (popup) popup.location.href = href;
+      else {
+        await copyText(message);
+        notify('El navegador ha bloqueado la ventana de WhatsApp. Se ha copiado el mensaje con el enlace S8.', 'warning');
+      }
+      onSent(round.name + ' · enlace S8 del acta de ' + row.label + ' preparado para WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.');
+      onMarkSent(row.debate.id);
+    } catch (error) {
+      popup?.close();
+      notify((error instanceof Error ? error.message : String(error)) + ' No se ha enviado ningún enlace alternativo.', 'error');
+    } finally { setBusyId(''); }
+  };
+  const openActa = async (row: typeof rows[number]) => {
+    const popup = window.open('about:blank', '_blank');
+    setBusyId(row.debate.id);
+    try {
+      const url = await getShortUrl(row);
+      if (popup) popup.location.href = url;
+      else window.location.href = url;
+    } catch (error) {
+      popup?.close();
+      notify((error instanceof Error ? error.message : String(error)) + ' No se ha generado ningún enlace alternativo.', 'error');
+    } finally { setBusyId(''); }
+  };
+  const copyGroup = async () => {
+    setBusyId('__all__');
+    try {
+      const generated = await Promise.all(rows.map(async (row) => ({
+        row, url: await getShortUrl(row),
+      })));
+      const message = 'Actas de ' + round.name + ' · ' + tournament.name + '. Cada juez principal abre el enlace de su sala, rellena el acta y la envía por WhatsApp a la mesa:\\n\\n'
+        + generated.map(({ row, url }) => row.label + (row.link.jury[0] ? ' · ' + row.link.jury[0] : '') + '\\n' + url).join('\\n\\n');
+      const copied = await copyText(message);
+      notify(copied ? 'Enlaces S8 copiados.' : 'No se han podido copiar los enlaces.', copied ? 'success' : 'error');
+    } catch (error) {
+      notify((error instanceof Error ? error.message : String(error)) + ' No se han copiado enlaces parciales.', 'error');
+    } finally { setBusyId(''); }
+  };
   return <details className="tab-whatsapp tab-no-project">
-    <summary><MessageCircle size={16} /> Actas por WhatsApp</summary>
-    {unreachable && <Notice kind="warning">Los móviles no pueden abrir {baseUrl}: usa la tabulación publicada o escribe la dirección pública en Reglas → «Actas por WhatsApp».</Notice>}
-    <p className="muted">Envía a cada juez principal el enlace de su sala. Rellenará el acta en el móvil y la mandará por WhatsApp {desk ? 'al +' + desk : 'al chat que elija (escribe el móvil de la mesa en Reglas)'}; después pega los mensajes en Actas → «Actas recibidas por WhatsApp».</p>
+    <summary><MessageCircle size={16} /> Actas por WhatsApp · enlaces S8</summary>
+    {unreachable && <Notice kind="warning">Los móviles no pueden abrir {baseUrl}: configura una dirección pública antes de generar enlaces.</Notice>}
+    {!managerSessionToken && <Notice kind="warning">Inicia sesión en el panel de organización para generar enlaces cortos. No se enviarán enlaces A2 como alternativa.</Notice>}
+    <p className="muted">Cada botón crea o recupera un enlace S8 de ocho caracteres, guarda el acta en Neon y abre WhatsApp con el mensaje preparado. Si falla el backend, no se genera ni se envía un enlace alternativo.</p>
     <div className="tournament-table-wrap"><table>
       <thead><tr><th>Sala</th><th>Debate</th><th>Juez principal</th><th>Enlace</th></tr></thead>
       <tbody>{rows.map((row) => <tr key={row.debate.id}>
@@ -612,14 +672,13 @@ function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent }: { tour
         <td>{row.link.teams[0].name} – {row.link.teams[1].name}</td>
         <td>{row.link.jury[0] ?? 'sin juez'}<small className="tab-cell-sub">{row.phone ? '+' + row.phone : 'sin móvil: WhatsApp pedirá el chat'}</small></td>
         <td className="tab-whatsapp-actions">
-          <a className="button secondary" href={row.href} target="_blank" rel="noreferrer" aria-label={'Enviar el enlace de ' + row.label}
-            onClick={() => { onSent(round.name + ' · enlace del acta de ' + row.label + ' enviado por WhatsApp' + (row.phone ? ' al +' + row.phone : '') + '.'); row.onSent(); }}><Send size={14} /> Enviar enlace</a>
-          <a className="text-button" href={row.url} target="_blank" rel="noreferrer" aria-label={'Abrir el acta de ' + row.label}>Abrir el acta</a>
+          <button type="button" className="button secondary" disabled={Boolean(busyId) || !managerSessionToken || unreachable} onClick={() => void openWhatsApp(row)}><Send size={14} /> {busyId === row.debate.id ? 'Generando S8…' : 'Enviar enlace'}</button>
+          <button type="button" className="text-button" disabled={Boolean(busyId) || !managerSessionToken || unreachable} onClick={() => void openActa(row)}>Abrir acta</button>
         </td>
       </tr>)}</tbody>
     </table></div>
-    <button type="button" className="button ghost" onClick={() => void copyText(groupMessage).then((copied) => notify(copied ? 'Enlaces copiados: pégalos en el grupo de WhatsApp de los jueces.' : 'No se han podido copiar: usa «Enviar enlace» en cada sala.', copied ? 'success' : 'error'))}>
-      <Copy size={16} /> Copiar todos los enlaces para el grupo de jueces
+    <button type="button" className="button ghost" disabled={Boolean(busyId) || !managerSessionToken || unreachable || !rows.length} onClick={() => void copyGroup()}>
+      <Copy size={16} /> {busyId === '__all__' ? 'Generando enlaces S8…' : 'Copiar todos los enlaces S8 para el grupo'}
     </button>
   </details>;
 }
