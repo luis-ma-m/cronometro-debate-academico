@@ -1179,6 +1179,14 @@ async function createActaShortLink(p:Record<string,unknown>):Promise<unknown>{
     for(let i=0;i<8&&!created;i++){
       const inserted=await client.query("INSERT INTO acta_short_links(id,tournament_id,debate_id,snapshot,snapshot_sha256,idempotency_key,created_by,expires_at) VALUES($1,$2,$3,$4::jsonb,$5,$6,'manager',$7) ON CONFLICT DO NOTHING RETURNING *",[newShortLinkId(),tournamentId,debateId,json,hash,idem,expires]);
       if(inserted.rows[0])created=inserted.rows[0] as ShortLinkRow;
+      else {
+        const raced=await client.query("SELECT * FROM acta_short_links WHERE tournament_id=$1 AND idempotency_key=$2 FOR UPDATE",[tournamentId,idem]);
+        if(raced.rows[0]){
+          const existing=raced.rows[0] as ShortLinkRow;
+          if(existing.snapshot_sha256!==hash)throw new ApiError("IDEMPOTENCY_CONFLICT","La clave de idempotencia tiene otro contenido.",409);
+          await client.query("COMMIT");return shortLinkPublic(existing);
+        }
+      }
     }
     if(!created)throw new ApiError("SHORT_LINK_COLLISION","No se ha podido reservar un identificador único.",503);
     await client.query("INSERT INTO acta_short_link_events(link_id,event_type,actor,details) VALUES($1,'created','manager',$2::jsonb)",[created.id,JSON.stringify({expiresAt:expires.toISOString(),snapshotHash:hash})]);
