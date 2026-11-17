@@ -598,6 +598,35 @@ export async function readIdempotentResponse(operationKey: string, scope: string
   }
 }
 
+const DATABASE_CONSTRAINT_MESSAGES: Record<string, string> = {
+  round_team_claims_pkey: "un equipo está asignado a más de un debate de la misma ronda",
+  round_room_claims_pkey: "una misma sala física está asignada a más de un debate de la misma ronda",
+  assignment_judges_one_room_per_round_uq: "un juez está asignado a más de una sala de la misma ronda",
+  room_assignments_team_favor_round_uq: "un equipo aparece repetido en la postura a favor de la misma ronda",
+  room_assignments_team_contra_round_uq: "un equipo aparece repetido en la postura en contra de la misma ronda",
+  assignment_judges_round_fk: "un juez referencia una ronda que no existe",
+  room_assignments_round_id_fkey: "una asignación referencia una ronda que no existe",
+  room_assignments_physical_room_id_fkey: "una asignación referencia una sala física que no existe",
+  room_assignments_team_favor_id_fkey: "la asignación referencia un equipo a favor que no existe",
+  room_assignments_team_contra_id_fkey: "la asignación referencia un equipo en contra que no existe",
+  room_assignments_format_id_fkey: "la asignación referencia un formato que no existe",
+  rounds_number_key: "hay dos rondas con el mismo número",
+  physical_rooms_slug_key: "hay dos salas físicas con el mismo identificador",
+};
+
+function describeDatabaseConstraint(error: unknown): string {
+  const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const constraint = typeof value.constraint === "string" ? value.constraint : "";
+  const detail = typeof value.detail === "string" ? value.detail : "";
+  const known = DATABASE_CONSTRAINT_MESSAGES[constraint];
+  console.error("[ledu-api] PostgreSQL integrity constraint rejected tournament save", {
+    code: value.code, constraint, table: value.table, column: value.column, detail,
+  });
+  if (known) return "No se ha podido guardar la ronda: " + known + ". Revisa los emparejamientos y las asignaciones de jueces y salas.";
+  return "No se ha podido guardar la ronda por una regla de integridad de la base de datos" +
+    (constraint ? " (" + constraint + ")" : "") + ". Revisa los equipos, jueces, salas, rondas y formatos vinculados.";
+}
+
 export async function writePostgresTables(data: PostgresSheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[]): Promise<void> {
   const client = await getPool().connect();
   try {
@@ -678,7 +707,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     if (error instanceof ApiError) throw error;
     const code = (error as { code?: string })?.code;
     if (code === "23505" || code === "23503" || code === "23514") {
-      throw new ApiError("DATABASE_CONSTRAINT", "La operación contradice una regla de integridad del torneo. Actualiza los datos y vuelve a intentarlo.", 409);
+      throw new ApiError("DATABASE_CONSTRAINT", describeDatabaseConstraint(error), 409);
     }
     throw new ApiError("DATABASE_WRITE_FAILED", "No se ha podido guardar el torneo en PostgreSQL. No se ha confirmado ningún cambio.", 503);
   } finally {

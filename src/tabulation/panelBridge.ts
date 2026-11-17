@@ -146,30 +146,85 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
   }
   const venues = new Map(tournament.venues.map((venue) => [venue.id, venue.name]));
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
+  const judges = new Map(tournament.judges.map((judge) => [judge.id, judge]));
   const debates: PanelOutboxDebate[] = [];
   const usedTeamIds = new Set<string>();
   const usedJudgeIds = new Set<string>();
+  const venueBookings = new Map<string, string>();
+  const teamBookings = new Map<string, string>();
+  const judgeBookings = new Map<string, string>();
   let fallen = 0;
   for (const debate of round.debates) {
     const [a, b] = debate.teamIds;
-    for (const id of debate.teamIds) if (id) usedTeamIds.add(id);
-    for (const id of debate.judgeIds) if (id) usedJudgeIds.add(id);
-    if (debate.teamIds.some((id) => isFallenAt(teams.get(id), round.number))) { fallen++; continue; }
+    if (debate.teamIds.some((id) => id && isFallenAt(teams.get(id), round.number))) { fallen++; continue; }
     const venueName = venues.get(debate.venueId) ?? '';
     if (!venueName) { issues.push('Hay debates sin sala: asigna una sala a cada debate antes de enviarlo.'); continue; }
     if (!a || !b) { issues.push(venueName + ': faltan equipos.'); continue; }
+    if (a === b) { issues.push(venueName + ': un equipo no puede debatir contra sí mismo.'); continue; }
+    if (!teams.has(a) || !teams.has(b)) { issues.push(venueName + ': contiene un equipo que ya no existe en Participantes. Actualiza el debate y vuelve a generarlo.'); continue; }
     const favor = debate.favorTeamId ?? a;
+    if (favor !== a && favor !== b) {
+      issues.push(venueName + ': la postura a favor apunta a un equipo que no pertenece a este debate. Vuelve a sortear las posturas.');
+      continue;
+    }
+    const previousVenue = venueBookings.get(debate.venueId);
+    if (previousVenue) issues.push('La sala «' + venueName + '» está asignada a ' + previousVenue + ' y a otro debate de la misma ronda.');
+    else venueBookings.set(debate.venueId, venueName);
+    for (const id of [a, b]) {
+      const previous = teamBookings.get(id);
+      if (previous) issues.push((teams.get(id)?.name ?? id) + ' aparece en ' + previous + ' y en ' + venueName + ' dentro de la misma ronda.');
+      else teamBookings.set(id, venueName);
+      usedTeamIds.add(id);
+    }
     const panel = tournament.settings.conflictPolicy === 'lastResort' ? panelAcceptedJudges(tournament, debate, venueName, warnings) : debate;
+    const localJudges = new Set<string>();
+    for (const id of panel.judgeIds) {
+      const judge = judges.get(id);
+      if (!judge) {
+        issues.push(venueName + ': el panel contiene un juez que ya no existe en Participantes. Actualiza el panel.');
+        continue;
+      }
+      if (localJudges.has(id)) {
+        issues.push(venueName + ': ' + judge.name + ' aparece más de una vez en el mismo panel.');
+        continue;
+      }
+      localJudges.add(id);
+      const previous = judgeBookings.get(id);
+      if (previous) issues.push(judge.name + ' está asignado a ' + previous + ' y a ' + venueName + ' en la misma ronda.');
+      else judgeBookings.set(id, venueName);
+      usedJudgeIds.add(id);
+      if (tournament.settings.conflictPolicy === 'hard') {
+        for (const teamId of [a, b]) {
+          const team = teams.get(teamId);
+          if (!team) continue;
+          if (sameInstitution(team.institution, judge.institution)) {
+            issues.push(venueName + ': ' + judge.name + ' y ' + team.name + ' comparten institución.');
+          }
+          if (team.incompatibleJudgeIds.includes(judge.id)) {
+            issues.push(venueName + ': ' + judge.name + ' es incompatible con el equipo ' + team.name + '.');
+          }
+        }
+      }
+    }
+    if (tournament.settings.conflictPolicy === 'hard') {
+      const seated = [...localJudges].map((id) => judges.get(id)).filter((judge): judge is TabJudge => Boolean(judge));
+      for (let i = 0; i < seated.length; i++) for (let j = i + 1; j < seated.length; j++) {
+        if (seated[i].incompatibleJudgeIds.includes(seated[j].id) || seated[j].incompatibleJudgeIds.includes(seated[i].id)) {
+          issues.push(venueName + ': ' + seated[i].name + ' y ' + seated[j].name + ' son jueces incompatibles.');
+        }
+      }
+    }
     debates.push({
       physicalRoomId: debate.venueId,
       venueName,
       teamFavorId: favor,
       teamContraId: favor === a ? b : a,
-      judgeIds: [...panel.judgeIds].sort(),
-      chairId: panel.chairId,
+      judgeIds: [...localJudges].sort(),
+      chairId: localJudges.has(panel.chairId) ? panel.chairId : pickChair([...localJudges], judges),
       sidesProvisional: !debate.favorTeamId,
     });
   }
+  if (issues.length) return { outbox: null, issues: [...new Set(issues)], warnings };
   if (fallen) warnings.push(fallen + ' debate(s) contra un equipo caído no se envían al panel: no se disputan.');
   const provisional = debates.filter((debate) => debate.sidesProvisional).length;
   if (provisional) warnings.push(provisional + ' debate(s) sin postura sorteada: se enviarán con una postura provisional que podrás intercambiar en el panel.');
