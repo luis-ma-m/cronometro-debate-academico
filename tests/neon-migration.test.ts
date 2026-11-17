@@ -175,6 +175,7 @@ describe("Neon migration artifacts", () => {
     const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
     expect(store).toContain('teams_name_ci_uq: "ya existe otro equipo');
     expect(store).toContain('judges_name_ci_uq: "ya existe otro juez');
+    expect(store).toContain('Comprueba los nombres de los equipos.');
     expect(store).toContain("async function releaseUniqueNamesForReplacement");
     const release = store.indexOf("await releaseUniqueNamesForReplacement(client, table)");
     const upsert = store.indexOf("INSERT INTO ${table}(id,name,institution_id,active)");
