@@ -179,19 +179,40 @@ export function buildOutbox(tournament: TabTournament, roundId: string, now = Da
     const panel = tournament.settings.conflictPolicy === 'lastResort' ? panelAcceptedJudges(tournament, debate, venueName, warnings) : debate;
     const localJudges = new Set<string>();
     for (const id of panel.judgeIds) {
-      if (!judges.has(id)) {
+      const judge = judges.get(id);
+      if (!judge) {
         issues.push(venueName + ': el panel contiene un juez que ya no existe en Participantes. Actualiza el panel.');
         continue;
       }
       if (localJudges.has(id)) {
-        issues.push(venueName + ': ' + (judges.get(id)?.name ?? id) + ' aparece más de una vez en el mismo panel.');
+        issues.push(venueName + ': ' + judge.name + ' aparece más de una vez en el mismo panel.');
         continue;
       }
       localJudges.add(id);
       const previous = judgeBookings.get(id);
-      if (previous) issues.push((judges.get(id)?.name ?? id) + ' está asignado a ' + previous + ' y a ' + venueName + ' en la misma ronda.');
+      if (previous) issues.push(judge.name + ' está asignado a ' + previous + ' y a ' + venueName + ' en la misma ronda.');
       else judgeBookings.set(id, venueName);
       usedJudgeIds.add(id);
+      if (tournament.settings.conflictPolicy === 'hard') {
+        for (const teamId of [a, b]) {
+          const team = teams.get(teamId);
+          if (!team) continue;
+          if (sameInstitution(team.institution, judge.institution)) {
+            issues.push(venueName + ': ' + judge.name + ' y ' + team.name + ' comparten institución.');
+          }
+          if (team.incompatibleJudgeIds.includes(judge.id)) {
+            issues.push(venueName + ': ' + judge.name + ' es incompatible con el equipo ' + team.name + '.');
+          }
+        }
+      }
+    }
+    if (tournament.settings.conflictPolicy === 'hard') {
+      const seated = [...localJudges].map((id) => judges.get(id)).filter((judge): judge is TabJudge => Boolean(judge));
+      for (let i = 0; i < seated.length; i++) for (let j = i + 1; j < seated.length; j++) {
+        if (seated[i].incompatibleJudgeIds.includes(seated[j].id) || seated[j].incompatibleJudgeIds.includes(seated[i].id)) {
+          issues.push(venueName + ': ' + seated[i].name + ' y ' + seated[j].name + ' son jueces incompatibles.');
+        }
+      }
     }
     debates.push({
       physicalRoomId: debate.venueId,
