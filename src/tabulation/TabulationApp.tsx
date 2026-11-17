@@ -17,6 +17,7 @@ import { RoundsView } from './views/RoundsView';
 import { RulesView } from './views/RulesView';
 import { StandingsView } from './views/StandingsView';
 import { applyReceivedActa, readActaCode } from './whatsapp';
+import { findSnapshotDifferences, type SnapshotDifference } from './snapshot-diff';
 
 const VIEWS = [
   { id: 'inicio', label: 'Inicio', icon: House },
@@ -30,7 +31,6 @@ const VIEWS = [
 export type TabulationViewId = (typeof VIEWS)[number]['id'];
 type ViewId = TabulationViewId;
 
-type SnapshotDifference = { path: string; localValue: unknown; remoteValue: unknown };
 
 const SNAPSHOT_LABELS: Record<string, string> = {
   name: 'Nombre', seed: 'Semilla del torneo', settings: 'Configuración',
@@ -81,49 +81,6 @@ function displayDifferenceValue(value: unknown): string {
   try { return JSON.stringify(value, null, 2) ?? '—'; } catch { return String(value); }
 }
 
-/** Compares persisted tournament content while ignoring revision and timestamps used only for sync bookkeeping. */
-function findSnapshotDifferences(local: unknown, remote: unknown): SnapshotDifference[] {
-  const differences: SnapshotDifference[] = [];
-  const ignored = new Set(['revision', 'updatedAt', 'createdAt', 'logTail', 'logSeq']);
-  const stable = (value: unknown): string => {
-    if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
-    if (value && typeof value === 'object') {
-      return '{' + Object.keys(value as Record<string, unknown>).sort().map((key) => JSON.stringify(key) + ':' + stable((value as Record<string, unknown>)[key])).join(',') + '}';
-    }
-    return JSON.stringify(value);
-  };
-  const visit = (left: unknown, right: unknown, path: string, depth: number) => {
-    if (stable(left) === stable(right)) return;
-    if (depth > 8) {
-      differences.push({ path, localValue: left, remoteValue: right });
-      return;
-    }
-    if (Array.isArray(left) || Array.isArray(right)) {
-      const a = Array.isArray(left) ? left : [];
-      const b = Array.isArray(right) ? right : [];
-      const keyed = [...a, ...b].every((item) => item && typeof item === 'object' && 'id' in item);
-      if (!keyed) {
-        differences.push({ path, localValue: left, remoteValue: right });
-        return;
-      }
-      const byId = (items: unknown[]) => new Map(items.map((item) => [String((item as { id: unknown }).id), item]));
-      const am = byId(a), bm = byId(b);
-      for (const id of [...new Set([...am.keys(), ...bm.keys()])].sort()) {
-        visit(am.get(id), bm.get(id), path + '[' + id + ']', depth + 1);
-      }
-      return;
-    }
-    if (left && typeof left === 'object' && right && typeof right === 'object') {
-      const a = left as Record<string, unknown>, b = right as Record<string, unknown>;
-      const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((key) => !ignored.has(key)).sort();
-      for (const key of keys) visit(a[key], b[key], path ? path + '.' + key : key, depth + 1);
-      return;
-    }
-    differences.push({ path, localValue: left, remoteValue: right });
-  };
-  visit(local, remote, '', 0);
-  return differences;
-}
 
 function readHashView(): ViewId {
   const id = window.location.hash.replace(/^#/, '').split('/')[0];
@@ -152,6 +109,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
   const [manualSaving, setManualSaving] = useState(false);
   const [remoteConflict, setRemoteConflict] = useState<{ remote: import('../api').AuthoritativeTabulationSnapshot; localUpdatedAt: number } | null>(null);
   const remoteCursor = useRef<{ id: string; revision: number; localRevision: number; inFlight: boolean } | null>(null);
+  const autoResolvedConflict = useRef<string | null>(null);
   const initialRecovery = useRef(false);
   const recoveredTournamentId = useRef<string | null | undefined>(undefined);
   const skipNextEmptyRecovery = useRef(false);
@@ -540,6 +498,36 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     return [...groups.entries()];
   }, [remoteDifferences]);
 
+  // Neon is authoritative when only sync metadata/revision bookkeeping differs.
+  // Keep a local backup, replace the cache silently, and advance the remote cursor.
+  useEffect(() => {
+    if (!remoteConflict || !tournament || remoteDifferences.length > 0 || state.readOnly || state.status === 'conflict') return;
+    const { remote } = remoteConflict;
+    if (remote.tabTournamentId !== tournament.id || remote.snapshot.id !== tournament.id) return;
+    const conflictKey = tournament.id + ':' + remote.revision + ':' + remote.snapshotSha256;
+    if (autoResolvedConflict.current === conflictKey) return;
+    autoResolvedConflict.current = conflictKey;
+    store.backup('Antes de sincronizar metadatos desde Neon');
+    const applied = store.update(() => remote.snapshot, {
+      type: 'sync.remote',
+      message: 'Metadatos sincronizados desde Neon',
+      details: { revision: remote.revision, sha256: remote.snapshotSha256 },
+    });
+    if (!applied || !store.flush()) {
+      setRemoteSync('error');
+      store.logError('No se pudo aplicar automáticamente la versión de Neon porque falló el guardado local.');
+      return;
+    }
+    remoteCursor.current = {
+      id: tournament.id,
+      revision: remote.revision,
+      localRevision: store.getState().tournament?.revision ?? remote.snapshot.revision,
+      inFlight: false,
+    };
+    setRemoteConflict(null);
+    setRemoteSync('synced');
+  }, [remoteConflict, remoteDifferences, tournament?.id, state.readOnly, state.status, store]);
+
   const badges: Partial<Record<ViewId, { text: string; kind: string; title: string }>> = {
     ...(tournament?.draftRound ? { rondas: { text: 'Borrador', kind: 'info', title: 'Hay un borrador de ronda pendiente de confirmar' } } : {}),
     ...(pendingActas ? { actas: { text: String(pendingActas), kind: 'warn', title: pendingActas + ' actas pendientes' } } : {}),
@@ -664,7 +652,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           <button type="button" className="button secondary" onClick={() => store.reloadFromStorage()}>Cargar la otra versión</button>
           <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Sobrescribir la versión guardada por la otra pestaña con la de esta pestaña?')) store.overwrite(); }}>Mantener esta versión</button>
         </div>}
-        {remoteSync === 'conflict' && remoteConflict && <section className="notice error-notice tab-remote-conflict" role="alert" aria-labelledby="tab-remote-conflict-title">
+        {remoteSync === 'conflict' && remoteConflict && remoteDifferences.length > 0 && <section className="notice error-notice tab-remote-conflict" role="alert" aria-labelledby="tab-remote-conflict-title">
           <div className="tab-remote-conflict-heading">
             <div>
               <strong id="tab-remote-conflict-title">Hay dos versiones distintas del torneo</strong>
@@ -685,7 +673,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
                 </article>)}
               </div>
             </details>)}
-          </div> : <p className="tab-remote-diff-empty">El contenido funcional coincide. La discrepancia detectada se limita a metadatos de sincronización o a una revisión concurrente.</p>}
+          </div> : null}
           <div className="tab-remote-conflict-actions">
             <button type="button" className="button secondary" onClick={recoverRemoteVersion}>Recuperar Neon</button>
             <button type="button" className="button secondary" onClick={() => { if (window.confirm('¿Publicar la copia de este dispositivo sobre la revisión remota? La copia remota actual quedará reemplazada, pero se conservará una copia local de seguridad.')) void publishLocalVersion(); }}>Publicar este dispositivo</button>
