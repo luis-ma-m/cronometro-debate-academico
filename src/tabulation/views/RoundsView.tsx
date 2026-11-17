@@ -611,8 +611,11 @@ function WhatsAppLinks({ tournament, round, notify, onSent, onMarkSent, managerS
     if (unreachable) throw new Error('La dirección pública configurada no es accesible desde los móviles.');
     const fingerprint = cyrb53(JSON.stringify(row.link)).toString(36);
     const idempotencyKey = 's8_' + fingerprint + '_' + cyrb53(row.debate.id).toString(36);
-    const result = await createActaShortLink(managerSessionToken, tournament.id, row.debate.id, row.link, 30, idempotencyKey);
-    if (!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(result.id)) throw new Error('El backend no ha devuelto un identificador S8 válido.');
+    let result = await createActaShortLink(managerSessionToken, tournament.id, row.debate.id, row.link, 30, idempotencyKey);
+    if (result.revokedAt || (result.expiresAt !== null && result.expiresAt <= Date.now())) {
+      result = await createActaShortLink(managerSessionToken, tournament.id, row.debate.id, row.link, 30, idempotencyKey + '_' + Date.now().toString(36));
+    }
+    if (!/^[0-9A-HJKMNP-TV-Z]{8}$/.test(result.id) || result.revokedAt || (result.expiresAt !== null && result.expiresAt <= Date.now())) throw new Error('El backend no ha devuelto un enlace S8 activo.');
     return baseUrl + '/acta#S8-' + result.id;
   };
   const openWhatsApp = async (row: typeof rows[number]) => {
