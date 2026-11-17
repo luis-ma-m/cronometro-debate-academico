@@ -6,7 +6,8 @@ import { computeTournamentOutcomes } from './results';
 import { STORAGE_WARNING_BYTES } from './store';
 import { TournamentProgress } from './TournamentProgress';
 import { isFallenAt, makeTabId } from './types';
-import { apiConfigured, deleteTabulationSnapshot, getTabulationSnapshot, listPublicActas, listTabulationSnapshots, publishTabulationSnapshot } from '../api';
+import { apiConfigured, deleteTabulationSnapshot, getTabulationSnapshot, listPublicActas, listTabulationSnapshots, publishTabulationSnapshot, type AuthoritativeTabulationListing } from '../api';
+import { duplicateTabTournament } from './normalize';
 import { BUILD_INFO, exportTournamentCopy, hasUnsavedEditors, Notice, type NoticeKind, type ViewProps } from './ui';
 import { getBrowserTabStore, useTabStore } from './useTabStore';
 import { BallotsView } from './views/BallotsView';
@@ -164,8 +165,91 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       return session?.token && (session.expiresAt ?? 0) > Date.now() ? session.token : null;
     } catch { return null; }
   }, []);
+  const [remoteTournaments, setRemoteTournaments] = useState<AuthoritativeTabulationListing[]>([]);
+  const [remoteListLoading, setRemoteListLoading] = useState(false);
+  const [remoteListError, setRemoteListError] = useState<string | null>(null);
+  const refreshRemoteTournaments = useCallback(async () => {
+    if (!apiConfigured || !remoteToken) {
+      setRemoteTournaments([]);
+      setRemoteListError(apiConfigured ? 'Inicia sesión para consultar los torneos guardados en Neon.' : 'La API remota no está configurada en este entorno.');
+      return;
+    }
+    setRemoteListLoading(true);
+    try {
+      const entries = await listTabulationSnapshots(remoteToken);
+      setRemoteTournaments(entries.sort((left, right) => right.updatedAt - left.updatedAt));
+      setRemoteListError(null);
+    } catch (error) {
+      setRemoteListError(error instanceof Error ? error.message : 'No se ha podido consultar la biblioteca de Neon.');
+    } finally {
+      setRemoteListLoading(false);
+    }
+  }, [remoteToken]);
+  useEffect(() => {
+    void refreshRemoteTournaments();
+    if (!apiConfigured || !remoteToken) return;
+    const timer = window.setInterval(() => void refreshRemoteTournaments(), 10000);
+    const resume = () => { if (document.visibilityState === 'visible') void refreshRemoteTournaments(); };
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', resume);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('online', resume);
+      document.removeEventListener('visibilitychange', resume);
+    };
+  }, [refreshRemoteTournaments, remoteToken]);
   const tournament = state.tournament;
   const operatorMissing = !state.operator.trim();
+  const restoreRemoteTournament = useCallback(async (id: string) => {
+    if (!remoteToken) throw new Error('Inicia sesión para recuperar torneos desde Neon.');
+    if (store.getState().status !== 'saved' && store.getState().tournament) throw new Error('Guarda o resuelve primero los cambios locales pendientes antes de cambiar de torneo.');
+    const remote = await getTabulationSnapshot(remoteToken, id);
+    if (!remote || remote.tabTournamentId !== id || remote.snapshot.id !== id || remote.revision < 1 || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256)) {
+      throw new Error('El torneo no existe en Neon o no supera la validación de identidad e integridad.');
+    }
+    const current = store.getState();
+    if (current.tournament?.id === id) {
+      const differences = findSnapshotDifferences(current.tournament, remote.snapshot);
+      remoteCursor.current = { id, revision: remote.revision, localRevision: differences.length ? -1 : current.tournament.revision, inFlight: false };
+      if (!differences.length) {
+        store.backup('Antes de recuperar «' + remote.snapshot.name + '» desde Neon');
+        if (!store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Versión de Neon recuperada desde la biblioteca', details: { revision: remote.revision } }) || !store.flush()) {
+          throw new Error('No se ha podido aplicar la copia de Neon. La copia local se conserva.');
+        }
+        remoteCursor.current.localRevision = store.getState().tournament?.revision ?? remote.snapshot.revision;
+        setRemoteConflict(null);
+        setRemoteSync('synced');
+      } else {
+        setRemoteConflict({ remote, localUpdatedAt: current.tournament.updatedAt });
+        setRemoteSync('conflict');
+      }
+    } else if (store.hasTournament(id)) {
+      store.open(id);
+      // The normal recovery effect compares this local copy with Neon before syncing.
+    } else {
+      store.create(remote.snapshot);
+      const local = store.getState().tournament;
+      remoteCursor.current = { id, revision: remote.revision, localRevision: local?.revision ?? -1, inFlight: false };
+      setRemoteSync('synced');
+    }
+    await refreshRemoteTournaments();
+  }, [remoteToken, refreshRemoteTournaments, store]);
+  const duplicateRemoteTournament = useCallback(async (id: string) => {
+    if (!remoteToken) throw new Error('Inicia sesión para duplicar torneos guardados en Neon.');
+    const remote = await getTabulationSnapshot(remoteToken, id);
+    if (!remote || remote.tabTournamentId !== id || remote.snapshot.id !== id || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256)) {
+      throw new Error('No se ha podido validar el torneo original en Neon.');
+    }
+    if (store.getState().status !== 'saved' && store.getState().tournament) throw new Error('Guarda o resuelve primero los cambios locales pendientes antes de duplicar.');
+    const copy = duplicateTabTournament(remote.snapshot, Date.now());
+    remoteCursor.current = { id: copy.id, revision: 0, localRevision: -1, inFlight: false };
+    setRemoteSync('synced');
+    store.create(copy);
+    await refreshRemoteTournaments();
+  }, [remoteToken, refreshRemoteTournaments, store]);
+
   const deleteTournament = useCallback(async (id: string) => {
     if (apiConfigured) {
       if (!remoteToken) throw new Error('Inicia sesión en Gestión para eliminar también la copia sincronizada en Neon.');
@@ -762,7 +846,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         {notice && <Notice kind={notice.kind} onClose={() => setNotice(null)}>{notice.message}</Notice>}
       </div>
       <ErrorBoundary resetKey={activeView} onError={onViewError}>
-        {activeView === 'inicio' && <HomeView store={store} state={state} outcomes={outcomes} notify={notify} onNavigate={(id) => setView(id as ViewId)} onDeleteTournament={deleteTournament} />}
+        {activeView === 'inicio' && <HomeView store={store} state={state} outcomes={outcomes} notify={notify} onNavigate={(id) => setView(id as ViewId)} onDeleteTournament={deleteTournament} remoteTournaments={remoteTournaments} remoteListLoading={remoteListLoading} remoteListError={remoteListError} onRefreshRemoteTournaments={() => void refreshRemoteTournaments()} onRestoreRemoteTournament={restoreRemoteTournament} onDuplicateRemoteTournament={duplicateRemoteTournament} />}
         {props && activeView === 'reglas' && <RulesView {...props} />}
         {props && activeView === 'participantes' && <ParticipantsView {...props} />}
         {props && activeView === 'rondas' && <RoundsView {...props} projection={projection} onProject={() => setProjection(true)} onNavigate={(id) => setView(id as ViewId)} />}
