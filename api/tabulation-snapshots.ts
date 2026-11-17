@@ -36,6 +36,11 @@ async function ensureSnapshotSchema(): Promise<void> {
         "snapshot_sha256 char(64) NOT NULL CHECK (snapshot_sha256 ~ '^[a-f0-9]{64}$'),",
         "published_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now())",
       ].join(" ");
+      const deletionTable = [
+        "CREATE TABLE IF NOT EXISTS tabulation_tournament_deletions (",
+        "tab_tournament_id text PRIMARY KEY CHECK (length(btrim(tab_tournament_id)) BETWEEN 1 AND 200),",
+        "deleted_by text NOT NULL, deleted_at timestamptz NOT NULL DEFAULT now())",
+      ].join(" ");
       const operationsTable = [
         "CREATE TABLE IF NOT EXISTS tabulation_publication_operations (",
         "operation_id varchar(128) PRIMARY KEY CHECK (operation_id ~ '^[a-zA-Z0-9_-]{8,128}$'),",
@@ -48,6 +53,7 @@ async function ensureSnapshotSchema(): Promise<void> {
       await pool.query(tournamentTable);
       await pool.query("CREATE INDEX IF NOT EXISTS tabulation_tournaments_updated_idx ON tabulation_tournaments(updated_at DESC)");
       await pool.query(operationsTable);
+      await pool.query(deletionTable);
     })().catch((error) => { schemaReady = null; throw error; });
   }
   await schemaReady;
@@ -130,6 +136,8 @@ export async function publishTabulationSnapshot(payload: Record<string, unknown>
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [input.id]);
+    const deleted = await client.query("SELECT 1 FROM tabulation_tournament_deletions WHERE tab_tournament_id=$1", [input.id]);
+    if (deleted.rows[0]) throw new ApiError("TABULATION_TOURNAMENT_DELETED", "Este torneo fue eliminado y no puede volver a sincronizarse.", 410);
     const prior = await client.query(
       "SELECT tab_tournament_id,base_revision,committed_revision,snapshot_sha256 FROM tabulation_publication_operations WHERE operation_id=$1 FOR UPDATE",
       [input.operationId],
@@ -179,6 +187,31 @@ export async function publishTabulationSnapshot(payload: Record<string, unknown>
     await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof ApiError) throw error;
     throw new ApiError("TABULATION_PUBLISH_FAILED", "No se ha podido guardar el snapshot en Neon.", 503);
+  } finally {
+    client.release();
+  }
+}
+
+
+/** Permanently removes a remote snapshot and records a tombstone to prevent stale clients from resurrecting it. */
+export async function deleteTabulationSnapshot(id: string, actor: string): Promise<{ deleted: boolean }> {
+  await ensureSnapshotSchema();
+  if (!/^[a-zA-Z0-9_-]{1,200}$/.test(id)) throw new ApiError("INVALID_PAYLOAD", "El identificador del torneo no es válido.");
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [id]);
+    const removed = await client.query("DELETE FROM tabulation_tournaments WHERE tab_tournament_id=$1 RETURNING tab_tournament_id", [id]);
+    await client.query(
+      "INSERT INTO tabulation_tournament_deletions(tab_tournament_id,deleted_by) VALUES($1,$2) ON CONFLICT(tab_tournament_id) DO NOTHING",
+      [id, actor],
+    );
+    await client.query("COMMIT");
+    return { deleted: (removed.rowCount ?? 0) > 0 };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    if (error instanceof ApiError) throw error;
+    throw new ApiError("TABULATION_DELETE_FAILED", "No se ha podido eliminar el torneo sincronizado en Neon.", 503);
   } finally {
     client.release();
   }

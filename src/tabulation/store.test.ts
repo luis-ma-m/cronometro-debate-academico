@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeTabTournament, parseTournamentExport, serializeTournamentExport, TabDataError } from './normalize';
 import { createSampleTournament } from './sample';
 import { createTabStore, INDEX_KEY, isQuotaError, memoryStorage, tournamentKey, type KeyValueStorage } from './store';
-import { decided, makeTournament, qualifyingRound } from './test-fixtures';
+import { decided, judge, makeTournament, qualifyingRound } from './test-fixtures';
 
 function harness(storage: KeyValueStorage = memoryStorage()) {
   const pending: Array<() => void> = [];
@@ -104,6 +104,51 @@ describe('tabulation store', () => {
     expect(backups).toHaveLength(3);
     store.restoreBackup(backups.find((backup) => backup.label === 'Copia dos')!.slot);
     expect(store.getState().tournament!.name).toBe('dos');
+  });
+
+
+  it('duplicates a tournament with fresh identities and no shared mutable state', () => {
+    const { store, storage } = harness();
+    const original = makeTournament('ledu-groups', ['a', 'b']);
+    original.name = 'Original';
+    original.panelLink = { tournamentName: 'Gestión original', linkedAt: 42 };
+    original.whatsapp = { deskPhone: '34600000000', baseUrl: 'https://example.test' };
+    original.judges = [judge('j1'), judge('j2', { incompatibleJudgeIds: ['j1'] })];
+    original.teams[0]!.incompatibleJudgeIds = ['j1'];
+    original.judgeConflicts = [{ id: 'c1', judgeId: 'j1', teamId: 'a', level: 'objective', note: 'Conflicto' }];
+    original.venues = [{ id: 'v1', name: 'Sala 1', active: true }];
+    original.groups = [{ id: 'g1', name: 'Grupo 1', teamIds: ['a', 'b'] }];
+    original.rounds = [qualifyingRound(1, [{
+      ...decided('d1', 'a', 'b'),
+      venueId: 'v1', chairId: 'j1', judgeIds: ['j1'],
+      actaLinkSentAt: 123, publicActaSubmissionId: 'submission-old', publicActaSignedBy: 'Juez',
+    }])];
+    original.judges[0]!.unavailableRoundIds = ['r1'];
+    store.create(original);
+    const originalId = store.getState().tournament!.id;
+    const originalTeamId = store.getState().tournament!.teams[0]!.id;
+    expect(store.duplicate(originalId)).toBe(true);
+    const copy = store.getState().tournament!;
+    expect(copy.id).not.toBe(originalId);
+    expect(copy.name).toBe('Original (copia)');
+    expect(copy.teams[0]!.id).not.toBe(originalTeamId);
+    expect(copy.judges[0]!.id).not.toBe('j1');
+    expect(copy.teams[0]!.incompatibleJudgeIds).toEqual([copy.judges[0]!.id]);
+    expect(copy.judges[1]!.incompatibleJudgeIds).toEqual([copy.judges[0]!.id]);
+    expect(copy.judges[0]!.unavailableRoundIds).toEqual([copy.rounds[0]!.id]);
+    expect(copy.groups[0]!.teamIds).toEqual(copy.teams.map((team) => team.id));
+    expect(copy.judgeConflicts[0]!.judgeId).toBe(copy.judges[0]!.id);
+    expect(copy.judgeConflicts[0]!.teamId).toBe(copy.teams[0]!.id);
+    expect(copy.rounds[0]!.debates[0]!.actaLinkSentAt).toBeUndefined();
+    expect(copy.rounds[0]!.debates[0]!.publicActaSubmissionId).toBeUndefined();
+    expect(copy.logSeq).toBe(1);
+    expect(copy.panelLink).toBeUndefined();
+    expect(copy.whatsapp).toBeUndefined();
+    store.update((t) => ({ ...t, teams: t.teams.map((team) => team.id === copy.teams[0]!.id ? { ...team, name: 'Solo en copia' } : team) }));
+    store.flush();
+    const savedOriginal = JSON.parse(storage.getItem(tournamentKey(originalId))!);
+    expect(savedOriginal.teams[0].name).toBe('Equipo a');
+    expect(store.getState().tournament!.teams[0]!.name).toBe('Solo en copia');
   });
 
   it('imports over an existing tournament or as a copy', () => {

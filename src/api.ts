@@ -134,6 +134,8 @@ export const publishTabulationSnapshot = (
   token: string,
   input: { tabTournamentId: string; expectedRevision: number; operationId: string; snapshot: import('./tabulation/types').TabTournament },
 ) => apiCall<TabulationPublicationResult>('publishTabulationSnapshot', { token, ...input });
+export const deleteTabulationSnapshot = (token: string, tabTournamentId: string) =>
+  apiCall<{ deleted: boolean }>('deleteTabulationSnapshot', { token, tabTournamentId });
 
 
 export type PublicActaSubmission = {
