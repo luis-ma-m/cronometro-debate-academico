@@ -358,10 +358,30 @@ async function persistRounds(client: PoolClient, rows: SheetRow[]): Promise<void
   }
 }
 
+async function releaseUniqueNamesForReplacement(client: PoolClient, table: "teams" | "judges"): Promise<void> {
+  // The case-insensitive name index is immediate (not deferrable). Release all
+  // current names before upserting the replacement set so valid renames,
+  // swaps, and remove-and-recreate operations do not depend on row order.
+  // This happens inside the same transaction, so readers never observe these
+  // temporary names and a rollback restores the original values.
+  const namespace = "__ledu_sync_" + randomBytes(12).toString("hex") + "_";
+  await client.query(
+    `WITH numbered AS (
+       SELECT id, row_number() OVER (ORDER BY id) AS ordinal FROM ${table}
+     )
+     UPDATE ${table} AS current
+     SET name = $1 || numbered.ordinal::text
+     FROM numbered
+     WHERE current.id = numbered.id`,
+    [namespace],
+  );
+}
+
 async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolean): Promise<void> {
+  const table = judges ? "judges" : "teams";
+  await releaseUniqueNamesForReplacement(client, table);
   for (const row of rows) {
     const institution = await upsertInstitution(client, row.institution);
-    const table = judges ? "judges" : "teams";
     await client.query(
       `INSERT INTO ${table}(id,name,institution_id,active)
        VALUES($1,$2,$3,$4)
@@ -369,7 +389,6 @@ async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolea
        active=EXCLUDED.active,updated_at=now()`,
       [str(row.id), str(row.name).trim(), institution, bool(row.active)],
     );
-
   }
 }
 
@@ -599,6 +618,9 @@ export async function readIdempotentResponse(operationKey: string, scope: string
 }
 
 const DATABASE_CONSTRAINT_MESSAGES: Record<string, string> = {
+  teams_name_ci_uq: "ya existe otro equipo con el mismo nombre (sin distinguir mayúsculas y minúsculas)",
+  judges_name_ci_uq: "ya existe otro juez con el mismo nombre (sin distinguir mayúsculas y minúsculas)",
+  format_presets_name_ci_uq: "ya existe otro formato con el mismo nombre (sin distinguir mayúsculas y minúsculas)",
   round_team_claims_pkey: "un equipo está asignado a más de un debate de la misma ronda",
   round_room_claims_pkey: "una misma sala física está asignada a más de un debate de la misma ronda",
   assignment_judges_one_room_per_round_uq: "un juez está asignado a más de una sala de la misma ronda",
@@ -622,6 +644,15 @@ function describeDatabaseConstraint(error: unknown): string {
   console.error("[ledu-api] PostgreSQL integrity constraint rejected tournament save", {
     code: value.code, constraint, table: value.table, column: value.column, detail,
   });
+  if (constraint === "teams_name_ci_uq") {
+    return "No se ha podido guardar el torneo: ya existe otro equipo con el mismo nombre (sin distinguir mayúsculas y minúsculas). Comprueba los nombres de los equipos.";
+  }
+  if (constraint === "judges_name_ci_uq") {
+    return "No se ha podido guardar el torneo: ya existe otro juez con el mismo nombre (sin distinguir mayúsculas y minúsculas). Comprueba los nombres de los jueces.";
+  }
+  if (constraint === "format_presets_name_ci_uq") {
+    return "No se ha podido guardar el torneo: ya existe otro formato con el mismo nombre (sin distinguir mayúsculas y minúsculas). Comprueba los nombres de los formatos.";
+  }
   if (known) return "No se ha podido guardar la ronda: " + known + ". Revisa los emparejamientos y las asignaciones de jueces y salas.";
   return "No se ha podido guardar la ronda por una regla de integridad de la base de datos" +
     (constraint ? " (" + constraint + ")" : "") + ". Revisa los equipos, jueces, salas, rondas y formatos vinculados.";

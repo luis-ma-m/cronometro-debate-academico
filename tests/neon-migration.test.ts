@@ -170,4 +170,19 @@ describe("Neon migration artifacts", () => {
     expect(sql).toContain("favor_count <> 1 OR contra_count <> 1");
   });
 
+
+  it("releases immediate case-insensitive team and judge name indexes before replacement upserts", async () => {
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    expect(store).toContain('teams_name_ci_uq: "ya existe otro equipo');
+    expect(store).toContain('judges_name_ci_uq: "ya existe otro juez');
+    expect(store).toContain('Comprueba los nombres de los equipos.');
+    expect(store).toContain("async function releaseUniqueNamesForReplacement");
+    const release = store.indexOf("await releaseUniqueNamesForReplacement(client, table)");
+    const upsert = store.indexOf("INSERT INTO ${table}(id,name,institution_id,active)");
+    expect(release).toBeGreaterThan(-1);
+    expect(upsert).toBeGreaterThan(release);
+    expect(store).toContain('row_number() OVER (ORDER BY id)');
+    expect(store).toContain('const namespace = "__ledu_sync_"');
+  });
+
 });
