@@ -48,7 +48,7 @@ function nextStep(tournament: TabTournament, outcomes: Map<string, DebateOutcome
   return { text: 'Genera la siguiente eliminatoria.', ...rounds };
 }
 
-export function HomeView({ store, state, outcomes, notify, onNavigate, onDeleteTournament }: {
+export function HomeView({ store, state, outcomes, notify, onNavigate, onDeleteTournament, remoteTournaments, remoteListLoading, remoteListError, onRefreshRemoteTournaments, onRestoreRemoteTournament, onDuplicateRemoteTournament }: {
   store: TabStore;
   state: TabStoreState;
   outcomes: Map<string, DebateOutcome>;
