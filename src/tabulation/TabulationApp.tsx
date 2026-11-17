@@ -646,7 +646,19 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
 
   const cursorForStatus = remoteCursor.current;
   const hasPendingNeonChanges = Boolean(tournament && (state.status === 'dirty' || state.status === 'error' || !cursorForStatus || cursorForStatus.id !== tournament.id || cursorForStatus.localRevision !== tournament.revision));
-  const saveLabel = remoteSync === 'conflict' ? 'Conflicto entre dispositivos' : remoteSync === 'error' ? 'Error de sincronización' : remoteSync === 'offline' ? 'Sin conexión con Neon' : manualSaving ? 'Guardando en Neon…' : hasPendingNeonChanges ? 'Cambios pendientes de guardar en Neon' : remoteSync === 'checking' ? 'Comprobando Neon…' : 'Sincronizado con Neon';
+  // Keep the displayed status and the save action in agreement: a local-tab conflict or a
+  // read-only tab blocks publishing even if the Neon cursor also looks out of date.
+  const saveBlockedByLocalState = state.readOnly || state.status === 'conflict';
+  const saveLabel = saveBlockedByLocalState
+    ? (state.readOnly ? 'Solo lectura en este dispositivo' : 'Conflicto en este navegador')
+    : remoteSync === 'conflict' ? 'Conflicto entre dispositivos'
+      : remoteSync === 'error' ? 'Error de sincronización'
+        : remoteSync === 'offline' ? 'Sin conexión con Neon'
+          : manualSaving ? 'Guardando en Neon…'
+            : hasPendingNeonChanges ? 'Cambios pendientes de guardar en Neon'
+              : remoteSync === 'checking' ? 'Comprobando Neon…' : 'Sincronizado con Neon';
+  const saveStatusClass = saveBlockedByLocalState || remoteSync === 'conflict' || remoteSync === 'error' || remoteSync === 'offline'
+    ? 'disconnected' : '';
 
   const props: ViewProps | null = tournament ? { tournament, outcomes, update, notify, store } : null;
 
@@ -662,7 +674,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
         </button>;
       })}</nav>
       <div className="sidebar-bottom">
-        <span className={'connection-dot' + (state.status === 'conflict' || state.status === 'error' || state.readOnly ? ' tab-dot-error' : '')} />
+        <span className={'connection-dot' + (saveStatusClass ? ' tab-dot-error' : '')} />
         <span>{saveLabel}</span>
         <span className="tab-operator">Operador: {state.operator || 'sin nombre'}</span>
         <a className="sidebar-logout" href="/"><ExternalLink size={16} /> Panel de organización</a>
@@ -672,8 +684,8 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       <header className="topbar">
         <div><span className="eyebrow">TABULACIÓN · ESPACIO DE COMPETICIÓN</span><h1>{tournament?.name ?? 'Tabulación de debate académico'}</h1></div>
         {tournament && <div className="top-actions tab-no-project">
-          <span className="live-status"><i className={state.status === 'conflict' || state.status === 'error' || state.readOnly || remoteSync === 'error' || remoteSync === 'conflict' ? 'disconnected' : ''} /> {saveLabel}</span>
-          <button type="button" className="button primary" onClick={() => void saveToNeon()} disabled={!apiConfigured || !remoteToken || state.readOnly || state.status === 'conflict' || remoteSync === 'conflict' || manualSaving} title="Forzar el guardado de la copia local en Neon"><Save size={16} /> {manualSaving ? 'Guardando…' : 'Guardar en Neon'}</button>
+          <span className="live-status"><i className={saveStatusClass} /> {saveLabel}</span>
+          <button type="button" className="button primary" onClick={() => void saveToNeon()} disabled={!apiConfigured || !remoteToken || saveBlockedByLocalState || remoteSync === 'conflict' || manualSaving} title={saveBlockedByLocalState ? 'Resuelve el conflicto local o toma el control de esta pestaña antes de guardar.' : remoteSync === 'conflict' ? 'Resuelve primero las diferencias entre este dispositivo y Neon.' : 'Forzar el guardado de la copia local en Neon'}><Save size={16} /> {manualSaving ? 'Guardando…' : 'Guardar en Neon'}</button>
           <button type="button" className="button secondary" onClick={exportCopy}><Download size={16} /> Exportar copia</button>
           <button type="button" className="button secondary" onClick={() => setProjection(true)} title="Pantalla limpia para proyectar (Esc para salir)"><Projector size={16} /> Proyectar</button>
         </div>}
