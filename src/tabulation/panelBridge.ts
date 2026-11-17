@@ -368,6 +368,24 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     judgesByName.set(normalizeVenueName(added.name), added);
     canonicalJudgeId.set(incoming.id, added.id);
   }
+  // New entities may carry incompatibility references using Tabulation IDs.
+  // Translate those references through the same canonical-ID maps before persisting.
+  const existingPanelTeamIds = new Set(panel.teams.map((team) => team.id));
+  for (const incoming of outbox.teams ?? []) {
+    const id = canonicalTeamId.get(incoming.id);
+    if (id && !existingPanelTeamIds.has(id)) {
+      const team = teams.get(id)!;
+      teams.set(id, { ...team, incompatibleJudgeIds: incoming.incompatibleJudgeIds.map((judgeId) => canonicalJudgeId.get(judgeId) ?? judgeId) });
+    }
+  }
+  const existingPanelJudgeIds = new Set(panel.judges.map((judge) => judge.id));
+  for (const incoming of outbox.judges ?? []) {
+    const id = canonicalJudgeId.get(incoming.id);
+    if (id && !existingPanelJudgeIds.has(id)) {
+      const judge = judgesById.get(id)!;
+      judgesById.set(id, { ...judge, incompatibleJudgeIds: incoming.incompatibleJudgeIds.map((judgeId) => canonicalJudgeId.get(judgeId) ?? judgeId) });
+    }
+  }
   const judges = new Set(judgesById.keys());
   const seenRooms = new Set<string>();
   const targets = new Map<string, PanelOutboxDebate>();
