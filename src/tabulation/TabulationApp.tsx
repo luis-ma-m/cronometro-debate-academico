@@ -222,9 +222,10 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
           throw new Error('La copia de Neon no supera la validación de identidad e integridad.');
         }
         remoteCursor.current = { id: remote.tabTournamentId, revision: remote.revision, localRevision: -1, inFlight: false };
-        if (remote.updatedAt >= tournament.updatedAt) {
+        const differences = findSnapshotDifferences(tournament, remote.snapshot);
+        if (differences.length === 0) {
           store.backup('Antes de recuperar el snapshot de Neon r' + remote.revision);
-          store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Snapshot recuperado desde Neon', details: { revision: remote.revision, sha256: remote.snapshotSha256 } });
+          store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Snapshot de Neon reconciliado', details: { revision: remote.revision, sha256: remote.snapshotSha256 } });
           store.flush();
           remoteCursor.current.localRevision = store.getState().tournament?.revision ?? remote.snapshot.revision;
           setRemoteSync('synced');
@@ -369,63 +370,121 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     return () => { cancelled = true; window.clearInterval(timer); window.removeEventListener('focus', receive); window.removeEventListener('online', receive); };
   }, [apiConfigured, remoteToken, tournament?.id, state.readOnly, remoteSync, store]);
 
+  // Reconcile with Neon every 10 seconds (and immediately on focus/reconnect).
+  // Apply newer remote revisions automatically when functional content is equivalent.
+  const remotePollInFlight = useRef(false);
   useEffect(() => {
-    if (!apiConfigured || !remoteToken || !tournament || remoteSync === 'conflict') return;
-    const refresh = async () => {
-      if (document.visibilityState !== 'visible') return;
+    if (!apiConfigured || !remoteToken || !tournament) return;
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled || remotePollInFlight.current || document.visibilityState !== 'visible') return;
+      remotePollInFlight.current = true;
+      const requestedTournamentId = tournament.id;
       try {
-        const remote = await getTabulationSnapshot(remoteToken, tournament.id);
-        const cursor = remoteCursor.current;
-        if (!cursor) return;
+        const remote = await getTabulationSnapshot(remoteToken, requestedTournamentId);
+        if (cancelled) return;
+        const current = store.getState();
+        if (!current.tournament || current.tournament.id !== requestedTournamentId) return;
+        if (remote && (remote.tabTournamentId !== requestedTournamentId
+          || remote.snapshot.id !== requestedTournamentId
+          || remote.revision < 1
+          || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256))) {
+          throw new Error('La copia de Neon no supera la validación de identidad e integridad.');
+        }
+
+        let cursor = remoteCursor.current;
+        if (!cursor || cursor.id !== requestedTournamentId) {
+          if (!remote) {
+            remoteCursor.current = { id: requestedTournamentId, revision: 0, localRevision: -1, inFlight: false };
+            setRemoteSync('checking');
+            return;
+          }
+          const differences = findSnapshotDifferences(current.tournament, remote.snapshot);
+          remoteCursor.current = {
+            id: requestedTournamentId,
+            revision: remote.revision,
+            localRevision: differences.length === 0 && current.status === 'saved' ? current.tournament.revision : -1,
+            inFlight: false,
+          };
+          if (differences.length === 0 && current.status === 'saved') {
+            store.backup('Antes de reconciliar con Neon r' + remote.revision);
+            store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Snapshot de Neon reconciliado', details: { revision: remote.revision } });
+            store.flush();
+            remoteCursor.current.localRevision = store.getState().tournament?.revision ?? remote.snapshot.revision;
+            setRemoteConflict(null);
+            setRemoteSync('synced');
+          } else {
+            setRemoteConflict({ remote, localUpdatedAt: current.tournament.updatedAt });
+            setRemoteSync('conflict');
+          }
+          return;
+        }
+
         if (!remote) {
-          if (cursor.localRevision !== tournament.revision) setRemoteSync('checking');
+          if (cursor.revision > 0) {
+            setRemoteSync('error');
+            store.logError('Neon no devuelve el torneo que ya estaba sincronizado. No se ha eliminado la copia local.');
+          }
           return;
         }
         if (remote.revision <= cursor.revision) {
-          if (cursor.localRevision !== tournament.revision) setRemoteSync('checking');
+          if (remoteSync !== 'conflict' && current.status === 'saved'
+            && cursor.localRevision === current.tournament.revision) setRemoteSync('synced');
           return;
         }
-        if (cursor.localRevision === tournament.revision && store.getState().status === 'saved') {
-          store.backup('Antes de sincronizar cambios de otro dispositivo');
-          store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Cambios recuperados desde otro dispositivo', details: { revision: remote.revision } });
-          store.flush();
-          remoteCursor.current = { id: tournament.id, revision: remote.revision, localRevision: store.getState().tournament?.revision ?? remote.snapshot.revision, inFlight: false };
-          setRemoteSync('synced');
+
+        // Never replace unsaved/local-conflicted data. Retry on the next polling cycle.
+        if (current.status !== 'saved' || current.readOnly) {
+          setRemoteSync('checking');
+          return;
+        }
+
+        const differences = findSnapshotDifferences(current.tournament, remote.snapshot);
+        if (differences.length === 0) {
+          store.backup('Antes de sincronizar cambios de otro dispositivo r' + remote.revision);
+          const applied = store.update(() => remote.snapshot, {
+            type: 'sync.remote',
+            message: 'Cambios de otro dispositivo incorporados automáticamente',
+            details: { revision: remote.revision },
+          });
+          if (applied && store.flush()) {
+            remoteCursor.current = {
+              id: requestedTournamentId,
+              revision: remote.revision,
+              localRevision: store.getState().tournament?.revision ?? remote.snapshot.revision,
+              inFlight: false,
+            };
+            setRemoteConflict(null);
+            setRemoteSync('synced');
+          }
         } else {
-          setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
+          remoteCursor.current = { ...cursor, revision: remote.revision, inFlight: false };
+          setRemoteConflict({ remote, localUpdatedAt: current.tournament.updatedAt });
           setRemoteSync('conflict');
         }
-      } catch {
-        setRemoteSync('offline');
+      } catch (error) {
+        if (!cancelled) {
+          setRemoteSync('offline');
+          store.logError(error instanceof Error ? error.message : 'No se ha podido comprobar la sincronización con Neon.');
+        }
+      } finally {
+        remotePollInFlight.current = false;
       }
     };
-    const timer = window.setInterval(() => void refresh(), 15000);
-    window.addEventListener('focus', refresh);
-    window.addEventListener('online', refresh);
-    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); window.removeEventListener('online', refresh); };
-  }, [apiConfigured, remoteToken, tournament?.id, tournament?.revision, tournament?.updatedAt, remoteSync, store]);
-
-  useEffect(() => {
-    if (!tournament || !apiConfigured || !remoteToken || remoteCursor.current) return;
-    let cancelled = false;
-    void getTabulationSnapshot(remoteToken, tournament.id).then((remote) => {
-      if (cancelled) return;
-      if (remote) {
-        remoteCursor.current = { id: tournament.id, revision: remote.revision, localRevision: -1, inFlight: false };
-        setRemoteConflict({ remote, localUpdatedAt: tournament.updatedAt });
-        setRemoteSync('conflict');
-      } else {
-        remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
-        setRemoteSync('checking');
-      }
-    }).catch(() => {
-      if (!cancelled) {
-        if (!remoteCursor.current) remoteCursor.current = { id: tournament.id, revision: 0, localRevision: -1, inFlight: false };
-        setRemoteSync('offline');
-      }
-    });
-    return () => { cancelled = true; };
-  }, [tournament?.id, remoteToken, tournament?.updatedAt]);
+    void poll();
+    const timer = window.setInterval(() => void poll(), 10000);
+    const onResume = () => { if (document.visibilityState === 'visible') void poll(); };
+    window.addEventListener('focus', onResume);
+    window.addEventListener('online', onResume);
+    document.addEventListener('visibilitychange', onResume);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onResume);
+      window.removeEventListener('online', onResume);
+      document.removeEventListener('visibilitychange', onResume);
+    };
+  }, [apiConfigured, remoteToken, tournament?.id, remoteSync, store]);
 
   const recoverRemoteVersion = () => {
     if (!remoteConflict || !tournament) return;
