@@ -337,10 +337,6 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   for (const incoming of outbox.teams) {
     const byId = teams.get(incoming.id);
     const byName = teamsByName.get(normalizeVenueName(incoming.name));
-    if (byId && byName && byId.id !== byName.id) {
-      issues.push('El equipo «' + incoming.name + '» coincide por ID y por nombre con dos equipos distintos de Gestión. No se puede reconciliar de forma segura.');
-      continue;
-    }
     const existing = byId ?? byName;
     const canonicalId = existing?.id ?? incoming.id;
     canonicalTeamId.set(incoming.id, canonicalId);
@@ -351,8 +347,11 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   }
   // Retain removed records as inactive tombstones because historic assignments and
   // scorecards have restrictive foreign keys. They are no longer assignable in Management.
+  const incomingTeamNames = new Set(outbox.teams.map((team) => normalizeVenueName(team.name)));
   for (const [id, team] of teams) {
-    if (!incomingTeamIds.has(id) && team.active) teams.set(id, { ...team, active: false, incompatibleJudgeIds: [] });
+    if (incomingTeamIds.has(id)) continue;
+    const archivedName = incomingTeamNames.has(normalizeVenueName(team.name)) ? team.name + ' (histórico ' + id.slice(-6) + ')' : team.name;
+    teams.set(id, { ...team, name: archivedName, active: false, incompatibleJudgeIds: [] });
   }
 
   const judgesById = new Map(panel.judges.map((judge) => [judge.id, judge]));
@@ -362,10 +361,6 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
   for (const incoming of outbox.judges) {
     const byId = judgesById.get(incoming.id);
     const byName = judgesByName.get(normalizeVenueName(incoming.name));
-    if (byId && byName && byId.id !== byName.id) {
-      issues.push('El juez «' + incoming.name + '» coincide por ID y por nombre con dos jueces distintos de Gestión. No se puede reconciliar de forma segura.');
-      continue;
-    }
     const existing = byId ?? byName;
     const canonicalId = existing?.id ?? incoming.id;
     canonicalJudgeId.set(incoming.id, canonicalId);
@@ -374,8 +369,11 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     judgesById.set(canonicalId, next);
     judgesByName.set(normalizeVenueName(next.name), next);
   }
+  const incomingJudgeNames = new Set(outbox.judges.map((judge) => normalizeVenueName(judge.name)));
   for (const [id, judge] of judgesById) {
-    if (!incomingJudgeIds.has(id) && judge.active) judgesById.set(id, { ...judge, active: false, incompatibleJudgeIds: [] });
+    if (incomingJudgeIds.has(id)) continue;
+    const archivedName = incomingJudgeNames.has(normalizeVenueName(judge.name)) ? judge.name + ' (histórico ' + id.slice(-6) + ')' : judge.name;
+    judgesById.set(id, { ...judge, name: archivedName, active: false, incompatibleJudgeIds: [] });
   }
 
   // Resolve speakers by ID, then by (canonical team, normalized name). Keep removed
@@ -390,10 +388,6 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     }
     const byId = speakersById.get(incoming.id);
     const byName = speakersByName.get(teamId + '|' + normalizeVenueName(incoming.name));
-    if (byId && byName && byId.id !== byName.id) {
-      issues.push('El orador «' + incoming.name + '» coincide por ID y por nombre con dos registros distintos de Gestión.');
-      continue;
-    }
     const existing = byId ?? byName;
     const canonicalId = existing?.id ?? incoming.id;
     const next = { ...incoming, id: canonicalId, teamId };
