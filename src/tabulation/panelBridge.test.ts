@@ -83,6 +83,14 @@ describe('panel → tabulation', () => {
 });
 
 describe('tabulation → panel', () => {
+  it('blocks sending a round when Tabulation contains duplicate participant names', () => {
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(panel(), now), 'ledu-groups', now, 1));
+    tab.teams[1] = { ...tab.teams[1], name: '  EQUIPO A ' };
+    const result = buildOutbox(tab, 'r1', now);
+    expect(result.outbox).toBeNull();
+    expect(result.issues.join(' ')).toContain('dos equipos con el mismo nombre');
+  });
+
   it('creates the assignments of an empty round and passes the panel and API validation', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
