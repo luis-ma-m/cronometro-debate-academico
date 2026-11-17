@@ -338,7 +338,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     const activeId = tournament?.id ?? null;
     if (activeTournamentId.current === activeId) return;
     activeTournamentId.current = activeId;
-    remoteCursor.current = null;
+    if (remoteCursor.current?.id !== activeId) remoteCursor.current = null;
     setRemoteConflict(null);
     setRemoteSync(apiConfigured && remoteToken ? 'checking' : 'offline');
     initialRecovery.current = false;
