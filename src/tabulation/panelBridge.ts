@@ -324,10 +324,50 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     resolved.set(debate.physicalRoomId, physical);
   }
 
+  // Tabulation and Management may contain the same participant with different IDs
+  // (e.g. independently created/imported copies). Resolve by stable ID first, then by
+  // normalized name, so an existing entity is reused instead of violating Neon’s
+  // case-insensitive unique-name index.
   const teams = new Map(panel.teams.map((team) => [team.id, team]));
-  for (const incoming of outbox.teams ?? []) if (!teams.has(incoming.id)) teams.set(incoming.id, { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] });
+  const teamsByName = new Map(panel.teams.map((team) => [normalizeVenueName(team.name), team]));
+  const canonicalTeamId = new Map<string, string>();
+  for (const incoming of outbox.teams ?? []) {
+    const byId = teams.get(incoming.id);
+    const byName = teamsByName.get(normalizeVenueName(incoming.name));
+    if (byId && byName && byId.id !== byName.id) {
+      issues.push('El equipo «' + incoming.name + '» tiene identificadores distintos en Gestión y Tabulación y su nombre también está duplicado en Gestión. Corrige los participantes antes de importar.');
+      continue;
+    }
+    const existing = byId ?? byName;
+    if (existing) {
+      canonicalTeamId.set(incoming.id, existing.id);
+      continue;
+    }
+    const added = { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] };
+    teams.set(added.id, added);
+    teamsByName.set(normalizeVenueName(added.name), added);
+    canonicalTeamId.set(incoming.id, added.id);
+  }
   const judgesById = new Map(panel.judges.map((judge) => [judge.id, judge]));
-  for (const incoming of outbox.judges ?? []) if (!judgesById.has(incoming.id)) judgesById.set(incoming.id, { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] });
+  const judgesByName = new Map(panel.judges.map((judge) => [normalizeVenueName(judge.name), judge]));
+  const canonicalJudgeId = new Map<string, string>();
+  for (const incoming of outbox.judges ?? []) {
+    const byId = judgesById.get(incoming.id);
+    const byName = judgesByName.get(normalizeVenueName(incoming.name));
+    if (byId && byName && byId.id !== byName.id) {
+      issues.push('El juez «' + incoming.name + '» tiene identificadores distintos en Gestión y Tabulación y su nombre también está duplicado en Gestión. Corrige los participantes antes de importar.');
+      continue;
+    }
+    const existing = byId ?? byName;
+    if (existing) {
+      canonicalJudgeId.set(incoming.id, existing.id);
+      continue;
+    }
+    const added = { ...incoming, incompatibleJudgeIds: [...incoming.incompatibleJudgeIds] };
+    judgesById.set(added.id, added);
+    judgesByName.set(normalizeVenueName(added.name), added);
+    canonicalJudgeId.set(incoming.id, added.id);
+  }
   const judges = new Set(judgesById.keys());
   const seenRooms = new Set<string>();
   const targets = new Map<string, PanelOutboxDebate>();
@@ -335,9 +375,12 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     const physical = resolved.get(debate.physicalRoomId)!;
     if (seenRooms.has(physical.id)) issues.push('La sala «' + debate.venueName + '» aparece en dos debates.');
     seenRooms.add(physical.id);
-    targets.set(physical.id, debate);
-    if (!teams.has(debate.teamFavorId) || !teams.has(debate.teamContraId)) issues.push(debate.venueName + ': faltan datos de algún equipo en la copia enviada desde tabulación.');
-    if (debate.judgeIds.some((id) => !judges.has(id))) issues.push(debate.venueName + ': faltan datos de algún juez en la copia enviada desde tabulación.');
+    const mappedFavor = canonicalTeamId.get(debate.teamFavorId) ?? (teams.has(debate.teamFavorId) ? debate.teamFavorId : '');
+    const mappedContra = canonicalTeamId.get(debate.teamContraId) ?? (teams.has(debate.teamContraId) ? debate.teamContraId : '');
+    const mappedJudges = debate.judgeIds.map((id) => canonicalJudgeId.get(id) ?? (judges.has(id) ? id : ''));
+    targets.set(physical.id, { ...debate, teamFavorId: mappedFavor, teamContraId: mappedContra, judgeIds: mappedJudges });
+    if (!mappedFavor || !mappedContra) issues.push(debate.venueName + ': faltan datos de algún equipo en la copia enviada desde tabulación.');
+    if (mappedJudges.some((id) => !id)) issues.push(debate.venueName + ': faltan datos de algún juez en la copia enviada desde tabulación.');
   }
   if (issues.length) return { ...empty, rooms: null, issues: [...new Set(issues)] };
 
