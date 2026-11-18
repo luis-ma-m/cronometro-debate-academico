@@ -434,13 +434,26 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
 }
 
 async function saveTournament(payload: Record<string, unknown>): Promise<Tournament> {
+  const saveStartedAt = Date.now();
+  let phaseStartedAt = saveStartedAt;
+  const logSavePhase = (phase: string) => {
+    const now = Date.now();
+    console.info("[ledu-api] saveTournament timing", {
+      phase,
+      durationMs: now - phaseStartedAt,
+      totalMs: now - saveStartedAt,
+    });
+    phaseStartedAt = now;
+  };
   return withLock("database-transaction", async () => {
     const expectedRevision = num(payload.expectedRevision);
     const idempotencyScope = "saveTournament:" + expectedRevision;
     const idempotencyKey = sha256("saveTournament:" + expectedRevision + ":" + sha256(JSON.stringify(payload.tournament) || ""));
     const cachedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
+    logSavePhase("idempotency_read");
     if (cachedResponse !== null) return cachedResponse as Tournament;
     const data = await loadSheetData(true);
+    logSavePhase("snapshot_read");
     const current = tournamentFromData(data);
     if (expectedRevision !== current.revision) {
       throw new ApiError("REVISION_CONFLICT", "El torneo cambió en otro dispositivo. Actualiza los datos antes de guardar.", 409);
@@ -575,6 +588,7 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
     if (formatsChanged) replacements.Formatos = candidateReplacements.Formatos;
 
     const response = tournamentFromData({ ...data, rows: { ...data.rows, ...candidateReplacements } });
+    logSavePhase("validation_and_diff");
     try {
       await writeTables(data, replacements, [
         randomBytes(16).toString("hex"),
@@ -596,7 +610,13 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
           idempotencyResponse: response,
         }),
       ]);
+      logSavePhase("postgres_write");
     } catch (error) {
+      console.error("[ledu-api] saveTournament write failed", {
+        durationMs: Date.now() - phaseStartedAt,
+        totalMs: Date.now() - saveStartedAt,
+        code: error instanceof ApiError ? error.code : (error as { code?: string })?.code,
+      });
       // Known constraint/timeout failures are rolled back by writePostgresTables.
       // Do not issue another database round-trip for an operation that is known
       // not to have committed; this keeps a rejected save from hanging on retry.
@@ -616,6 +636,8 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
         "ledu:room-heartbeat:" + hash + ":last",
       ]).catch(() => undefined);
     }));
+    logSavePhase("post_commit_cleanup");
+    console.info("[ledu-api] saveTournament completed", { totalMs: Date.now() - saveStartedAt });
 
     return response;
   });
