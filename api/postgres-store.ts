@@ -65,9 +65,8 @@ async function setTransactionTimeouts(client: PoolClient): Promise<void> {
 }
 
 async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
-  // A PoolClient serializes its queries. Promise.all(client.query(...)) therefore
-  // queues 21 round-trips rather than executing them in parallel. Read the
-  // complete, consistent snapshot in one PostgreSQL statement instead.
+  // Queries on one PoolClient are serialized, so issuing many of them creates
+  // sequential network round-trips. Read the complete consistent snapshot in one statement.
   const result = await client.query(`
     SELECT jsonb_build_object(
       'settings', (SELECT to_jsonb(t) FROM tournament_settings t WHERE id=1),
