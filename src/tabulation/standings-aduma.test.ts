@@ -97,4 +97,24 @@ describe('ADUMA speaker awards', () => {
     const row = buildSpeakerStandings(tournament).find((ranking) => ranking.key === 'all')!.rows[0];
     expect(row).toMatchObject({ speakerId: 'a-s1', fallenRivalDebates: 1 });
   });
+
+  it('shows assigned speakers with a pending score instead of dropping them from the rankings', () => {
+    const tournament = aduma(['a', 'b']);
+    const speakers = {
+      a: [
+        { speakerId: 'a-s1', roles: ['introductor' as const] },
+        { speakerId: 'a-s2', roles: ['first_rebuttal' as const] },
+      ],
+    };
+    tournament.rounds = [qualifyingRound(1, [jointDecided('1', 'a', 'b', 40, 30, { speakers })])];
+    const rankings = buildSpeakerStandings(tournament);
+    const overall = rankings.find((ranking) => ranking.key === 'all')!;
+    expect(overall.rows.map((row) => [row.speakerId, row.value, row.count, row.pendingCount, row.rank])).toEqual([
+      ['a-s1', null, 0, 1, null],
+      ['a-s2', null, 0, 1, null],
+    ]);
+    const introductor = rankings.find((ranking) => ranking.key === 'introductor')!;
+    expect(introductor.rows.map((row) => [row.speakerId, row.pendingCount])).toEqual([['a-s1', 1]]);
+  });
+
 });

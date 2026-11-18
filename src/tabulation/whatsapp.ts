@@ -350,8 +350,8 @@ function compactActa(link: ActaLink, entry: ActaEntry): unknown[] {
       return [penalty?.warnings ?? 0, penalty?.minors ?? 0, penalty?.majors ?? 0];
     }) : 0,
     sheet ? link.teams.map((team) => (entry.speakers[team.id] ?? [])
-      .map((row) => [team.members.findIndex((member) => member.id === row.speakerId), row.score, SPEAKER_ROLES.reduce((mask, role, index) => (row.roles.includes(role) ? mask | (1 << index) : mask), 0)])
-      .filter(([position]) => position >= 0)) : 0,
+      .map((row) => [team.members.findIndex((member) => member.id === row.speakerId), row.score ?? null, SPEAKER_ROLES.reduce((mask, role, index) => (row.roles.includes(role) ? mask | (1 << index) : mask), 0)])
+      .filter(([position]) => typeof position === 'number' && position >= 0)) : 0,
     entry.notes,
     entry.signedBy,
     Math.round(entry.sentAt / 1000),
@@ -383,8 +383,13 @@ function normalizeActaCode(raw: unknown): ActaCode | null {
   }
   const speakers: Record<string, TabSpeakerEntry[]> = {};
   for (const [teamId, rows] of Object.entries(isRecord(raw.speakers) ? raw.speakers : {})) {
-    speakers[teamId] = (Array.isArray(rows) ? rows : []).filter((row): row is Record<string, unknown> => isRecord(row) && isText(row.speakerId) && isNumber(row.score))
-      .map((row) => ({ speakerId: row.speakerId as string, score: row.score as number, roles: SPEAKER_ROLES.filter((role) => Array.isArray(row.roles) && row.roles.includes(role)).sort((x, y) => (row.roles as unknown[]).indexOf(x) - (row.roles as unknown[]).indexOf(y)) }));
+    speakers[teamId] = (Array.isArray(rows) ? rows : []).flatMap((row): TabSpeakerEntry[] => {
+      if (!isRecord(row) || !isText(row.speakerId)) return [];
+      const roles = SPEAKER_ROLES.filter((role) => Array.isArray(row.roles) && row.roles.includes(role))
+        .sort((x, y) => (row.roles as unknown[]).indexOf(x) - (row.roles as unknown[]).indexOf(y));
+      const score = isNumber(row.score) ? { score: row.score } : {};
+      return isNumber(row.score) || roles.length ? [{ speakerId: row.speakerId, ...score, roles }] : [];
+    });
   }
   return {
     version: 1,
@@ -431,10 +436,12 @@ function actaFromCompact(raw: unknown[], round: TabRound, debate: TabDebate, tou
     ...(writtenTotals ? { writtenTotals } : {}),
     penalties: perTeam(raw[7], (list): TabPenalties => ({ warnings: count(list[0]), minors: count(list[1]), majors: count(list[2]), disqualified: false })),
     speakers: perTeam(raw[8], (list, index) => list.flatMap((row): TabSpeakerEntry[] => {
-      if (!Array.isArray(row) || !Number.isInteger(row[0]) || !isNumber(row[1])) return [];
+      if (!Array.isArray(row) || !Number.isInteger(row[0]) || !(isNumber(row[1]) || row[1] === null)) return [];
       const speaker = members[index][row[0] as number];
       const mask = Number.isInteger(row[2]) ? row[2] as number : 0;
-      return speaker ? [{ speakerId: speaker.id, score: row[1] as number, roles: SPEAKER_ROLES.filter((_, bit) => mask & (1 << bit)) }] : [];
+      const roles = SPEAKER_ROLES.filter((_, bit) => mask & (1 << bit));
+      const score = isNumber(row[1]) ? { score: row[1] } : {};
+      return speaker && (isNumber(row[1]) || roles.length) ? [{ speakerId: speaker.id, ...score, roles }] : [];
     })),
     notes: isText(raw[9]) ? raw[9].slice(0, 2000) : '',
     signedBy: isText(raw[10]) ? raw[10].slice(0, 120) : '',

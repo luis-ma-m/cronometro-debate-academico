@@ -114,7 +114,8 @@ export function validateJointActa(acta: TabJointActa | undefined, penalties: Rec
         if (!speaker || speaker.teamId !== teamId) issues.push('Un orador de la lista de ' + name(teamId) + ' es de otro equipo.');
         if (seen.has(row.speakerId)) issues.push('Un integrante de ' + name(teamId) + ' aparece dos veces.');
         seen.add(row.speakerId);
-        if (!isNumber(row.score) || row.score < settings.speakerScoreMin || row.score > settings.speakerScoreMax || !onStep(row.score, settings.speakerScoreMin, settings.speakerScoreStep)) {
+        // A missing score means "not scored yet", not "no participant/intervention".
+        if (row.score !== undefined && (!isNumber(row.score) || row.score < settings.speakerScoreMin || row.score > settings.speakerScoreMax || !onStep(row.score, settings.speakerScoreMin, settings.speakerScoreStep))) {
           issues.push('Las notas de orador deben estar entre ' + settings.speakerScoreMin + ' y ' + settings.speakerScoreMax + ' (paso ' + format(settings.speakerScoreStep) + ').');
         }
         for (const role of row.roles) {

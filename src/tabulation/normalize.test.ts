@@ -117,4 +117,18 @@ describe('schema v2 normalization', () => {
     expect(tournament.rounds[0].debates[0].result!.joint!.speakers.a[0].roles).toEqual(['introductor', 'concluder']);
     expect(Object.keys(tournament.rounds[0].debates[0].result!.joint!.items)).toEqual(['a', 'b']);
   });
+
+  it('preserves joint-acta speaker roles when no score has been entered', () => {
+    const tournament = fullAduma();
+    const debate = tournament.rounds[0].debates[0];
+    debate.result!.joint!.speakers = {
+      a: [{ speakerId: 's1', roles: ['introductor'] }],
+      b: [],
+    };
+    const normalized = normalizeTabTournament(JSON.parse(JSON.stringify(tournament))).tournament;
+    expect(normalized.rounds[0].debates[0].result?.joint?.speakers.a).toEqual([
+      { speakerId: 's1', roles: ['introductor'] },
+    ]);
+  });
+
 });

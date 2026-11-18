@@ -54,7 +54,7 @@ export interface TeamLine {
 }
 
 export interface JudgeVote { judgeId: string; teamId: string | null; nets: Record<string, number>; tie: boolean }
-export interface SpeechScore { teamId: string; role: SpeakerRole; speakerId: string | null; score: number }
+export interface SpeechScore { teamId: string; role: SpeakerRole; speakerId: string | null; score: number | null }
 /** One value per speaker and debate, used by the overall speaker ranking. */
 export interface SpeakerTotal { speakerId: string; teamId: string; score: number }
 
@@ -203,7 +203,7 @@ function evaluateJudgeBallots(round: RoundInfo, debate: TabDebate, context: Outc
     // "Mejor orador" counts one value per debate: the mean of that speaker's turns (as src/rankings.ts does).
     const perSpeaker = new Map<string, { teamId: string; scores: number[] }>();
     for (const speech of speeches) {
-      if (!speech.speakerId) continue;
+      if (!speech.speakerId || speech.score === null) continue;
       const entry = perSpeaker.get(speech.speakerId) ?? { teamId: speech.teamId, scores: [] };
       entry.scores.push(speech.score);
       perSpeaker.set(speech.speakerId, entry);
@@ -234,10 +234,13 @@ function evaluateJointActa(round: RoundInfo, debate: TabDebate, context: Outcome
   if (settings.speakerScores && !elimination) {
     for (const teamId of [a, b]) {
       for (const row of result.joint?.speakers[teamId] ?? []) {
-        if (!isScore(row.score)) continue;
-        speakerTotals.push({ speakerId: row.speakerId, teamId, score: row.score });
-        speakerPoints[teamId] += row.score;
-        for (const role of row.roles) speeches.push({ teamId, role, speakerId: row.speakerId, score: row.score });
+        const score = isScore(row.score) ? row.score : null;
+        if (score !== null) {
+          speakerTotals.push({ speakerId: row.speakerId, teamId, score });
+          speakerPoints[teamId] += score;
+        }
+        // Keep role assignments visible to the speaker standings even before a score is entered.
+        for (const role of row.roles) speeches.push({ teamId, role, speakerId: row.speakerId, score });
       }
     }
   }

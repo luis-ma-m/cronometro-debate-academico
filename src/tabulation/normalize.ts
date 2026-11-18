@@ -137,11 +137,12 @@ function normalizeJoint(raw: unknown, teamIds: [string, string]): TabJointActa |
     items: byTeam(raw.items, numberRecord),
     ...(quickTotals ? { quickTotals } : {}),
     ...(writtenTotals ? { writtenTotals } : {}),
-    speakers: byTeam(raw.speakers, (rows): TabSpeakerEntry[] => list(rows).filter((row) => isText(row.speakerId)).map((row) => ({
-      speakerId: row.speakerId as string,
-      score: num(row.score, Number.NaN),
-      roles: Array.isArray(row.roles) ? [...new Set(row.roles.filter(isRole))] : [],
-    }))),
+    speakers: byTeam(raw.speakers, (rows): TabSpeakerEntry[] => list(rows).flatMap((row) => {
+      if (!isText(row.speakerId)) return [];
+      const roles = Array.isArray(row.roles) ? [...new Set(row.roles.filter(isRole))] : [];
+      const score = isFiniteNumber(row.score) ? { score: row.score } : {};
+      return isFiniteNumber(row.score) || roles.length ? [{ speakerId: row.speakerId, ...score, roles }] : [];
+    })),
   };
 }
 
