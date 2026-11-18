@@ -213,7 +213,7 @@ export function standingsCsv(sections: Array<{ title: string; rows: TeamStanding
   for (const ranking of speakerRankings) {
     rows.push([ranking.title]);
     rows.push(['Pos.', 'Orador', 'Equipo', 'Suma', 'Media', 'Intervenciones puntuadas', 'Pendientes']);
-    for (const row of ranking.rows) rows.push([row.rank ?? 'Pendiente', row.name, row.teamName, row.total, row.average ?? '', row.count, row.pendingCount]);
+    for (const row of ranking.rows) rows.push([row.rank ?? 'Pendiente', row.name, row.teamName, row.count ? row.total : '', row.average ?? '', row.count, row.pendingCount]);
     rows.push([]);
   }
   return toCsv(rows);
