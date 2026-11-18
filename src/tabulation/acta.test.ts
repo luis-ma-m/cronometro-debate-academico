@@ -88,6 +88,16 @@ describe('validateJointActa', () => {
     expect(check.warnings.join(' ')).toContain('intervenciones');
   });
 
+  it('accepts assigned speakers without a score and keeps their role ownership', () => {
+    const partial = acta({ speakers: {
+      a: [{ speakerId: 'a1', roles: ['introductor', 'concluder'] }, { speakerId: 'a2', roles: ['first_rebuttal', 'second_rebuttal'] }],
+      b: [{ speakerId: 'b1', score: 8, roles: ['introductor', 'first_rebuttal', 'second_rebuttal', 'concluder'] }],
+    } });
+    const check = validateJointActa(partial, none, context());
+    expect(check.issues).toEqual([]);
+    expect(check.warnings.join(' ')).not.toContain('intervenciones');
+  });
+
   it('only needs the winner in elimination rounds', () => {
     const check = validateJointActa({ winnerTeamId: 'b', items: {}, speakers: {} }, none, context(true));
     expect(check).toMatchObject({ issues: [], missing: [] });
