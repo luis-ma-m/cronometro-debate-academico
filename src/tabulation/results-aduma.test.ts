@@ -102,4 +102,25 @@ describe('equipo caído', () => {
     const outcome = computeDebateOutcome(qualifying, debate('d', 'a', 'b', [], result([], { override: { winnerTeamId: 'b', reason: 'Reclamación' } })), setup({ b: { fallenFromRound: 1 } }));
     expect(outcome.winnerTeamId).toBe('b');
   });
+
+  it('keeps joint-acta role assignments when a speaker has no score yet', () => {
+    const context = setup();
+    const acta = joint({
+      speakers: {
+        a: [
+          { speakerId: 'a-s1', roles: ['introductor'] },
+          { speakerId: 'a-s2', roles: ['first_rebuttal', 'second_rebuttal'] },
+        ],
+      },
+    });
+    const outcome = computeDebateOutcome(qualifying, jointDebate(acta), context);
+    expect(outcome.status).toBe('complete');
+    expect(outcome.speeches.map(({ speakerId, role, score }) => [speakerId, role, score])).toEqual([
+      ['a-s1', 'introductor', null],
+      ['a-s2', 'first_rebuttal', null],
+      ['a-s2', 'second_rebuttal', null],
+    ]);
+    expect(outcome.speakerTotals).toEqual([]);
+  });
+
 });
