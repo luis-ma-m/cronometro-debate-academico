@@ -65,53 +65,64 @@ async function setTransactionTimeouts(client: PoolClient): Promise<void> {
 }
 
 async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
-  const [settingsQ, institutionsQ, roundsQ, teamsQ, teamIncompatQ, judgesQ, judgeIncompatQ, speakersQ, physicalQ, formatsQ, formatPhasesQ, assignmentsQ, assignmentJudgesQ, assignmentPhasesQ, categoriesQ, cardsQ, teamScoresQ, categoryScoresQ, cardJudgesQ, speakerScoresQ, eventsQ] = await Promise.all([
-    client.query("SELECT * FROM tournament_settings WHERE id=1"),
-    client.query("SELECT * FROM institutions ORDER BY name"),
-    client.query("SELECT * FROM rounds ORDER BY number"),
-    client.query("SELECT t.*, i.name AS institution FROM teams t LEFT JOIN institutions i ON i.id=t.institution_id ORDER BY t.name"),
-    client.query("SELECT team_id,judge_id FROM team_judge_incompatibilities ORDER BY team_id,judge_id"),
-    client.query("SELECT j.*, i.name AS institution FROM judges j LEFT JOIN institutions i ON i.id=j.institution_id ORDER BY j.name"),
-    client.query("SELECT judge_id,incompatible_judge_id FROM judge_incompatibilities ORDER BY judge_id,incompatible_judge_id"),
-    client.query("SELECT * FROM speakers ORDER BY team_id, name"),
-    client.query("SELECT * FROM physical_rooms ORDER BY name"),
-    client.query("SELECT * FROM format_presets ORDER BY name"),
-    client.query("SELECT * FROM format_phases ORDER BY format_id, phase_order"),
-    client.query("SELECT * FROM room_assignments ORDER BY round_id, physical_room_id"),
-    client.query("SELECT * FROM assignment_judges ORDER BY assignment_id, judge_id"),
-    client.query("SELECT * FROM assignment_phases ORDER BY assignment_id, phase_order"),
-    client.query("SELECT * FROM score_categories ORDER BY category_order"),
-    client.query("SELECT * FROM scorecards ORDER BY created_at"),
-    client.query("SELECT * FROM scorecard_team_scores"),
-    client.query("SELECT * FROM scorecard_category_scores"),
-    client.query("SELECT * FROM scorecard_judges"),
-    client.query("SELECT * FROM scorecard_speaker_scores"),
-    client.query("SELECT * FROM audit_events ORDER BY occurred_at"),
-  ]);
-  const settings = settingsQ.rows[0] as Record<string, unknown> | undefined;
+  // A PoolClient serializes its queries. Promise.all(client.query(...)) therefore
+  // queues 21 round-trips rather than executing them in parallel. Read the
+  // complete, consistent snapshot in one PostgreSQL statement instead.
+  const result = await client.query(`
+    SELECT jsonb_build_object(
+      'settings', (SELECT to_jsonb(t) FROM tournament_settings t WHERE id=1),
+      'institutions', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM institutions ORDER BY name) q), '[]'::jsonb),
+      'rounds', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM rounds ORDER BY number) q), '[]'::jsonb),
+      'teams', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT t.*, i.name AS institution FROM teams t LEFT JOIN institutions i ON i.id=t.institution_id ORDER BY t.name) q), '[]'::jsonb),
+      'teamIncompatibilities', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT team_id,judge_id FROM team_judge_incompatibilities ORDER BY team_id,judge_id) q), '[]'::jsonb),
+      'judges', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT j.*, i.name AS institution FROM judges j LEFT JOIN institutions i ON i.id=j.institution_id ORDER BY j.name) q), '[]'::jsonb),
+      'judgeIncompatibilities', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT judge_id,incompatible_judge_id FROM judge_incompatibilities ORDER BY judge_id,incompatible_judge_id) q), '[]'::jsonb),
+      'speakers', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM speakers ORDER BY team_id, name) q), '[]'::jsonb),
+      'physicalRooms', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM physical_rooms ORDER BY name) q), '[]'::jsonb),
+      'formats', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM format_presets ORDER BY name) q), '[]'::jsonb),
+      'formatPhases', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM format_phases ORDER BY format_id, phase_order) q), '[]'::jsonb),
+      'assignments', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM room_assignments ORDER BY round_id, physical_room_id) q), '[]'::jsonb),
+      'assignmentJudges', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM assignment_judges ORDER BY assignment_id, judge_id) q), '[]'::jsonb),
+      'assignmentPhases', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM assignment_phases ORDER BY assignment_id, phase_order) q), '[]'::jsonb),
+      'categories', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM score_categories ORDER BY category_order) q), '[]'::jsonb),
+      'cards', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecards ORDER BY created_at) q), '[]'::jsonb),
+      'teamScores', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecard_team_scores) q), '[]'::jsonb),
+      'categoryScores', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecard_category_scores) q), '[]'::jsonb),
+      'cardJudges', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecard_judges) q), '[]'::jsonb),
+      'speakerScores', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecard_speaker_scores) q), '[]'::jsonb),
+      'events', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM audit_events ORDER BY occurred_at) q), '[]'::jsonb)
+    ) AS snapshot
+  `);
+  const snapshot = result.rows[0]?.snapshot as Record<string, unknown> | undefined;
+  if (!snapshot) throw new ApiError("DATABASE_NOT_INITIALIZED", "Neon no ha devuelto el estado del torneo.", 503);
+  const asRows = (key: string) => Array.isArray(snapshot[key]) ? snapshot[key] as Record<string, unknown>[] : [];
+  const settings = snapshot.settings as Record<string, unknown> | null;
   if (!settings) throw new ApiError("DATABASE_NOT_INITIALIZED", "Neon está conectado, pero falta inicializar el esquema y los valores base. Ejecuta db:migrate y db:seed en la base correcta.", 503);
-  const settingsJson = settings ? (settings.settings as Record<string, unknown> || {}) : {};
-  const institutions = institutionsQ.rows as Record<string, unknown>[];
-  const rounds = roundsQ.rows as Record<string, unknown>[];
-  const teamIncompatibilities = teamIncompatQ.rows as Record<string, unknown>[];
-  const judgeIncompatibilities = judgeIncompatQ.rows as Record<string, unknown>[];
+  const institutions = asRows("institutions");
+  const rounds = asRows("rounds");
+  const teamsQ = asRows("teams");
+  const teamIncompatibilities = asRows("teamIncompatibilities");
+  const judgesQ = asRows("judges");
+  const judgeIncompatibilities = asRows("judgeIncompatibilities");
+  const speakers = asRows("speakers");
+  const physicalRooms = asRows("physicalRooms");
+  const formatRows = asRows("formats");
+  const formatPhases = asRows("formatPhases");
+  const assignments = asRows("assignments");
+  const assignmentJudges = asRows("assignmentJudges");
+  const assignmentPhases = asRows("assignmentPhases");
+  const categories = asRows("categories");
+  const cards = asRows("cards");
+  const teamScores = asRows("teamScores");
+  const categoryScores = asRows("categoryScores");
+  const cardJudges = asRows("cardJudges");
+  const speakerScores = asRows("speakerScores");
+  const events = asRows("events");
+  const settingsJson = settings.settings as Record<string, unknown> || {};
   const teamIncompatibilitiesByTeam = groupByString(teamIncompatibilities, "team_id");
   const judgeIncompatibilitiesByJudge = groupByString(judgeIncompatibilities, "judge_id");
-  const teams: Record<string, unknown>[] = (teamsQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: (teamIncompatibilitiesByTeam.get(str(row.id)) || []).map((item) => str(item.judge_id)) }));
-  const judges: Record<string, unknown>[] = (judgesQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: (judgeIncompatibilitiesByJudge.get(str(row.id)) || []).map((item) => str(item.incompatible_judge_id)) }));
-  const speakers = speakersQ.rows as Record<string, unknown>[];
-  const physicalRooms = physicalQ.rows as Record<string, unknown>[];
-  const formatRows = formatsQ.rows as Record<string, unknown>[];
-  const formatPhases = formatPhasesQ.rows as Record<string, unknown>[];
-  const assignments = assignmentsQ.rows as Record<string, unknown>[];
-  const assignmentJudges = assignmentJudgesQ.rows as Record<string, unknown>[];
-  const assignmentPhases = assignmentPhasesQ.rows as Record<string, unknown>[];
-  const categories = categoriesQ.rows as Record<string, unknown>[];
-  const cards = cardsQ.rows as Record<string, unknown>[];
-  const teamScores = teamScoresQ.rows as Record<string, unknown>[];
-  const categoryScores = categoryScoresQ.rows as Record<string, unknown>[];
-  const cardJudges = cardJudgesQ.rows as Record<string, unknown>[];
-  const speakerScores = speakerScoresQ.rows as Record<string, unknown>[];
+  const teams: Record<string, unknown>[] = teamsQ.map((row) => ({ ...row, incompatible_judge_ids: (teamIncompatibilitiesByTeam.get(str(row.id)) || []).map((item) => str(item.judge_id)) }));
+  const judges: Record<string, unknown>[] = judgesQ.map((row) => ({ ...row, incompatible_judge_ids: (judgeIncompatibilitiesByJudge.get(str(row.id)) || []).map((item) => str(item.incompatible_judge_id)) }));
 
   const teamsById = new Map(teams.map((row) => [str(row.id), row]));
   const judgesById = new Map(judges.map((row) => [str(row.id), row]));
@@ -173,13 +184,13 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     scorecards,
   });
   const config: SheetRow[] = [
-    { key: "tournamentName", value: str(settings?.tournament_name) || "Torneo LEDU" },
-    { key: "activeRoundId", value: str(settings?.active_round_id) },
-    { key: "activationRevision", value: str(settings?.activation_revision ?? 0) },
-    { key: "activatedAt", value: str(millis(settings?.activated_at)) },
-    { key: "revision", value: str(settings?.revision ?? 1) },
-    { key: "updatedAt", value: str(millis(settings?.updated_at)) },
-    { key: "minimumJudgesPerRoom", value: str(settings?.minimum_judges_per_room ?? 1) },
+    { key: "tournamentName", value: str(settings.tournament_name) || "Torneo LEDU" },
+    { key: "activeRoundId", value: str(settings.active_round_id) },
+    { key: "activationRevision", value: str(settings.activation_revision ?? 0) },
+    { key: "activatedAt", value: str(millis(settings.activated_at)) },
+    { key: "revision", value: str(settings.revision ?? 1) },
+    { key: "updatedAt", value: str(millis(settings.updated_at)) },
+    { key: "minimumJudgesPerRoom", value: str(settings.minimum_judges_per_room ?? 1) },
     { key: "institutions", value: JSON.stringify(institutions.map((row) => str(row.name))) },
     { key: "speakers", value: JSON.stringify(speakers.map((row) => ({ id: str(row.id), teamId: str(row.team_id), name: str(row.name) }))) },
     { key: "formatPhases", value: JSON.stringify(parseJson(settingsJson.formatPhases, defaultPhases())) },
@@ -214,7 +225,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     lastResumedAt: row.last_resumed_at ? millis(row.last_resumed_at) : "",
     revision: num(row.timer_revision), updatedAt: millis(row.timer_updated_at),
   }));
-  const eventRows = (eventsQ.rows as Record<string, unknown>[]).map((row) => ({
+  const eventRows = events.map((row) => ({
     event_id: str(row.event_key), timestamp_utc: iso(row.occurred_at), room_round_id: str(row.assignment_id),
     round_id: str(row.round_id), room_id: str(row.assignment_id), phase_index: str(row.phase_index ?? ""),
     event_type: str(row.event_type), elapsed_seconds: "", details: JSON.stringify(row.details ?? {}),
@@ -230,7 +241,6 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     raw, rows,
   };
 }
-
 export async function loadPostgresSheetData(): Promise<PostgresSheetData> {
   const client = await getPool().connect();
   try {
