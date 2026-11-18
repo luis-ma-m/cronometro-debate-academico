@@ -204,7 +204,7 @@ describe("Neon migration artifacts", () => {
     expect(snapshot).toContain("SELECT jsonb_build_object(");
     expect(snapshot).toContain("'settings'");
     expect(snapshot).toContain("'assignments'");
-    expect(snapshot).toContain("'scorecards'");
+    expect(snapshot).toContain("'cards'");
     expect(snapshot.match(/client\.query\(/g) || []).toHaveLength(1);
     expect(snapshot).not.toContain("Promise.all(");
     for (const phase of ["idempotency_read", "snapshot_read", "validation_and_diff", "postgres_write", "post_commit_cleanup"]) {
