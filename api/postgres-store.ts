@@ -355,17 +355,6 @@ async function persistInstitutions(client: PoolClient, value: string): Promise<v
   else await client.query("DELETE FROM institutions");
 }
 
-async function upsertInstitution(client: PoolClient, nameValue: unknown): Promise<string | null> {
-  const name = str(nameValue).trim();
-  if (!name) return null;
-  const id = institutionId(name);
-  await client.query(
-    "INSERT INTO institutions(id,name) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, updated_at=now()",
-    [id, name],
-  );
-  return id;
-}
-
 async function persistRounds(client: PoolClient, rows: SheetRow[]): Promise<void> {
   await client.query("UPDATE rounds SET is_active=false WHERE is_active=true");
   await client.query("UPDATE rounds SET number=number+100000");
