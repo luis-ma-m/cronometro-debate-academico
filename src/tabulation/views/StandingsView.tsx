@@ -139,11 +139,11 @@ export function StandingsView({ tournament, outcomes, update, notify, projection
         <div className="panel-title"><div><h3>{ranking.title}</h3></div></div>
         {ranking.rows.length ? <div className="tournament-table-wrap"><table>
           <thead><tr><th>Pos.</th><th>Orador</th><th>Equipo</th><th>{tournament.settings.speakerMetric === 'sum' ? 'Suma' : 'Media'}</th><th>Notas</th></tr></thead>
-          <tbody>{ranking.rows.slice(0, projection || !expandedRankings.includes(ranking.key) ? 10 : undefined).map((row) => <tr key={row.speakerId} className={joint && ranking.key === 'all' && row.rank <= 2 ? 'tab-qualified' : ''}>
-            <td><strong>{row.rank}</strong></td>
-            <td>{row.name}{joint && ranking.key === 'all' && row.rank <= 2 && <span className="state-pill ready tab-fallen-pill" title="ADUMA art. 43">final de discursos</span>}
+          <tbody>{ranking.rows.slice(0, projection || !expandedRankings.includes(ranking.key) ? 10 : undefined).map((row) => <tr key={row.speakerId} className={joint && ranking.key === 'all' && row.rank !== null && row.rank <= 2 ? 'tab-qualified' : ''}>
+            <td><strong>{row.rank ?? '—'}</strong></td>
+            <td>{row.name}{joint && ranking.key === 'all' && row.rank !== null && row.rank <= 2 && <span className="state-pill ready tab-fallen-pill" title="ADUMA art. 43">final de discursos</span>}
               {row.fallenRivalDebates > 0 && <span className="tab-tie" title={'Su equipo se enfrentó a un equipo caído: tiene ' + row.fallenRivalDebates + ' debate(s) menos puntuado(s). Lo decide el comité.'}>†</span>}</td>
-            <td>{row.teamName}</td><td>{formatNumber(row.value)}</td><td>{row.count}</td>
+            <td>{row.teamName}</td><td>{row.value === null ? 'Pendiente' : formatNumber(row.value)}</td><td>{row.count}{row.pendingCount > 0 && <small className="tab-cell-sub">{row.pendingCount} sin nota</small>}</td>
           </tr>)}</tbody>
         </table></div> : <p className="muted tournament-empty">Sin notas todavía.</p>}
         {ranking.rows.length > 10 && !projection && <button type="button" className="text-button tab-no-print" onClick={() => setExpandedRankings((current) => (current.includes(ranking.key) ? current.filter((key) => key !== ranking.key) : [...current, ranking.key]))}>
