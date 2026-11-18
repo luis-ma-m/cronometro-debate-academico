@@ -206,7 +206,7 @@ describe("Neon migration artifacts", () => {
     expect(snapshot).toContain("'assignments'");
     expect(snapshot).toContain("'scorecards'");
     expect(snapshot.match(/client\.query\(/g) || []).toHaveLength(1);
-    expect(snapshot).not.toMatch(/Promise\\.all\\s*\\(/);
+    expect(snapshot).not.toContain("Promise.all(");
     for (const phase of ["idempotency_read", "snapshot_read", "validation_and_diff", "postgres_write", "post_commit_cleanup"]) {
       expect(api).toContain('logSavePhase("' + phase + '")');
     }
