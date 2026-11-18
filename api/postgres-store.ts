@@ -347,7 +347,9 @@ async function persistInstitutions(client: PoolClient, value: string): Promise<v
   const names = parseJson<unknown>(value, []);
   if (!Array.isArray(names)) throw new ApiError("INVALID_INSTITUTIONS", "El catálogo de instituciones debe ser una lista.", 400);
   const normalized = [...new Set(names.filter((name): name is string => typeof name === "string").map((name) => name.trim()).filter(Boolean))];
-  for (const name of normalized) await upsertInstitution(client, name);
+  const institutionRows: unknown[][] = normalized.map((name) => [institutionId(name), name]);
+  await insertMany(client, "institutions", ["id", "name"], institutionRows,
+    "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, updated_at=now()");
   const ids = normalized.map(institutionId);
   if (ids.length) await client.query("DELETE FROM institutions WHERE NOT (id = ANY($1::text[]))", [ids]);
   else await client.query("DELETE FROM institutions");
