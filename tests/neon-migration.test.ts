@@ -171,6 +171,17 @@ describe("Neon migration artifacts", () => {
   });
 
 
+  it("bounds PostgreSQL read, write and idempotency transactions and avoids retrying known rollbacks", async () => {
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    expect(store).toContain('SET LOCAL statement_timeout');
+    expect(store).toContain('SET LOCAL lock_timeout');
+    expect(store).toContain('SET LOCAL idle_in_transaction_session_timeout');
+    expect(store).toContain('BEGIN READ ONLY');
+    expect(store).toContain('code === "57014" || code === "55P03" || code === "40P01"');
+    expect(api).toContain('["DATABASE_CONSTRAINT", "DATABASE_BUSY", "DUPLICATE_ENTITY_NAME"].includes(error.code)');
+  });
+
   it("releases immediate case-insensitive team and judge name indexes before replacement upserts", async () => {
     const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
     expect(store).toContain('teams_name_ci_uq: "ya existe otro equipo');

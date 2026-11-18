@@ -143,6 +143,18 @@ describe("Vercel API core", () => {
     expect(() => validateTournamentInput(duplicate)).toThrow("IDs únicos");
   });
 
+  it("rejects duplicate team names case-insensitively before persistence", () => {
+    const tournament = makeTournament();
+    tournament.teams[1].name = "  eQuIpO a  ";
+    expect(() => validateTournamentInput(tournament)).toThrow("más de un registro llamado");
+  });
+
+  it("rejects duplicate judge names case-insensitively before persistence", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({ id: "j2", name: "  JUEZ 1 ", institution: "", active: true, incompatibleJudgeIds: [] });
+    expect(() => validateTournamentInput(tournament)).toThrow("más de un registro llamado");
+  });
+
   it("rejects duplicate team IDs", () => {
     const tournament = makeTournament();
     tournament.teams.push({ ...tournament.teams[0] });

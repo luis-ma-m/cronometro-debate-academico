@@ -597,6 +597,10 @@ async function saveTournament(payload: Record<string, unknown>): Promise<Tournam
         }),
       ]);
     } catch (error) {
+      // Known constraint/timeout failures are rolled back by writePostgresTables.
+      // Do not issue another database round-trip for an operation that is known
+      // not to have committed; this keeps a rejected save from hanging on retry.
+      if (error instanceof ApiError && ["DATABASE_CONSTRAINT", "DATABASE_BUSY", "DUPLICATE_ENTITY_NAME"].includes(error.code)) throw error;
       const committedResponse = await readIdempotentResponse(idempotencyKey, idempotencyScope);
       if (committedResponse !== null) return committedResponse as Tournament;
       throw error;

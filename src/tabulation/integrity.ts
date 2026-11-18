@@ -27,6 +27,18 @@ export function checkIntegrity(tournament: TabTournament): IntegrityReport {
   const teamName = (id: string) => teams.get(id)?.name ?? id;
   const judgeName = (id: string) => judges.get(id)?.name ?? id;
 
+  for (const [label, items] of [
+    ['equipos', tournament.teams], ['jueces', tournament.judges],
+  ] as const) {
+    const seen = new Map<string, string>();
+    for (const item of items) {
+      const key = item.name.trim().toLocaleLowerCase('es-ES');
+      const previous = seen.get(key);
+      if (previous) errors.push('Hay ' + label + ' con el mismo nombre: «' + previous + '» y «' + item.name + '».');
+      else seen.set(key, item.name);
+    }
+  }
+
   const allDebates = tournament.rounds.flatMap((round) => round.debates);
   for (const [label, ids] of [
     ['equipos', tournament.teams.map((team) => team.id)], ['oradores', tournament.speakers.map((speaker) => speaker.id)],

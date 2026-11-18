@@ -35,6 +35,15 @@ describe('checkIntegrity', () => {
     expect(warnings.join('\n')).toContain('incompatibilidad de un juez que no existe');
   });
 
+  it('reports duplicate team and judge names case-insensitively', () => {
+    const tournament = makeTournament('aduma', ['a', 'b'], ['j1', 'j2'], 1);
+    tournament.teams[1].name = '  ' + tournament.teams[0].name.toUpperCase() + ' ';
+    tournament.judges[1].name = tournament.judges[0].name.toLowerCase();
+    const errors = checkIntegrity(tournament).errors.join(' ');
+    expect(errors).toContain('equipos con el mismo nombre');
+    expect(errors).toContain('jueces con el mismo nombre');
+  });
+
   it('warns about institutions written in two ways, which would hide a conflict', () => {
     const tournament = makeTournament('aduma', ['a', 'b', 'c'], [], 0);
     tournament.teams[0].institution = 'Universidad de Málaga';
