@@ -470,7 +470,7 @@ async function persistPhysicalRooms(client: PoolClient, rows: SheetRow[]): Promi
   );
 }
 
-async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers: SheetRow[], oldRooms: SheetRow[], oldTimers: SheetRow[], forceRelations = false): Promise<void> {
+async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers: SheetRow[], oldRooms: SheetRow[], oldTimers: SheetRow[], forceRelations = false, trace = false): Promise<void> {
   const timerById = new Map(timers.map((row) => [str(row.roomId), row]));
   const needsScoredCheck = forceRelations || rooms.some((row) => {
     const oldRoom = getRow(oldRooms, str(row.id));
@@ -488,6 +488,8 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     const phasesChanged = !oldRoom || !same(parseJson(oldRoom.phases, []), phases);
     const staticChanged = forceRelations || !oldRoom || ["roundId","physicalRoomId","formatId","teamFavorId","teamContraId","notes"].some((key) => str(oldRoom[key]) !== str(row[key])) || phasesChanged || !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
     if (!staticChanged) continue;
+    const assignmentStartedAt = Date.now();
+    if (trace) console.info("[ledu-api] postgres save assignment started", { assignmentId: id, roomCount: rooms.length, phaseCount: phases.length, judgeCount: parseStringArray(row.judgeIds).length });
     if (scoredAssignmentIds.has(id) && phasesChanged) {
       throw new ApiError("SCORED_ASSIGNMENT_PHASES_IMMUTABLE", "No se pueden modificar las fases históricas de una asignación que ya tiene un acta.", 409);
     }
@@ -527,6 +529,7 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
       const judgeRows: unknown[][] = judgeIds.map((judgeId) => [id, judgeId]);
       await insertMany(client, "assignment_judges", ["assignment_id", "judge_id"], judgeRows);
     }
+    if (trace) console.info("[ledu-api] postgres save assignment completed", { assignmentId: id, durationMs: Date.now() - assignmentStartedAt });
   }
   // Timer updates are optimistic and row-scoped. A stale timer revision cannot overwrite another device.
   for (const timer of timers) {
@@ -535,6 +538,8 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     const changed = !old || !same(old, timer);
     if (!changed) continue;
     if (!old) continue; // New assignments already received their initial timer in the INSERT above.
+    const timerStartedAt = Date.now();
+    if (trace) console.info("[ledu-api] postgres save timer update started", { assignmentId: id });
     const oldRevision = num(old.revision);
     const result = await client.query(
       `UPDATE room_assignments SET timer_status=$1,phase_index=$2,remaining_seconds=$3,
@@ -546,6 +551,7 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
       [str(timer.status), num(timer.phaseIndex), num(timer.remainingSeconds), num(timer.startedAt), num(timer.lastResumedAt), num(timer.revision), num(timer.updatedAt), id, oldRevision],
     );
     if (result.rowCount !== 1) throw new ApiError("REVISION_CONFLICT", "El cronómetro cambió en otro dispositivo. Actualiza el estado.", 409);
+    if (trace) console.info("[ledu-api] postgres save timer update completed", { assignmentId: id, durationMs: Date.now() - timerStartedAt });
   }
 }
 
@@ -696,83 +702,106 @@ function describeDatabaseConstraint(error: unknown): string {
 }
 
 export async function writePostgresTables(data: PostgresSheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[]): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    await setTransactionTimeouts(client);
-    await client.query("SET CONSTRAINTS ALL DEFERRED");
-    if (replacements.Config) await persistConfig(client, data.rows.Config, replacements.Config);
-    // Parent rows must exist before rounds and assignments reference them.
-    if (replacements.Formatos) await persistFormats(client, replacements.Formatos);
-    if (replacements.Rondas) await persistRounds(client, replacements.Rondas);
-    if (replacements.Equipos) await persistTeams(client, replacements.Equipos, false);
-    if (replacements.Jueces) await persistTeams(client, replacements.Jueces, true);
-    if (replacements.Equipos || replacements.Jueces) {
-      await persistIncompatibilities(client, replacements.Equipos || data.rows.Equipos, replacements.Jueces || data.rows.Jueces);
+  const isTournamentSave = str(appendEvent?.[6]) === "tournament_saved";
+  const startedAt = Date.now();
+  let phaseStartedAt = startedAt;
+  const runPhase = async <T>(phase: string, action: () => Promise<T>): Promise<T> => {
+    if (isTournamentSave) console.info("[ledu-api] postgres save phase started", { phase, elapsedMs: Date.now() - startedAt });
+    phaseStartedAt = Date.now();
+    try {
+      const result = await action();
+      if (isTournamentSave) console.info("[ledu-api] postgres save phase completed", { phase, durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - startedAt });
+      return result;
+    } catch (error) {
+      if (isTournamentSave) console.error("[ledu-api] postgres save phase failed", {
+        phase, durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - startedAt,
+        code: (error as { code?: string })?.code,
+        errorName: error instanceof Error ? error.name : "unknown",
+      });
+      throw error;
     }
-    if (replacements.SalasFisicas) await persistPhysicalRooms(client, replacements.SalasFisicas);
+  };
+  let client: PoolClient | null = null;
+  try {
+    client = await runPhase("connection_acquire", () => getPool().connect());
+    await runPhase("transaction_begin_and_settings", async () => {
+      await client!.query("BEGIN");
+      await setTransactionTimeouts(client!);
+      await client!.query("SET CONSTRAINTS ALL DEFERRED");
+    });
+    if (replacements.Config) await runPhase("config", () => persistConfig(client!, data.rows.Config, replacements.Config!));
+    // Parent rows must exist before rounds and assignments reference them.
+    if (replacements.Formatos) await runPhase("formats", () => persistFormats(client!, replacements.Formatos!));
+    if (replacements.Rondas) await runPhase("rounds", () => persistRounds(client!, replacements.Rondas!));
+    if (replacements.Equipos) await runPhase("teams", () => persistTeams(client!, replacements.Equipos!, false));
+    if (replacements.Jueces) await runPhase("judges", () => persistTeams(client!, replacements.Jueces!, true));
+    if (replacements.Equipos || replacements.Jueces) {
+      await runPhase("incompatibilities", () => persistIncompatibilities(client!, replacements.Equipos || data.rows.Equipos, replacements.Jueces || data.rows.Jueces));
+    }
+    if (replacements.SalasFisicas) await runPhase("physical_rooms", () => persistPhysicalRooms(client!, replacements.SalasFisicas!));
     const rebuildAssignmentRelations = assignmentRelationsChanged(data, replacements);
     if (rebuildAssignmentRelations) {
-      // Room/team/judge claims are unique across a round. Release them only
-      // when assignment identities actually change (including swaps), then
-      // rebuild the complete relation set atomically.
-      await client.query("DELETE FROM round_team_claims");
-      await client.query("DELETE FROM round_room_claims");
-      await client.query("DELETE FROM assignment_judges WHERE assignment_id NOT IN (SELECT assignment_id FROM scorecards)");
+      await runPhase("release_assignment_claims", async () => {
+        // Room/team/judge claims are unique across a round. Release them only
+        // when assignment identities actually change (including swaps), then rebuild atomically.
+        await client!.query("DELETE FROM round_team_claims");
+        await client!.query("DELETE FROM round_room_claims");
+        await client!.query("DELETE FROM assignment_judges WHERE assignment_id NOT IN (SELECT assignment_id FROM scorecards)");
+      });
     }
     if (replacements.Salas || replacements.Cronometros || rebuildAssignmentRelations) {
-      await persistAssignments(client, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
-        data.rows.Salas, data.rows.Cronometros, rebuildAssignmentRelations);
+      await runPhase("assignments", () => persistAssignments(client!, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
+        data.rows.Salas, data.rows.Cronometros, rebuildAssignmentRelations, isTournamentSave));
     }
     if (replacements.Config) {
       const config = replacements.Config;
       if (!same(parseJson(getConfig(config, "institutions"), []), parseJson(getConfig(data.rows.Config, "institutions"), []))) {
-        await persistInstitutions(client, getConfig(config, "institutions"));
+        await runPhase("institutions", () => persistInstitutions(client!, getConfig(config, "institutions")));
       }
       if (!same(parseJson(getConfig(config, "speakers"), []), parseJson(getConfig(data.rows.Config, "speakers"), []))) {
-        await persistSpeakers(client, getConfig(config, "speakers"));
+        await runPhase("speakers", () => persistSpeakers(client!, getConfig(config, "speakers")));
       }
       if (!same(parseJson(getConfig(config, "scoring"), emptyScoringConfig()), parseJson(getConfig(data.rows.Config, "scoring"), emptyScoringConfig()))) {
-        await persistScoring(client, getConfig(config, "scoring"));
+        await runPhase("scoring", () => persistScoring(client!, getConfig(config, "scoring")));
       }
     }
-    // Each collection is a complete replacement only when its semantic
-    // contents changed. Delete obsolete rows for that collection independently;
-    // room deletions must not depend on an unrelated team edit.
-    if (replacements.Salas) {
-      const ids = replacements.Salas.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM room_assignments WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM room_assignments");
-    }
-    if (replacements.Equipos) {
-      const ids = replacements.Equipos.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM teams WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM teams");
-    }
-    if (replacements.Jueces) {
-      const ids = replacements.Jueces.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM judges WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM judges");
-    }
-    if (replacements.SalasFisicas) {
-      const ids = replacements.SalasFisicas.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM physical_rooms WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM physical_rooms");
-    }
-    if (replacements.Rondas) {
-      const ids = replacements.Rondas.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM rounds WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM rounds");
-    }
-    if (replacements.Formatos) {
-      const ids = replacements.Formatos.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM format_presets");
-    }
-    if (appendEvent) await persistEvent(client, appendEvent);
-    await client.query("COMMIT");
+    await runPhase("obsolete_rows_cleanup", async () => {
+      // Each collection is a complete replacement only when its semantic contents changed.
+      if (replacements.Salas) {
+        const ids = replacements.Salas.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM room_assignments WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM room_assignments");
+      }
+      if (replacements.Equipos) {
+        const ids = replacements.Equipos.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM teams WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM teams");
+      }
+      if (replacements.Jueces) {
+        const ids = replacements.Jueces.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM judges WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM judges");
+      }
+      if (replacements.SalasFisicas) {
+        const ids = replacements.SalasFisicas.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM physical_rooms WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM physical_rooms");
+      }
+      if (replacements.Rondas) {
+        const ids = replacements.Rondas.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM rounds WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM rounds");
+      }
+      if (replacements.Formatos) {
+        const ids = replacements.Formatos.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM format_presets");
+      }
+    });
+    if (appendEvent) await runPhase("audit_event_and_idempotency", () => persistEvent(client!, appendEvent));
+    await runPhase("commit", () => client!.query("COMMIT").then(() => undefined));
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    if (client) await runPhase("rollback", () => client!.query("ROLLBACK").then(() => undefined)).catch(() => undefined);
     if (error instanceof ApiError) throw error;
     const code = (error as { code?: string })?.code;
     if (code === "57014" || code === "55P03" || code === "40P01") {
@@ -783,6 +812,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     }
     throw new ApiError("DATABASE_WRITE_FAILED", "No se ha podido guardar el torneo en PostgreSQL. No se ha confirmado ningún cambio.", 503);
   } finally {
-    client.release();
+    client?.release();
+    if (isTournamentSave) console.info("[ledu-api] postgres save finished", { totalMs: Date.now() - startedAt });
   }
 }
