@@ -210,12 +210,16 @@ export interface SpeakerStanding {
   name: string;
   teamId: string;
   teamName: string;
-  rank: number;
+  /** Null means the speaker is assigned but has no scored appearance yet. */
+  rank: number | null;
   tied: boolean;
   total: number;
-  average: number;
+  average: number | null;
+  /** Number of scored appearances (or debates in the overall ranking). */
   count: number;
-  value: number;
+  /** Assigned appearances whose score is still blank. */
+  pendingCount: number;
+  value: number | null;
   /** Qualifying debates the speaker's team won against a fallen team, so nobody could score them (ADUMA). */
   fallenRivalDebates: number;
 }
@@ -233,46 +237,64 @@ export function buildSpeakerStandings(tournament: TabTournament, options: Omit<S
   const speakers = new Map(tournament.speakers.map((speaker) => [speaker.id, speaker]));
   const rounds = qualifyingRounds(tournament).filter((round) => options.upToRoundNumber === undefined || round.number <= options.upToRoundNumber);
   const values = new Map<string, Map<string, number[]>>(SPEAKER_RANKINGS.map((ranking) => [ranking.key, new Map()]));
+  const pending = new Map<string, Map<string, number>>(SPEAKER_RANKINGS.map((ranking) => [ranking.key, new Map()]));
   const fallenRivals = new Map<string, number>();
   const push = (key: string, speakerId: string, value: number) => {
     const bucket = values.get(key)!;
     bucket.set(speakerId, [...(bucket.get(speakerId) ?? []), value]);
+  };
+  const markPending = (key: string, speakerId: string) => {
+    const bucket = pending.get(key)!;
+    bucket.set(speakerId, (bucket.get(speakerId) ?? 0) + 1);
   };
   for (const round of rounds) {
     for (const debate of round.debates) {
       const outcome = outcomes.get(debate.id);
       if (outcome?.status !== 'complete') continue;
       for (const line of outcome.lines) if (line.fallenWin) fallenRivals.set(line.teamId, (fallenRivals.get(line.teamId) ?? 0) + 1);
+      const assignedSpeakers = new Set<string>();
       for (const speech of outcome.speeches) {
         if (!speech.speakerId || !speakers.has(speech.speakerId) || teams.get(speech.teamId)?.swing) continue;
-        push(speech.role, speech.speakerId, speech.score);
+        assignedSpeakers.add(speech.speakerId);
+        if (speech.score === null) markPending(speech.role, speech.speakerId);
+        else push(speech.role, speech.speakerId, speech.score);
       }
       // One value per speaker and debate (the mean of their turns, or the member's score in a joint acta).
+      const scoredSpeakers = new Set<string>();
       for (const total of outcome.speakerTotals) {
         if (!speakers.has(total.speakerId) || teams.get(total.teamId)?.swing) continue;
+        scoredSpeakers.add(total.speakerId);
         push('all', total.speakerId, total.score);
       }
+      for (const speakerId of assignedSpeakers) if (!scoredSpeakers.has(speakerId)) markPending('all', speakerId);
     }
   }
   return SPEAKER_RANKINGS.map((ranking) => {
-    const rows = [...values.get(ranking.key)!.entries()].map(([speakerId, list]) => {
+    const speakerIds = new Set([...values.get(ranking.key)!.keys(), ...pending.get(ranking.key)!.keys()]);
+    const rows = [...speakerIds].map((speakerId) => {
       const speaker = speakers.get(speakerId)!;
+      const list = values.get(ranking.key)!.get(speakerId) ?? [];
       const total = list.reduce((sum, value) => sum + value, 0);
-      const average = total / list.length;
+      const average = list.length ? total / list.length : null;
       return {
         speakerId, name: speaker.name, teamId: speaker.teamId, teamName: teams.get(speaker.teamId)?.name ?? 'Equipo desconocido',
-        rank: 0, tied: false, total, average, count: list.length, fallenRivalDebates: fallenRivals.get(speaker.teamId) ?? 0,
-        value: round6(tournament.settings.speakerMetric === 'sum' ? total : average),
+        rank: null as number | null, tied: false, total, average, count: list.length,
+        pendingCount: pending.get(ranking.key)!.get(speakerId) ?? 0,
+        fallenRivalDebates: fallenRivals.get(speaker.teamId) ?? 0,
+        value: average === null ? null : round6(tournament.settings.speakerMetric === 'sum' ? total : average),
       };
     });
     const teamOrder = (row: SpeakerStanding) => teamRank.get(row.teamId) ?? Number.MAX_SAFE_INTEGER;
-    rows.sort((x, y) => y.value - x.value || teamOrder(x) - teamOrder(y) || x.name.localeCompare(y.name, 'es'));
+    rows.sort((x, y) => (y.value ?? Number.NEGATIVE_INFINITY) - (x.value ?? Number.NEGATIVE_INFINITY) || teamOrder(x) - teamOrder(y) || x.name.localeCompare(y.name, 'es'));
+    let scoredRank = 0;
     rows.forEach((row, index) => {
+      if (row.value === null) return;
+      scoredRank++;
       const previous = rows[index - 1];
-      const same = previous && previous.value === row.value && teamOrder(previous) === teamOrder(row);
-      row.rank = same ? previous.rank : index + 1;
+      const same = previous && previous.value !== null && previous.value === row.value && teamOrder(previous) === teamOrder(row);
+      row.rank = same ? previous.rank : scoredRank;
     });
-    rows.forEach((row) => { row.tied = rows.some((other) => other !== row && other.rank === row.rank); });
+    rows.forEach((row) => { row.tied = row.rank !== null && rows.some((other) => other !== row && other.rank === row.rank); });
     return { key: ranking.key, title: ranking.title, rows };
   });
 }
