@@ -193,6 +193,8 @@ describe("Neon migration artifacts", () => {
     expect(release).toBeGreaterThan(-1);
     expect(entityBatch).toBeGreaterThan(release);
     expect(store).toContain('const entityRows: unknown[][] = rows.map');
+    const institutions = store.slice(store.indexOf("async function persistInstitutions"), store.indexOf("\nasync function upsertInstitution"));
+    expect(institutions).toContain('await insertMany(client, "institutions", ["id", "name"]');
     expect(store).toContain('row_number() OVER (ORDER BY id)');
     expect(store).toContain('const namespace = "__ledu_sync_"');
   });
