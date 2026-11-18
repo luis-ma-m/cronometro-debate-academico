@@ -200,12 +200,12 @@ describe("Neon migration artifacts", () => {
   it("loads the PostgreSQL snapshot in one round trip and records save phase timings", async () => {
     const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
     const api = await readFile(resolve("api/index.ts"), "utf8");
-    const snapshot = store.slice(store.indexOf("async function readSnapshot"), store.indexOf("\\nexport async function loadPostgresSheetData"));
+    const snapshot = store.slice(store.indexOf("async function readSnapshot"), store.indexOf("\nexport async function loadPostgresSheetData"));
     expect(snapshot).toContain("SELECT jsonb_build_object(");
     expect(snapshot).toContain("'settings'");
     expect(snapshot).toContain("'assignments'");
     expect(snapshot).toContain("'scorecards'");
-    expect(snapshot.match(/client\\.query\\(/g) || []).toHaveLength(1);
+    expect(snapshot.match(/client\.query\(/g) || []).toHaveLength(1);
     expect(snapshot).not.toMatch(/Promise\\.all\\s*\\(/);
     for (const phase of ["idempotency_read", "snapshot_read", "validation_and_diff", "postgres_write", "post_commit_cleanup"]) {
       expect(api).toContain('logSavePhase("' + phase + '")');
