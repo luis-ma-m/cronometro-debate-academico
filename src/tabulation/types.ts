@@ -160,7 +160,12 @@ export interface TabJudgeConflict {
 }
 
 /** One row of the paper's "puntos de orador": a member, the score and the interventions they made. */
-export interface TabSpeakerEntry { speakerId: string; score: number; roles: SpeakerRole[] }
+export interface TabSpeakerEntry {
+  speakerId: string;
+  /** Optional: a role assignment is valid even when its speaker score has not been entered yet. */
+  score?: number;
+  roles: SpeakerRole[];
+}
 
 /** Acta signed jointly by the jury (ADUMA art. 23): declared winner; items only break ties. */
 export interface TabJointActa {
