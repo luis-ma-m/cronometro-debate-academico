@@ -189,9 +189,10 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain('Comprueba los nombres de los equipos.');
     expect(store).toContain("async function releaseUniqueNamesForReplacement");
     const release = store.indexOf("await releaseUniqueNamesForReplacement(client, table)");
-    const upsert = store.indexOf("INSERT INTO ${table}(id,name,institution_id,active)");
+    const entityBatch = store.indexOf('await insertMany(client, table, ["id", "name", "institution_id", "active"]');
     expect(release).toBeGreaterThan(-1);
-    expect(upsert).toBeGreaterThan(release);
+    expect(entityBatch).toBeGreaterThan(release);
+    expect(store).toContain('const entityRows: unknown[][] = rows.map');
     expect(store).toContain('row_number() OVER (ORDER BY id)');
     expect(store).toContain('const namespace = "__ledu_sync_"');
   });
