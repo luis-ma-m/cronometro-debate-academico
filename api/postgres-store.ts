@@ -30,6 +30,19 @@ const iso = (value: unknown): string => value ? new Date(millis(value)).toISOStr
 const institutionId = (name: string): string =>
   "inst-" + createHash("sha256").update(name.trim().toLocaleLowerCase("es-ES")).digest("hex").slice(0, 24);
 
+function uniqueInstitutionNames(names: string[]): string[] {
+  // institutionId is case-insensitive, so deduplicate by that same identity
+  // before building a multi-row INSERT ... ON CONFLICT statement.
+  const byId = new Map<string, string>();
+  for (const value of names) {
+    const name = value.trim();
+    if (!name) continue;
+    const id = institutionId(name);
+    if (!byId.has(id)) byId.set(id, name);
+  }
+  return [...byId.values()];
+}
+
 function phasesFromRows(rows: Record<string, unknown>[], formatId: string): Phase[] {
   return rows.filter((row) => str(row.format_id) === formatId).sort((a, b) => num(a.phase_order) - num(b.phase_order)).map((row) => ({
     id: str(row.id), name: str(row.name), side: str(row.side) as Phase["side"], speaker: str(row.speaker),
@@ -405,16 +418,16 @@ async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolea
   // Resolve each distinct institution once, then persist the complete catalogue
   // in batches. The previous per-row awaits caused two sequential database
   // round-trips for every team or judge.
-  const institutionNames = [...new Set(rows
-    .map((row) => str(row.institution).trim())
-    .filter(Boolean))];
+  const institutionNames = uniqueInstitutionNames(rows.map((row) => str(row.institution)));
   const institutionRows: unknown[][] = institutionNames.map((name) => [institutionId(name), name]);
   await insertMany(client, "institutions", ["id", "name"], institutionRows,
     "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, updated_at=now()");
 
-  const institutionIds = new Map(institutionNames.map((name) => [name, institutionId(name)]));
+  const institutionIds = new Map(institutionNames.map((name) => [
+    name.toLocaleLowerCase("es-ES"), institutionId(name),
+  ]));
   const entityRows: unknown[][] = rows.map((row) => {
-    const institutionName = str(row.institution).trim();
+    const institutionName = str(row.institution).trim().toLocaleLowerCase("es-ES");
     return [str(row.id), str(row.name).trim(), institutionIds.get(institutionName) || null, bool(row.active)];
   });
   await insertMany(client, table, ["id", "name", "institution_id", "active"], entityRows,
