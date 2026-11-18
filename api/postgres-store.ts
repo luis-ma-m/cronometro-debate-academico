@@ -30,6 +30,19 @@ const iso = (value: unknown): string => value ? new Date(millis(value)).toISOStr
 const institutionId = (name: string): string =>
   "inst-" + createHash("sha256").update(name.trim().toLocaleLowerCase("es-ES")).digest("hex").slice(0, 24);
 
+function uniqueInstitutionNames(names: string[]): string[] {
+  // institutionId is case-insensitive, so deduplicate by that same identity
+  // before building a multi-row INSERT ... ON CONFLICT statement.
+  const byId = new Map<string, string>();
+  for (const value of names) {
+    const name = value.trim();
+    if (!name) continue;
+    const id = institutionId(name);
+    if (!byId.has(id)) byId.set(id, name);
+  }
+  return [...byId.values()];
+}
+
 function phasesFromRows(rows: Record<string, unknown>[], formatId: string): Phase[] {
   return rows.filter((row) => str(row.format_id) === formatId).sort((a, b) => num(a.phase_order) - num(b.phase_order)).map((row) => ({
     id: str(row.id), name: str(row.name), side: str(row.side) as Phase["side"], speaker: str(row.speaker),
@@ -65,53 +78,63 @@ async function setTransactionTimeouts(client: PoolClient): Promise<void> {
 }
 
 async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
-  const [settingsQ, institutionsQ, roundsQ, teamsQ, teamIncompatQ, judgesQ, judgeIncompatQ, speakersQ, physicalQ, formatsQ, formatPhasesQ, assignmentsQ, assignmentJudgesQ, assignmentPhasesQ, categoriesQ, cardsQ, teamScoresQ, categoryScoresQ, cardJudgesQ, speakerScoresQ, eventsQ] = await Promise.all([
-    client.query("SELECT * FROM tournament_settings WHERE id=1"),
-    client.query("SELECT * FROM institutions ORDER BY name"),
-    client.query("SELECT * FROM rounds ORDER BY number"),
-    client.query("SELECT t.*, i.name AS institution FROM teams t LEFT JOIN institutions i ON i.id=t.institution_id ORDER BY t.name"),
-    client.query("SELECT team_id,judge_id FROM team_judge_incompatibilities ORDER BY team_id,judge_id"),
-    client.query("SELECT j.*, i.name AS institution FROM judges j LEFT JOIN institutions i ON i.id=j.institution_id ORDER BY j.name"),
-    client.query("SELECT judge_id,incompatible_judge_id FROM judge_incompatibilities ORDER BY judge_id,incompatible_judge_id"),
-    client.query("SELECT * FROM speakers ORDER BY team_id, name"),
-    client.query("SELECT * FROM physical_rooms ORDER BY name"),
-    client.query("SELECT * FROM format_presets ORDER BY name"),
-    client.query("SELECT * FROM format_phases ORDER BY format_id, phase_order"),
-    client.query("SELECT * FROM room_assignments ORDER BY round_id, physical_room_id"),
-    client.query("SELECT * FROM assignment_judges ORDER BY assignment_id, judge_id"),
-    client.query("SELECT * FROM assignment_phases ORDER BY assignment_id, phase_order"),
-    client.query("SELECT * FROM score_categories ORDER BY category_order"),
-    client.query("SELECT * FROM scorecards ORDER BY created_at"),
-    client.query("SELECT * FROM scorecard_team_scores"),
-    client.query("SELECT * FROM scorecard_category_scores"),
-    client.query("SELECT * FROM scorecard_judges"),
-    client.query("SELECT * FROM scorecard_speaker_scores"),
-    client.query("SELECT * FROM audit_events ORDER BY occurred_at"),
-  ]);
-  const settings = settingsQ.rows[0] as Record<string, unknown> | undefined;
+  // Queries on one PoolClient are serialized, so issuing many of them creates
+  // sequential network round-trips. Read the complete consistent snapshot in one statement.
+  const result = await client.query(`
+    SELECT jsonb_build_object(
+      'settings', (SELECT to_jsonb(t) FROM tournament_settings t WHERE id=1),
+      'institutions', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM institutions ORDER BY name) q), '[]'::jsonb),
+      'rounds', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM rounds ORDER BY number) q), '[]'::jsonb),
+      'teams', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT t.*, i.name AS institution FROM teams t LEFT JOIN institutions i ON i.id=t.institution_id ORDER BY t.name) q), '[]'::jsonb),
+      'teamIncompatibilities', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT team_id,judge_id FROM team_judge_incompatibilities ORDER BY team_id,judge_id) q), '[]'::jsonb),
+      'judges', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT j.*, i.name AS institution FROM judges j LEFT JOIN institutions i ON i.id=j.institution_id ORDER BY j.name) q), '[]'::jsonb),
+      'judgeIncompatibilities', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT judge_id,incompatible_judge_id FROM judge_incompatibilities ORDER BY judge_id,incompatible_judge_id) q), '[]'::jsonb),
+      'speakers', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM speakers ORDER BY team_id, name) q), '[]'::jsonb),
+      'physicalRooms', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM physical_rooms ORDER BY name) q), '[]'::jsonb),
+      'formats', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM format_presets ORDER BY name) q), '[]'::jsonb),
+      'formatPhases', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM format_phases ORDER BY format_id, phase_order) q), '[]'::jsonb),
+      'assignments', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM room_assignments ORDER BY round_id, physical_room_id) q), '[]'::jsonb),
+      'assignmentJudges', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM assignment_judges ORDER BY assignment_id, judge_id) q), '[]'::jsonb),
+      'assignmentPhases', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM assignment_phases ORDER BY assignment_id, phase_order) q), '[]'::jsonb),
+      'categories', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM score_categories ORDER BY category_order) q), '[]'::jsonb),
+      'cards', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecards ORDER BY created_at) q), '[]'::jsonb),
+      'teamScores', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecard_team_scores) q), '[]'::jsonb),
+      'categoryScores', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecard_category_scores) q), '[]'::jsonb),
+      'cardJudges', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecard_judges) q), '[]'::jsonb),
+      'speakerScores', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM scorecard_speaker_scores) q), '[]'::jsonb),
+      'events', COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM (SELECT * FROM audit_events ORDER BY occurred_at) q), '[]'::jsonb)
+    ) AS snapshot
+  `);
+  const snapshot = result.rows[0]?.snapshot as Record<string, unknown> | undefined;
+  if (!snapshot) throw new ApiError("DATABASE_NOT_INITIALIZED", "Neon no ha devuelto el estado del torneo.", 503);
+  const asRows = (key: string) => Array.isArray(snapshot[key]) ? snapshot[key] as Record<string, unknown>[] : [];
+  const settings = snapshot.settings as Record<string, unknown> | null;
   if (!settings) throw new ApiError("DATABASE_NOT_INITIALIZED", "Neon está conectado, pero falta inicializar el esquema y los valores base. Ejecuta db:migrate y db:seed en la base correcta.", 503);
-  const settingsJson = settings ? (settings.settings as Record<string, unknown> || {}) : {};
-  const institutions = institutionsQ.rows as Record<string, unknown>[];
-  const rounds = roundsQ.rows as Record<string, unknown>[];
-  const teamIncompatibilities = teamIncompatQ.rows as Record<string, unknown>[];
-  const judgeIncompatibilities = judgeIncompatQ.rows as Record<string, unknown>[];
+  const institutions = asRows("institutions");
+  const rounds = asRows("rounds");
+  const teamsQ = asRows("teams");
+  const teamIncompatibilities = asRows("teamIncompatibilities");
+  const judgesQ = asRows("judges");
+  const judgeIncompatibilities = asRows("judgeIncompatibilities");
+  const speakers = asRows("speakers");
+  const physicalRooms = asRows("physicalRooms");
+  const formatRows = asRows("formats");
+  const formatPhases = asRows("formatPhases");
+  const assignments = asRows("assignments");
+  const assignmentJudges = asRows("assignmentJudges");
+  const assignmentPhases = asRows("assignmentPhases");
+  const categories = asRows("categories");
+  const cards = asRows("cards");
+  const teamScores = asRows("teamScores");
+  const categoryScores = asRows("categoryScores");
+  const cardJudges = asRows("cardJudges");
+  const speakerScores = asRows("speakerScores");
+  const events = asRows("events");
+  const settingsJson = settings.settings as Record<string, unknown> || {};
   const teamIncompatibilitiesByTeam = groupByString(teamIncompatibilities, "team_id");
   const judgeIncompatibilitiesByJudge = groupByString(judgeIncompatibilities, "judge_id");
-  const teams: Record<string, unknown>[] = (teamsQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: (teamIncompatibilitiesByTeam.get(str(row.id)) || []).map((item) => str(item.judge_id)) }));
-  const judges: Record<string, unknown>[] = (judgesQ.rows as Record<string, unknown>[]).map((row) => ({ ...row, incompatible_judge_ids: (judgeIncompatibilitiesByJudge.get(str(row.id)) || []).map((item) => str(item.incompatible_judge_id)) }));
-  const speakers = speakersQ.rows as Record<string, unknown>[];
-  const physicalRooms = physicalQ.rows as Record<string, unknown>[];
-  const formatRows = formatsQ.rows as Record<string, unknown>[];
-  const formatPhases = formatPhasesQ.rows as Record<string, unknown>[];
-  const assignments = assignmentsQ.rows as Record<string, unknown>[];
-  const assignmentJudges = assignmentJudgesQ.rows as Record<string, unknown>[];
-  const assignmentPhases = assignmentPhasesQ.rows as Record<string, unknown>[];
-  const categories = categoriesQ.rows as Record<string, unknown>[];
-  const cards = cardsQ.rows as Record<string, unknown>[];
-  const teamScores = teamScoresQ.rows as Record<string, unknown>[];
-  const categoryScores = categoryScoresQ.rows as Record<string, unknown>[];
-  const cardJudges = cardJudgesQ.rows as Record<string, unknown>[];
-  const speakerScores = speakerScoresQ.rows as Record<string, unknown>[];
+  const teams: Record<string, unknown>[] = teamsQ.map((row) => ({ ...row, incompatible_judge_ids: (teamIncompatibilitiesByTeam.get(str(row.id)) || []).map((item) => str(item.judge_id)) }));
+  const judges: Record<string, unknown>[] = judgesQ.map((row) => ({ ...row, incompatible_judge_ids: (judgeIncompatibilitiesByJudge.get(str(row.id)) || []).map((item) => str(item.incompatible_judge_id)) }));
 
   const teamsById = new Map(teams.map((row) => [str(row.id), row]));
   const judgesById = new Map(judges.map((row) => [str(row.id), row]));
@@ -173,13 +196,13 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     scorecards,
   });
   const config: SheetRow[] = [
-    { key: "tournamentName", value: str(settings?.tournament_name) || "Torneo LEDU" },
-    { key: "activeRoundId", value: str(settings?.active_round_id) },
-    { key: "activationRevision", value: str(settings?.activation_revision ?? 0) },
-    { key: "activatedAt", value: str(millis(settings?.activated_at)) },
-    { key: "revision", value: str(settings?.revision ?? 1) },
-    { key: "updatedAt", value: str(millis(settings?.updated_at)) },
-    { key: "minimumJudgesPerRoom", value: str(settings?.minimum_judges_per_room ?? 1) },
+    { key: "tournamentName", value: str(settings.tournament_name) || "Torneo LEDU" },
+    { key: "activeRoundId", value: str(settings.active_round_id) },
+    { key: "activationRevision", value: str(settings.activation_revision ?? 0) },
+    { key: "activatedAt", value: str(millis(settings.activated_at)) },
+    { key: "revision", value: str(settings.revision ?? 1) },
+    { key: "updatedAt", value: str(millis(settings.updated_at)) },
+    { key: "minimumJudgesPerRoom", value: str(settings.minimum_judges_per_room ?? 1) },
     { key: "institutions", value: JSON.stringify(institutions.map((row) => str(row.name))) },
     { key: "speakers", value: JSON.stringify(speakers.map((row) => ({ id: str(row.id), teamId: str(row.team_id), name: str(row.name) }))) },
     { key: "formatPhases", value: JSON.stringify(parseJson(settingsJson.formatPhases, defaultPhases())) },
@@ -214,7 +237,7 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     lastResumedAt: row.last_resumed_at ? millis(row.last_resumed_at) : "",
     revision: num(row.timer_revision), updatedAt: millis(row.timer_updated_at),
   }));
-  const eventRows = (eventsQ.rows as Record<string, unknown>[]).map((row) => ({
+  const eventRows = events.map((row) => ({
     event_id: str(row.event_key), timestamp_utc: iso(row.occurred_at), room_round_id: str(row.assignment_id),
     round_id: str(row.round_id), room_id: str(row.assignment_id), phase_index: str(row.phase_index ?? ""),
     event_type: str(row.event_type), elapsed_seconds: "", details: JSON.stringify(row.details ?? {}),
@@ -230,7 +253,6 @@ async function readSnapshot(client: PoolClient): Promise<PostgresSheetData> {
     raw, rows,
   };
 }
-
 export async function loadPostgresSheetData(): Promise<PostgresSheetData> {
   const client = await getPool().connect();
   try {
@@ -338,21 +360,12 @@ async function persistInstitutions(client: PoolClient, value: string): Promise<v
   const names = parseJson<unknown>(value, []);
   if (!Array.isArray(names)) throw new ApiError("INVALID_INSTITUTIONS", "El catálogo de instituciones debe ser una lista.", 400);
   const normalized = [...new Set(names.filter((name): name is string => typeof name === "string").map((name) => name.trim()).filter(Boolean))];
-  for (const name of normalized) await upsertInstitution(client, name);
+  const institutionRows: unknown[][] = normalized.map((name) => [institutionId(name), name]);
+  await insertMany(client, "institutions", ["id", "name"], institutionRows,
+    "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, updated_at=now()");
   const ids = normalized.map(institutionId);
   if (ids.length) await client.query("DELETE FROM institutions WHERE NOT (id = ANY($1::text[]))", [ids]);
   else await client.query("DELETE FROM institutions");
-}
-
-async function upsertInstitution(client: PoolClient, nameValue: unknown): Promise<string | null> {
-  const name = str(nameValue).trim();
-  if (!name) return null;
-  const id = institutionId(name);
-  await client.query(
-    "INSERT INTO institutions(id,name) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, updated_at=now()",
-    [id, name],
-  );
-  return id;
 }
 
 async function persistRounds(client: PoolClient, rows: SheetRow[]): Promise<void> {
@@ -399,17 +412,26 @@ async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolea
     }
     seenNames.add(key);
   }
+
   await releaseUniqueNamesForReplacement(client, table);
-  for (const row of rows) {
-    const institution = await upsertInstitution(client, row.institution);
-    await client.query(
-      `INSERT INTO ${table}(id,name,institution_id,active)
-       VALUES($1,$2,$3,$4)
-       ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,institution_id=EXCLUDED.institution_id,
-       active=EXCLUDED.active,updated_at=now()`,
-      [str(row.id), str(row.name).trim(), institution, bool(row.active)],
-    );
-  }
+
+  // Resolve each distinct institution once, then persist the complete catalogue
+  // in batches. The previous per-row awaits caused two sequential database
+  // round-trips for every team or judge.
+  const institutionNames = uniqueInstitutionNames(rows.map((row) => str(row.institution)));
+  const institutionRows: unknown[][] = institutionNames.map((name) => [institutionId(name), name]);
+  await insertMany(client, "institutions", ["id", "name"], institutionRows,
+    "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, updated_at=now()");
+
+  const institutionIds = new Map(institutionNames.map((name) => [
+    name.toLocaleLowerCase("es-ES"), institutionId(name),
+  ]));
+  const entityRows: unknown[][] = rows.map((row) => {
+    const institutionName = str(row.institution).trim().toLocaleLowerCase("es-ES");
+    return [str(row.id), str(row.name).trim(), institutionIds.get(institutionName) || null, bool(row.active)];
+  });
+  await insertMany(client, table, ["id", "name", "institution_id", "active"], entityRows,
+    "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,institution_id=EXCLUDED.institution_id,active=EXCLUDED.active,updated_at=now()");
 }
 
 async function persistIncompatibilities(client: PoolClient, teams: SheetRow[], judges: SheetRow[]): Promise<void> {
@@ -461,7 +483,7 @@ async function persistPhysicalRooms(client: PoolClient, rows: SheetRow[]): Promi
   );
 }
 
-async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers: SheetRow[], oldRooms: SheetRow[], oldTimers: SheetRow[], forceRelations = false): Promise<void> {
+async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers: SheetRow[], oldRooms: SheetRow[], oldTimers: SheetRow[], forceRelations = false, trace = false): Promise<void> {
   const timerById = new Map(timers.map((row) => [str(row.roomId), row]));
   const needsScoredCheck = forceRelations || rooms.some((row) => {
     const oldRoom = getRow(oldRooms, str(row.id));
@@ -479,6 +501,8 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     const phasesChanged = !oldRoom || !same(parseJson(oldRoom.phases, []), phases);
     const staticChanged = forceRelations || !oldRoom || ["roundId","physicalRoomId","formatId","teamFavorId","teamContraId","notes"].some((key) => str(oldRoom[key]) !== str(row[key])) || phasesChanged || !same(parseStringArray(oldRoom.judgeIds), parseStringArray(row.judgeIds));
     if (!staticChanged) continue;
+    const assignmentStartedAt = Date.now();
+    if (trace) console.info("[ledu-api] postgres save assignment started", { assignmentId: id, roomCount: rooms.length, phaseCount: phases.length, judgeCount: parseStringArray(row.judgeIds).length });
     if (scoredAssignmentIds.has(id) && phasesChanged) {
       throw new ApiError("SCORED_ASSIGNMENT_PHASES_IMMUTABLE", "No se pueden modificar las fases históricas de una asignación que ya tiene un acta.", 409);
     }
@@ -518,6 +542,7 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
       const judgeRows: unknown[][] = judgeIds.map((judgeId) => [id, judgeId]);
       await insertMany(client, "assignment_judges", ["assignment_id", "judge_id"], judgeRows);
     }
+    if (trace) console.info("[ledu-api] postgres save assignment completed", { assignmentId: id, durationMs: Date.now() - assignmentStartedAt });
   }
   // Timer updates are optimistic and row-scoped. A stale timer revision cannot overwrite another device.
   for (const timer of timers) {
@@ -526,6 +551,8 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
     const changed = !old || !same(old, timer);
     if (!changed) continue;
     if (!old) continue; // New assignments already received their initial timer in the INSERT above.
+    const timerStartedAt = Date.now();
+    if (trace) console.info("[ledu-api] postgres save timer update started", { assignmentId: id });
     const oldRevision = num(old.revision);
     const result = await client.query(
       `UPDATE room_assignments SET timer_status=$1,phase_index=$2,remaining_seconds=$3,
@@ -537,6 +564,7 @@ async function persistAssignments(client: PoolClient, rooms: SheetRow[], timers:
       [str(timer.status), num(timer.phaseIndex), num(timer.remainingSeconds), num(timer.startedAt), num(timer.lastResumedAt), num(timer.revision), num(timer.updatedAt), id, oldRevision],
     );
     if (result.rowCount !== 1) throw new ApiError("REVISION_CONFLICT", "El cronómetro cambió en otro dispositivo. Actualiza el estado.", 409);
+    if (trace) console.info("[ledu-api] postgres save timer update completed", { assignmentId: id, durationMs: Date.now() - timerStartedAt });
   }
 }
 
@@ -687,83 +715,106 @@ function describeDatabaseConstraint(error: unknown): string {
 }
 
 export async function writePostgresTables(data: PostgresSheetData, replacements: Partial<Record<SheetName, SheetRow[]>>, appendEvent?: unknown[]): Promise<void> {
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    await setTransactionTimeouts(client);
-    await client.query("SET CONSTRAINTS ALL DEFERRED");
-    if (replacements.Config) await persistConfig(client, data.rows.Config, replacements.Config);
-    // Parent rows must exist before rounds and assignments reference them.
-    if (replacements.Formatos) await persistFormats(client, replacements.Formatos);
-    if (replacements.Rondas) await persistRounds(client, replacements.Rondas);
-    if (replacements.Equipos) await persistTeams(client, replacements.Equipos, false);
-    if (replacements.Jueces) await persistTeams(client, replacements.Jueces, true);
-    if (replacements.Equipos || replacements.Jueces) {
-      await persistIncompatibilities(client, replacements.Equipos || data.rows.Equipos, replacements.Jueces || data.rows.Jueces);
+  const isTournamentSave = str(appendEvent?.[6]) === "tournament_saved";
+  const startedAt = Date.now();
+  let phaseStartedAt = startedAt;
+  const runPhase = async <T>(phase: string, action: () => Promise<T>): Promise<T> => {
+    if (isTournamentSave) console.info("[ledu-api] postgres save phase started", { phase, elapsedMs: Date.now() - startedAt });
+    phaseStartedAt = Date.now();
+    try {
+      const result = await action();
+      if (isTournamentSave) console.info("[ledu-api] postgres save phase completed", { phase, durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - startedAt });
+      return result;
+    } catch (error) {
+      if (isTournamentSave) console.error("[ledu-api] postgres save phase failed", {
+        phase, durationMs: Date.now() - phaseStartedAt, elapsedMs: Date.now() - startedAt,
+        code: (error as { code?: string })?.code,
+        errorName: error instanceof Error ? error.name : "unknown",
+      });
+      throw error;
     }
-    if (replacements.SalasFisicas) await persistPhysicalRooms(client, replacements.SalasFisicas);
+  };
+  let client: PoolClient | null = null;
+  try {
+    client = await runPhase("connection_acquire", () => getPool().connect());
+    await runPhase("transaction_begin_and_settings", async () => {
+      await client!.query("BEGIN");
+      await setTransactionTimeouts(client!);
+      await client!.query("SET CONSTRAINTS ALL DEFERRED");
+    });
+    if (replacements.Config) await runPhase("config", () => persistConfig(client!, data.rows.Config, replacements.Config!));
+    // Parent rows must exist before rounds and assignments reference them.
+    if (replacements.Formatos) await runPhase("formats", () => persistFormats(client!, replacements.Formatos!));
+    if (replacements.Rondas) await runPhase("rounds", () => persistRounds(client!, replacements.Rondas!));
+    if (replacements.Equipos) await runPhase("teams", () => persistTeams(client!, replacements.Equipos!, false));
+    if (replacements.Jueces) await runPhase("judges", () => persistTeams(client!, replacements.Jueces!, true));
+    if (replacements.Equipos || replacements.Jueces) {
+      await runPhase("incompatibilities", () => persistIncompatibilities(client!, replacements.Equipos || data.rows.Equipos, replacements.Jueces || data.rows.Jueces));
+    }
+    if (replacements.SalasFisicas) await runPhase("physical_rooms", () => persistPhysicalRooms(client!, replacements.SalasFisicas!));
     const rebuildAssignmentRelations = assignmentRelationsChanged(data, replacements);
     if (rebuildAssignmentRelations) {
-      // Room/team/judge claims are unique across a round. Release them only
-      // when assignment identities actually change (including swaps), then
-      // rebuild the complete relation set atomically.
-      await client.query("DELETE FROM round_team_claims");
-      await client.query("DELETE FROM round_room_claims");
-      await client.query("DELETE FROM assignment_judges WHERE assignment_id NOT IN (SELECT assignment_id FROM scorecards)");
+      await runPhase("release_assignment_claims", async () => {
+        // Room/team/judge claims are unique across a round. Release them only
+        // when assignment identities actually change (including swaps), then rebuild atomically.
+        await client!.query("DELETE FROM round_team_claims");
+        await client!.query("DELETE FROM round_room_claims");
+        await client!.query("DELETE FROM assignment_judges WHERE assignment_id NOT IN (SELECT assignment_id FROM scorecards)");
+      });
     }
     if (replacements.Salas || replacements.Cronometros || rebuildAssignmentRelations) {
-      await persistAssignments(client, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
-        data.rows.Salas, data.rows.Cronometros, rebuildAssignmentRelations);
+      await runPhase("assignments", () => persistAssignments(client!, replacements.Salas || data.rows.Salas, replacements.Cronometros || data.rows.Cronometros,
+        data.rows.Salas, data.rows.Cronometros, rebuildAssignmentRelations, isTournamentSave));
     }
     if (replacements.Config) {
       const config = replacements.Config;
       if (!same(parseJson(getConfig(config, "institutions"), []), parseJson(getConfig(data.rows.Config, "institutions"), []))) {
-        await persistInstitutions(client, getConfig(config, "institutions"));
+        await runPhase("institutions", () => persistInstitutions(client!, getConfig(config, "institutions")));
       }
       if (!same(parseJson(getConfig(config, "speakers"), []), parseJson(getConfig(data.rows.Config, "speakers"), []))) {
-        await persistSpeakers(client, getConfig(config, "speakers"));
+        await runPhase("speakers", () => persistSpeakers(client!, getConfig(config, "speakers")));
       }
       if (!same(parseJson(getConfig(config, "scoring"), emptyScoringConfig()), parseJson(getConfig(data.rows.Config, "scoring"), emptyScoringConfig()))) {
-        await persistScoring(client, getConfig(config, "scoring"));
+        await runPhase("scoring", () => persistScoring(client!, getConfig(config, "scoring")));
       }
     }
-    // Each collection is a complete replacement only when its semantic
-    // contents changed. Delete obsolete rows for that collection independently;
-    // room deletions must not depend on an unrelated team edit.
-    if (replacements.Salas) {
-      const ids = replacements.Salas.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM room_assignments WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM room_assignments");
-    }
-    if (replacements.Equipos) {
-      const ids = replacements.Equipos.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM teams WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM teams");
-    }
-    if (replacements.Jueces) {
-      const ids = replacements.Jueces.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM judges WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM judges");
-    }
-    if (replacements.SalasFisicas) {
-      const ids = replacements.SalasFisicas.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM physical_rooms WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM physical_rooms");
-    }
-    if (replacements.Rondas) {
-      const ids = replacements.Rondas.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM rounds WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM rounds");
-    }
-    if (replacements.Formatos) {
-      const ids = replacements.Formatos.map((row) => str(row.id));
-      if (ids.length) await client.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [ids]);
-      else await client.query("DELETE FROM format_presets");
-    }
-    if (appendEvent) await persistEvent(client, appendEvent);
-    await client.query("COMMIT");
+    await runPhase("obsolete_rows_cleanup", async () => {
+      // Each collection is a complete replacement only when its semantic contents changed.
+      if (replacements.Salas) {
+        const ids = replacements.Salas.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM room_assignments WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM room_assignments");
+      }
+      if (replacements.Equipos) {
+        const ids = replacements.Equipos.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM teams WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM teams");
+      }
+      if (replacements.Jueces) {
+        const ids = replacements.Jueces.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM judges WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM judges");
+      }
+      if (replacements.SalasFisicas) {
+        const ids = replacements.SalasFisicas.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM physical_rooms WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM physical_rooms");
+      }
+      if (replacements.Rondas) {
+        const ids = replacements.Rondas.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM rounds WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM rounds");
+      }
+      if (replacements.Formatos) {
+        const ids = replacements.Formatos.map((row) => str(row.id));
+        if (ids.length) await client!.query("DELETE FROM format_presets WHERE NOT (id = ANY($1::text[]))", [ids]);
+        else await client!.query("DELETE FROM format_presets");
+      }
+    });
+    if (appendEvent) await runPhase("audit_event_and_idempotency", () => persistEvent(client!, appendEvent));
+    await runPhase("commit", () => client!.query("COMMIT").then(() => undefined));
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
+    if (client) await runPhase("rollback", () => client!.query("ROLLBACK").then(() => undefined)).catch(() => undefined);
     if (error instanceof ApiError) throw error;
     const code = (error as { code?: string })?.code;
     if (code === "57014" || code === "55P03" || code === "40P01") {
@@ -774,6 +825,7 @@ export async function writePostgresTables(data: PostgresSheetData, replacements:
     }
     throw new ApiError("DATABASE_WRITE_FAILED", "No se ha podido guardar el torneo en PostgreSQL. No se ha confirmado ningún cambio.", 503);
   } finally {
-    client.release();
+    client?.release();
+    if (isTournamentSave) console.info("[ledu-api] postgres save finished", { totalMs: Date.now() - startedAt });
   }
 }

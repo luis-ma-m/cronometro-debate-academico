@@ -69,6 +69,14 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain("await insertMany(client, \"assignment_phases\"");
   });
 
+  it("deduplicates institution batch rows using the case-insensitive institution ID", async () => {
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    expect(store).toContain("function uniqueInstitutionNames(names: string[]): string[]");
+    expect(store).toContain("const institutionNames = uniqueInstitutionNames(rows.map((row) => str(row.institution)))");
+    expect(store).toContain('name.toLocaleLowerCase("es-ES"), institutionId(name)');
+    expect(store).toContain('str(row.institution).trim().toLocaleLowerCase("es-ES")');
+  });
+
   it("persists timer audit and idempotency in the same write transaction", async () => {
     const api = await readFile(resolve("api/index.ts"), "utf8");
     const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
@@ -189,11 +197,32 @@ describe("Neon migration artifacts", () => {
     expect(store).toContain('Comprueba los nombres de los equipos.');
     expect(store).toContain("async function releaseUniqueNamesForReplacement");
     const release = store.indexOf("await releaseUniqueNamesForReplacement(client, table)");
-    const upsert = store.indexOf("INSERT INTO ${table}(id,name,institution_id,active)");
+    const entityBatch = store.indexOf('await insertMany(client, table, ["id", "name", "institution_id", "active"]');
     expect(release).toBeGreaterThan(-1);
-    expect(upsert).toBeGreaterThan(release);
+    expect(entityBatch).toBeGreaterThan(release);
+    expect(store).toContain('const entityRows: unknown[][] = rows.map');
+    const institutions = store.slice(store.indexOf("async function persistInstitutions"), store.indexOf("\nasync function upsertInstitution"));
+    expect(institutions).toContain('await insertMany(client, "institutions", ["id", "name"]');
     expect(store).toContain('row_number() OVER (ORDER BY id)');
     expect(store).toContain('const namespace = "__ledu_sync_"');
   });
+
+
+  it("loads the PostgreSQL snapshot in one round trip and records save phase timings", async () => {
+    const store = await readFile(resolve("api/postgres-store.ts"), "utf8");
+    const api = await readFile(resolve("api/index.ts"), "utf8");
+    const snapshot = store.slice(store.indexOf("async function readSnapshot"), store.indexOf("\nexport async function loadPostgresSheetData"));
+    expect(snapshot).toContain("SELECT jsonb_build_object(");
+    expect(snapshot).toContain("'settings'");
+    expect(snapshot).toContain("'assignments'");
+    expect(snapshot).toContain("'cards'");
+    expect(snapshot.match(/client\.query\(/g) || []).toHaveLength(1);
+    expect(snapshot).not.toContain("Promise.all(");
+    for (const phase of ["idempotency_read", "snapshot_read", "validation_and_diff", "postgres_write", "post_commit_cleanup"]) {
+      expect(api).toContain('logSavePhase("' + phase + '")');
+    }
+    expect(api).toContain("saveTournament write failed");
+  });
+
 
 });
