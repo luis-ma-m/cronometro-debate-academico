@@ -277,4 +277,19 @@ describe('WhatsApp numbers and links', () => {
     expect(whatsAppUrl('34600112233', 'Hola y adiós')).toBe('https://wa.me/34600112233?text=Hola%20y%20adi%C3%B3s');
     expect(whatsAppUrl('', 'Hola')).toBe('https://wa.me/?text=Hola');
   });
+
+  it('round-trips assigned speakers without a score through compact WhatsApp acta codes', () => {
+    const tournament = aduma();
+    const { link } = linkOf(tournament);
+    const unsigned = entry({
+      speakers: { a: [{ speakerId: 'a-s1', roles: ['introductor'] }], b: [] },
+    });
+    const code = encodeActaCode(link, onPhone(tournament, link, unsigned));
+    const received = readActaCode(tournament, code);
+    expect(received.error).toBeNull();
+    expect(received.payload?.speakers.a).toEqual([
+      { speakerId: 'a-s1', roles: ['introductor'] },
+    ]);
+  });
+
 });
