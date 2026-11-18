@@ -408,17 +408,26 @@ async function persistTeams(client: PoolClient, rows: SheetRow[], judges: boolea
     }
     seenNames.add(key);
   }
+
   await releaseUniqueNamesForReplacement(client, table);
-  for (const row of rows) {
-    const institution = await upsertInstitution(client, row.institution);
-    await client.query(
-      `INSERT INTO ${table}(id,name,institution_id,active)
-       VALUES($1,$2,$3,$4)
-       ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,institution_id=EXCLUDED.institution_id,
-       active=EXCLUDED.active,updated_at=now()`,
-      [str(row.id), str(row.name).trim(), institution, bool(row.active)],
-    );
-  }
+
+  // Resolve each distinct institution once, then persist the complete catalogue
+  // in batches. The previous per-row awaits caused two sequential database
+  // round-trips for every team or judge.
+  const institutionNames = [...new Set(rows
+    .map((row) => str(row.institution).trim())
+    .filter(Boolean))];
+  const institutionRows: unknown[][] = institutionNames.map((name) => [institutionId(name), name]);
+  await insertMany(client, "institutions", ["id", "name"], institutionRows,
+    "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, updated_at=now()");
+
+  const institutionIds = new Map(institutionNames.map((name) => [name, institutionId(name)]));
+  const entityRows: unknown[][] = rows.map((row) => {
+    const institutionName = str(row.institution).trim();
+    return [str(row.id), str(row.name).trim(), institutionIds.get(institutionName) || null, bool(row.active)];
+  });
+  await insertMany(client, table, ["id", "name", "institution_id", "active"], entityRows,
+    "ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name,institution_id=EXCLUDED.institution_id,active=EXCLUDED.active,updated_at=now()");
 }
 
 async function persistIncompatibilities(client: PoolClient, teams: SheetRow[], judges: SheetRow[]): Promise<void> {
