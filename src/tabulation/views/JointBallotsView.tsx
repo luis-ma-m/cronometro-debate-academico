@@ -10,7 +10,7 @@ import { Empty, formatNumber, IssueList, lookups, markUnsaved, Notice, parseDeci
 
 interface PenaltyDraft { warnings: string; minors: string; majors: string; disqualified: boolean }
 interface SpeakerDraft { score: string; roles: SpeakerRole[] }
-interface JointDraft {
+export interface JointDraft {
   favorTeamId: string;
   winnerTeamId: string;
   judgeIds: string[];
@@ -41,7 +41,7 @@ function previousRoles(tournament: TabTournament, round: TabRound, teamId: strin
   return {};
 }
 
-function draftFor(tournament: TabTournament, round: TabRound, debate: TabDebate): JointDraft {
+export function draftFor(tournament: TabTournament, round: TabRound, debate: TabDebate): JointDraft {
   const result = debate.result;
   const joint = result?.joint;
   const totals = (values: Record<string, number> | undefined) => Object.fromEntries(debate.teamIds.map((teamId) => [teamId, asText(values?.[teamId])]));
@@ -72,7 +72,7 @@ function numbers(values: Record<string, string>): Record<string, number> {
   return Object.fromEntries(Object.entries(values).map(([key, text]) => [key, parseDecimal(text)]).filter((entry): entry is [string, number] => entry[1] !== null));
 }
 
-function applyJoint(debate: TabDebate, draft: JointDraft, elimination: boolean): TabDebate {
+export function applyJoint(debate: TabDebate, draft: JointDraft, elimination: boolean): TabDebate {
   const quickTotals = numbers(draft.quickTotals);
   const writtenTotals = numbers(draft.writtenTotals);
   const joint: TabJointActa = {
@@ -82,7 +82,9 @@ function applyJoint(debate: TabDebate, draft: JointDraft, elimination: boolean):
     ...(!elimination && Object.keys(writtenTotals).length ? { writtenTotals } : {}),
     speakers: elimination ? {} : Object.fromEntries(debate.teamIds.map((teamId) => [teamId, Object.entries(draft.speakers[teamId] ?? {}).flatMap(([speakerId, entry]) => {
       const score = parseDecimal(entry.score);
-      return score === null ? [] : [{ speakerId, score, roles: SPEAKER_ROLES.filter((role) => entry.roles.includes(role)) }];
+      const roles = SPEAKER_ROLES.filter((role) => entry.roles.includes(role));
+      // Keep the participant and their interventions even when the score is still blank.
+      return score === null && !roles.length ? [] : [{ speakerId, ...(score === null ? {} : { score }), roles }];
     })])),
   };
   const judgeIds = [...new Set(draft.judgeIds.filter(Boolean))];
