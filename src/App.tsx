@@ -1787,6 +1787,34 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
   const fullyAssigned = Boolean(snapshot?.hasAssignment && snapshot.teamFavor && snapshot.teamContra &&
     snapshot.judges.length >= (snapshot.minimumJudgesPerRoom ?? 1) && room?.phases.length);
   const [transitionUntil, setTransitionUntil] = useState(0);
+  const timerShellRef = useRef<HTMLElement | null>(null);
+  const [isProjected, setIsProjected] = useState(false);
+
+  useEffect(() => {
+    const syncFullscreenState = () => setIsProjected(document.fullscreenElement === timerShellRef.current);
+    const exitWithEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && document.fullscreenElement === timerShellRef.current) {
+        void document.exitFullscreen();
+      }
+    };
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    window.addEventListener('keydown', exitWithEscape);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreenState);
+      window.removeEventListener('keydown', exitWithEscape);
+    };
+  }, []);
+
+  const toggleProjection = async () => {
+    const shell = timerShellRef.current;
+    if (!shell) return;
+    try {
+      if (document.fullscreenElement === shell) await document.exitFullscreen();
+      else await shell.requestFullscreen();
+    } catch {
+      // Fullscreen can be denied by browser policy; timer operation remains untouched.
+    }
+  };
   const lastActivationRevision = useRef<number | null>(null);
   const transitioning = transitionUntil > now;
   const transitionSeconds = Math.max(0, Math.ceil((transitionUntil - now) / 1000));
@@ -1824,12 +1852,13 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
     onAction(action);
   };
 
-  return <main className="timer-shell">
+  return <main ref={timerShellRef} className={'timer-shell' + (isProjected ? ' timer-projected' : '')}>
     <header className="timer-top">
       <a href="/gestion" className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></a>
       <div className="timer-top-actions">
         <span className="public-pill"><i className={connected ? '' : 'disconnected'} />{!connected ? 'SIN CONEXIÓN' : syncPending ? 'PENDIENTE DE SINCRONIZAR' : 'SINCRONIZADO'}</span>
         <button className="button secondary sound-toggle" onClick={onToggleSound} aria-pressed={soundEnabled}><>{soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}{soundEnabled ? 'Avisos sonoros activados' : 'Activar sonido'}</></button>
+        <button className="button secondary projection-toggle" onClick={() => void toggleProjection()} aria-pressed={isProjected} title={isProjected ? 'Salir de pantalla completa (Esc)' : 'Mostrar cronómetro en pantalla completa'}>{isProjected ? <Minimize2 size={15} /> : <Maximize2 size={15} />}{isProjected ? 'Salir' : 'Proyectar'}</button>
       </div>
     </header>
     {!snapshot ? <section className="timer-empty"><Monitor size={36} /><h1>Sala no disponible</h1><p>{error || 'La sala física no existe o aún no se ha configurado.'}</p><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Reintentar</button></section>
@@ -1852,7 +1881,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
       {snapshot.featuredMessage && <FeaturedMessageBanner key={snapshot.featuredMessage.id} message={snapshot.featuredMessage} now={now} serverOffsetMs={serverOffsetMs} />}
       <section className="timer-card timer-primary-card">
         <div className="timer-status"><span className={'state-pill ' + (timedOut ? 'paused' : room?.timer.status || '')}>{ended ? 'Debate finalizado' : timedOut ? 'Tiempo agotado · exceso de tiempo' : room?.timer.status === 'running' ? 'Intervención en curso' : room?.timer.status === 'paused' ? 'Cronómetro pausado' : 'Preparado para comenzar'}</span><span>{snapshot.physicalRoomName} · {snapshot.roundName}</span></div>
-        <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''} · {phase?.side === 'favor' ? 'A favor' : phase?.side === 'contra' ? 'En contra' : ''}</b></div>
+        <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{[phase?.speaker, phase?.side === 'favor' ? 'A favor · ' + snapshot.teamFavor : phase?.side === 'contra' ? 'En contra · ' + snapshot.teamContra : ''].filter(Boolean).join(' · ')}</b></div>
         <div className={'timer-digits ' + (timedOut ? 'overtime' : (room?.timer.status === 'running' && hasReachedWarning(phase, left) ? 'warning' : '')) + (room?.timer.status === 'running' && reachedWarningCount(phase, left) >= 2 ? ' blink' : '')}>{formatTime(phase?.allowOvertimeDisplay === false && left < 0 ? 0 : left)}</div>
         <div className="timer-track"><div style={{ width: pct + '%' }} /></div>
         {!fullyAssigned && <div className="notice warning-notice timer-assignment-warning"><CircleHelp size={16} /><span>Para iniciar el debate, asigna los dos equipos, al menos {snapshot.minimumJudgesPerRoom ?? 1} juez(es) y un formato válido desde el panel.</span></div>}
