@@ -408,7 +408,12 @@ export function applyOutboxToPanel(panel: Tournament, panelRoundId: string, outb
     const mappedFavor = canonicalTeamId.get(debate.teamFavorId) ?? (teams.has(debate.teamFavorId) ? debate.teamFavorId : '');
     const mappedContra = canonicalTeamId.get(debate.teamContraId) ?? (teams.has(debate.teamContraId) ? debate.teamContraId : '');
     const mappedJudges = debate.judgeIds.map((id) => canonicalJudgeId.get(id) ?? (judges.has(id) ? id : ''));
-    targets.set(physical.id, { ...debate, teamFavorId: mappedFavor, teamContraId: mappedContra, judgeIds: mappedJudges });
+    const mappedChair = canonicalJudgeId.get(debate.chairId) ?? (judges.has(debate.chairId) ? debate.chairId : '');
+    // Keep the Tabulation chair first in the persisted panel order so public room screens can identify them.
+    const orderedJudges = mappedChair && mappedJudges.includes(mappedChair)
+      ? [mappedChair, ...mappedJudges.filter((id) => id !== mappedChair)]
+      : mappedJudges;
+    targets.set(physical.id, { ...debate, teamFavorId: mappedFavor, teamContraId: mappedContra, judgeIds: orderedJudges });
     if (!mappedFavor || !mappedContra) issues.push(debate.venueName + ': faltan datos de algún equipo en la copia enviada desde tabulación.');
     if (mappedJudges.some((id) => !id)) issues.push(debate.venueName + ': faltan datos de algún juez en la copia enviada desde tabulación.');
   }
