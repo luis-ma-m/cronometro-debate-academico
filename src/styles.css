@@ -1178,3 +1178,129 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
  .tab-remote-conflict-actions{flex-direction:column-reverse;align-items:stretch}
  .tab-remote-conflict-actions .button{width:100%;justify-content:center}
 }
+
+ 
+/* Fullscreen room-timer projection. This is presentation-only: timer state,
+   polling, synchronization and organization overlays remain mounted unchanged. */
+.timer-shell:fullscreen {
+  box-sizing: border-box;
+  width: 100vw;
+  height: 100dvh;
+  min-height: 100dvh;
+  max-width: none;
+  margin: 0;
+  padding: clamp(10px, 1.8vh, 22px) clamp(12px, 2.2vw, 34px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: #f4f7fb;
+}
+.timer-shell:fullscreen .timer-top {
+  flex: 0 0 auto;
+  padding-bottom: 10px;
+}
+.timer-shell:fullscreen .timer-top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.timer-shell:fullscreen .projection-toggle {
+  min-height: 34px;
+  padding: 7px 11px;
+  font-size: 11px;
+}
+.timer-shell:fullscreen > .featured-message-banner {
+  flex: 0 0 auto;
+  margin: 8px 0;
+  padding: clamp(10px, 1.5vh, 16px) clamp(14px, 2vw, 28px);
+  border-radius: 12px;
+}
+.timer-shell:fullscreen > .featured-message-banner h2 {
+  margin: 5px 0 9px;
+  font-size: clamp(20px, 2.5vh, 30px);
+}
+.timer-shell:fullscreen > .featured-message-banner .featured-message-item {
+  padding: 8px 12px;
+}
+.timer-shell:fullscreen .timer-primary-card {
+  flex: 1 0 auto;
+  min-height: 0;
+  justify-content: center;
+  padding: clamp(10px, 1.8vh, 22px) clamp(14px, 3vw, 48px);
+  border-radius: 14px;
+}
+.timer-shell:fullscreen .timer-status {
+  font-size: clamp(10px, 1vw, 14px);
+  letter-spacing: .08em;
+}
+.timer-shell:fullscreen .phase-heading {
+  gap: clamp(5px, 1vh, 10px);
+  margin-top: clamp(8px, 1.5vh, 18px);
+}
+.timer-shell:fullscreen .phase-heading span {
+  font-size: clamp(23px, 3.2vh, 42px);
+  line-height: 1.12;
+}
+.timer-shell:fullscreen .phase-heading b {
+  color: #1474BD;
+  font-size: clamp(18px, 2.6vh, 34px);
+  font-weight: 800;
+  line-height: 1.15;
+}
+.timer-shell:fullscreen .timer-digits {
+  font-size: clamp(112px, 34vh, 44vw);
+  line-height: .96;
+  letter-spacing: -.065em;
+  margin: clamp(8px, 1.7vh, 20px) 0;
+}
+.timer-shell:fullscreen .timer-track {
+  width: min(84vw, 1400px);
+  height: 7px;
+  margin-bottom: clamp(8px, 1.4vh, 16px);
+}
+.timer-shell:fullscreen .timer-controls {
+  gap: 6px;
+  margin-top: 5px;
+}
+.timer-shell:fullscreen .timer-controls .button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 11px;
+  border-radius: 7px;
+}
+.timer-shell:fullscreen .timer-controls .button svg {
+  width: 14px;
+  height: 14px;
+}
+.timer-shell:fullscreen .timer-room-metadata {
+  display: none;
+}
+.timer-shell:fullscreen .timer-footer {
+  flex: 0 0 auto;
+  margin-top: 5px;
+  padding-top: 5px;
+}
+.timer-shell:fullscreen .round-transition {
+  flex: 1 0 auto;
+  min-height: 0;
+}
+@media (max-height: 620px) {
+  .timer-shell:fullscreen .timer-digits {
+    font-size: clamp(100px, 30vh, 36vw);
+    margin: 5px 0;
+  }
+  .timer-shell:fullscreen .phase-heading span { font-size: clamp(20px, 3vh, 30px); }
+  .timer-shell:fullscreen .phase-heading b { font-size: clamp(16px, 2.3vh, 24px); }
+  .timer-shell:fullscreen .timer-controls .button { min-height: 28px; padding: 4px 8px; }
+}
+@media (max-width: 760px) {
+  .timer-shell:fullscreen { padding: 8px; }
+  .timer-shell:fullscreen .timer-top-actions { gap: 5px; }
+  .timer-shell:fullscreen .timer-top-actions .public-pill { padding: 6px 8px; font-size: 8px; }
+  .timer-shell:fullscreen .timer-top-actions .sound-toggle,
+  .timer-shell:fullscreen .timer-top-actions .projection-toggle { min-height: 30px; padding: 5px 7px; font-size: 10px; }
+  .timer-shell:fullscreen .timer-digits { font-size: clamp(104px, 29vh, 34vw); }
+  .timer-shell:fullscreen .timer-controls .button { min-height: 29px; padding: 5px 7px; font-size: 10px; }
+}
