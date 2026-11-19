@@ -109,6 +109,16 @@ describe('tabulation → panel', () => {
     expect(applyOutboxToPanel(candidate, 'r2', outbox!, { makeId, now })).toMatchObject({ issues: [], changed: 0 });
   });
 
+  it('keeps the Tabulation chair first in the room judge list', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.rounds[0].debates[0] = { ...tab.rounds[0].debates[0], judgeIds: ['j3', 'j2'], chairId: 'j2' };
+    const outbox = buildOutbox(tab, 'r1', now).outbox!;
+    const applied = applyOutboxToPanel(source, 'r2', outbox, { makeId, now });
+    expect(applied.issues).toEqual([]);
+    expect(applied.rooms!.find((room) => room.roundId === 'r2' && room.physicalRoomId === 'physical-a1')?.judgeIds).toEqual(['j2', 'j3']);
+  });
+
   it('transfers the round timer snapshot and makes it authoritative over Management formats', () => {
     const source = panel();
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'aduma', now, 1));
