@@ -387,6 +387,7 @@ export function publicRoomPayload(tournament: Tournament, roomSlug: string): Pub
   const favor = tournament.teams.find((item) => item.id === room.teamFavorId);
   const contra = tournament.teams.find((item) => item.id === room.teamContraId);
   const judges = room.judgeIds.map((id) => tournament.judges.find((item) => item.id === id)?.name ?? "").filter(Boolean);
+  const chairJudge = room.judgeIds.length ? tournament.judges.find((item) => item.id === room.judgeIds[0])?.name ?? "" : "";
   return {
     tournamentName: tournament.tournamentName,
     roundName: round?.name ?? "Sin ronda activa",
