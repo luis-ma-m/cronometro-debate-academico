@@ -209,9 +209,23 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     if (!remote || remote.tabTournamentId !== id || remote.snapshot.id !== id || remote.revision < 1 || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256)) {
       throw new Error('El torneo no existe en Neon o no supera la validación de identidad e integridad.');
     }
+    const syncLocalName = () => {
+      const local = store.getState().tournament;
+      if (!local || local.name === remote.snapshot.name) return;
+      store.backup('Antes de sincronizar el nombre desde Neon');
+      if (!store.update((value) => ({ ...value, name: remote.snapshot.name }), {
+        type: 'sync.remote', message: 'Nombre del torneo sincronizado con la biblioteca de Neon',
+        details: { tabTournamentId: id, name: remote.snapshot.name },
+      }) || !store.flush()) {
+        throw new Error('No se ha podido sincronizar el nombre del torneo. La copia local se conserva.');
+      }
+    };
     const current = store.getState();
     if (current.tournament?.id === id) {
-      const differences = findSnapshotDifferences(current.tournament, remote.snapshot);
+      syncLocalName();
+      const refreshed = store.getState().tournament;
+      if (!refreshed) throw new Error('No se ha podido abrir el torneo local.');
+      const differences = findSnapshotDifferences(refreshed, remote.snapshot);
       remoteCursor.current = { id, revision: remote.revision, localRevision: differences.length ? -1 : current.tournament.revision, inFlight: false };
       if (!differences.length) {
         store.backup('Antes de recuperar «' + remote.snapshot.name + '» desde Neon');
@@ -227,6 +241,8 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       }
     } else if (store.hasTournament(id)) {
       store.open(id);
+      // Keep the local tournament's data, but align its display name with the authoritative Neon listing.
+      syncLocalName();
       // The normal recovery effect compares this local copy with Neon before syncing.
     } else {
       store.create(remote.snapshot);
