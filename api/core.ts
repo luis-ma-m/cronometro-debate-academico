@@ -399,6 +399,7 @@ export function publicRoomPayload(tournament: Tournament, roomSlug: string): Pub
     activatedAt: tournament.activatedAt ?? 0,
     teamFavor: favor?.name ?? "",
     teamContra: contra?.name ?? "",
+    chairJudge: "",
     judges,
     minimumJudgesPerRoom: tournament.minimumJudgesPerRoom,
     featuredMessage: tournament.featuredMessage && (tournament.featuredMessage.targetPhysicalRoomIds.length === 0 || tournament.featuredMessage.targetPhysicalRoomIds.includes(physical.id)) ? tournament.featuredMessage : undefined,
