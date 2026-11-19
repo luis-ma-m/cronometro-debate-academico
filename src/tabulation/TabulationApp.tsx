@@ -206,16 +206,22 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     if (!remoteToken) throw new Error('Inicia sesión para recuperar torneos desde Neon.');
     if (store.getState().status !== 'saved' && store.getState().tournament) throw new Error('Guarda o resuelve primero los cambios locales pendientes antes de cambiar de torneo.');
     const remote = await getTabulationSnapshot(remoteToken, id);
-    if (!remote || remote.tabTournamentId !== id || remote.snapshot.id !== id || remote.revision < 1 || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256)) {
+    if (!remote || remote.tabTournamentId !== id || authoritativeRemote.snapshot.id !== id || remote.revision < 1 || !/^[a-f0-9]{64}$/.test(authoritativeRemote.snapshotSha256)) {
       throw new Error('El torneo no existe en Neon o no supera la validación de identidad e integridad.');
     }
+    // Neon listing metadata is authoritative for the display name. The snapshot hash
+    // has already been validated by getTabulationSnapshot before this normalization.
+    const authoritativeRemote = {
+      ...remote,
+      snapshot: { ...authoritativeRemote.snapshot, name: remote.tournamentName },
+    };
     const syncLocalName = () => {
       const local = store.getState().tournament;
-      if (!local || local.name === remote.snapshot.name) return;
+      if (!local || local.name === authoritativeRemote.snapshot.name) return;
       store.backup('Antes de sincronizar el nombre desde Neon');
-      if (!store.update((value) => ({ ...value, name: remote.snapshot.name }), {
+      if (!store.update((value) => ({ ...value, name: authoritativeRemote.snapshot.name }), {
         type: 'sync.remote', message: 'Nombre del torneo sincronizado con la biblioteca de Neon',
-        details: { tabTournamentId: id, name: remote.snapshot.name },
+        details: { tabTournamentId: id, name: authoritativeRemote.snapshot.name },
       }) || !store.flush()) {
         throw new Error('No se ha podido sincronizar el nombre del torneo. La copia local se conserva.');
       }
@@ -225,18 +231,18 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       syncLocalName();
       const refreshed = store.getState().tournament;
       if (!refreshed) throw new Error('No se ha podido abrir el torneo local.');
-      const differences = findSnapshotDifferences(refreshed, remote.snapshot);
+      const differences = findSnapshotDifferences(refreshed, authoritativeRemote.snapshot);
       remoteCursor.current = { id, revision: remote.revision, localRevision: differences.length ? -1 : current.tournament.revision, inFlight: false };
       if (!differences.length) {
-        store.backup('Antes de recuperar «' + remote.snapshot.name + '» desde Neon');
-        if (!store.update(() => remote.snapshot, { type: 'sync.remote', message: 'Versión de Neon recuperada desde la biblioteca', details: { revision: remote.revision } }) || !store.flush()) {
+        store.backup('Antes de recuperar «' + authoritativeRemote.snapshot.name + '» desde Neon');
+        if (!store.update(() => authoritativeRemote.snapshot, { type: 'sync.remote', message: 'Versión de Neon recuperada desde la biblioteca', details: { revision: remote.revision } }) || !store.flush()) {
           throw new Error('No se ha podido aplicar la copia de Neon. La copia local se conserva.');
         }
-        remoteCursor.current.localRevision = store.getState().tournament?.revision ?? remote.snapshot.revision;
+        remoteCursor.current.localRevision = store.getState().tournament?.revision ?? authoritativeRemote.snapshot.revision;
         setRemoteConflict(null);
         setRemoteSync('synced');
       } else {
-        setRemoteConflict({ remote, localUpdatedAt: current.tournament.updatedAt });
+        setRemoteConflict({ remote: authoritativeRemote, localUpdatedAt: current.tournament.updatedAt });
         setRemoteSync('conflict');
       }
     } else if (store.hasTournament(id)) {
@@ -245,7 +251,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       syncLocalName();
       // The normal recovery effect compares this local copy with Neon before syncing.
     } else {
-      store.create(remote.snapshot);
+      store.create(authoritativeRemote.snapshot);
       const local = store.getState().tournament;
       remoteCursor.current = { id, revision: remote.revision, localRevision: local?.revision ?? -1, inFlight: false };
       setRemoteSync('synced');
