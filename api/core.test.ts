@@ -54,7 +54,7 @@ function makeTournament(): Tournament {
 
 describe("Vercel API core", () => {
 
-  it("identifies the Tabulation chair in the public room payload", () => {
+  it("does not infer the Tabulation chair from judge order", () => {
     const tournament = makeTournament();
     tournament.judges.push({ id: "j2", name: "Juez 2", institution: "LEDU", active: true, incompatibleJudgeIds: [] });
     tournament.rooms[0].judgeIds = ["j2", "j1"];
