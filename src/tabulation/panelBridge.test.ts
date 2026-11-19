@@ -83,6 +83,16 @@ describe('panel → tabulation', () => {
 });
 
 describe('tabulation → panel', () => {
+  it('keeps the Tabulation chair first in the room judge list', () => {
+    const source = panel();
+    const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(source, now), 'ledu-groups', now, 1));
+    tab.rounds[0].debates[0] = { ...tab.rounds[0].debates[0], judgeIds: ['j1', 'j2'], chairId: 'j2' };
+    const outbox = buildOutbox(tab, 'r1', now).outbox!;
+    const applied = applyOutboxToPanel(source, 'r2', outbox, { makeId, now });
+    expect(applied.issues).toEqual([]);
+    expect(applied.rooms!.find((room) => room.roundId === 'r2' && room.physicalRoomId === 'physical-a1')?.judgeIds).toEqual(['j2', 'j1']);
+  });
+
   it('blocks sending a round when Tabulation contains duplicate participant names', () => {
     const tab = tabRound(tournamentFromHandoff(buildPanelHandoff(panel(), now), 'ledu-groups', now, 1));
     tab.teams[1] = { ...tab.teams[1], name: '  EQUIPO A ' };

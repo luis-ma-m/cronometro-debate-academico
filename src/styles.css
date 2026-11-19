@@ -1178,3 +1178,5 @@ html:has(.acta-shell){scroll-padding-top:76px;background:#f4f6fa}
  .tab-remote-conflict-actions{flex-direction:column-reverse;align-items:stretch}
  .tab-remote-conflict-actions .button{width:100%;justify-content:center}
 }
+
+.room-icon.disconnected{background:#fff0ee;color:#b23d31}.state-pill.disconnected{background:#fff0ee;color:#b23d31}

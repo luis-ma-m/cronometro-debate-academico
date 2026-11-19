@@ -120,6 +120,8 @@ export interface PublicRoom {
   activatedAt: number;
   teamFavor: string;
   teamContra: string;
+  /** Judge assigned as chair in Tabulation; empty when no authoritative chair is available. */
+  chairJudge: string;
   judges: string[];
   minimumJudgesPerRoom?: number;
   featuredMessage?: FeaturedMessage;

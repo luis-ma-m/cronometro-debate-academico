@@ -5,6 +5,7 @@ import { deleteTabulationSnapshot, getTabulationSnapshot, listTabulationSnapshot
 import { listPublicActas, publicActaAlreadySubmitted, submitPublicActa } from "./public-actas.js";
 import { loadPostgresSheetData, readIdempotentResponse, writePostgresTables, type PostgresSheetData } from "./postgres-store.js";
 import type { TimerAction } from "../src/timer.js";
+import type { TabTournament } from "../src/tabulation/types.js";
 import { findAssignmentConflicts } from "../src/incompatibilities.js";
 import { emptyScoringConfig, parseScoringConfig, sumCategoryScores, validateScorecard, type RoundScorecard, type ScoringConfig } from "../src/scoring.js";
 import {
@@ -43,6 +44,38 @@ type ResponseLike = {
 };
 
 type SheetData = PostgresSheetData;
+
+let publicTabulationChairCache: { tournamentName: string; expiresAt: number; snapshot: TabTournament | null } | null = null;
+
+async function getPublicTabulationSnapshot(tournamentName: string): Promise<TabTournament | null> {
+  const now = Date.now();
+  if (publicTabulationChairCache?.tournamentName === tournamentName && publicTabulationChairCache.expiresAt > now) return publicTabulationChairCache.snapshot;
+  try {
+    const listings = await listTabulationSnapshots();
+    const ordered = [...listings.filter((item) => item.tournamentName === tournamentName), ...listings.filter((item) => item.tournamentName !== tournamentName)];
+    for (const item of ordered) {
+      const remote = await getTabulationSnapshot(item.tabTournamentId);
+      const snapshot = remote?.snapshot as unknown as TabTournament | undefined;
+      if (snapshot?.panelLink?.tournamentName === tournamentName) {
+        publicTabulationChairCache = { tournamentName, expiresAt: now + 15_000, snapshot };
+        return snapshot;
+      }
+    }
+  } catch {
+    // Public room timers must remain available if Tabulation's remote snapshot is unavailable.
+  }
+  publicTabulationChairCache = { tournamentName, expiresAt: now + 15_000, snapshot: null };
+  return null;
+}
+
+function publicRoomWithTabulationChair(payload: ReturnType<typeof publicRoomPayload>, tournament: Tournament, snapshot: TabTournament | null) {
+  if (!snapshot) return { ...payload, chairJudge: "" };
+  const activeRound = tournament.rounds.find((round) => round.id === tournament.activeRoundId) ?? tournament.rounds.find((round) => round.active);
+  const tabRound = snapshot.rounds.find((round) => round.number === activeRound?.number) ?? snapshot.rounds.find((round) => round.name === payload.roundName);
+  const debate = tabRound?.debates.find((item) => item.venueId === payload.physicalRoomId);
+  const chairJudge = debate ? snapshot.judges.find((judge) => judge.id === debate.chairId)?.name ?? "" : "";
+  return { ...payload, chairJudge };
+}
 
 function env(name: string): string {
   return (process.env[name] || "").trim();
@@ -405,8 +438,12 @@ async function dispatch(action: string, payload: Record<string, unknown>, req: R
     case "getTournament":
       await requireSession(payload.token);
       return tournamentFromData(await loadSheetData());
-    case "getPublicRoom":
-      return publicRoomPayload(tournamentFromData(await loadSheetData()), str(payload.roomId));
+    case "getPublicRoom": {
+      const tournament = tournamentFromData(await loadSheetData());
+      const room = publicRoomPayload(tournament, str(payload.roomId));
+      const tabulation = await getPublicTabulationSnapshot(tournament.tournamentName);
+      return publicRoomWithTabulationChair(room, tournament, tabulation);
+    }
     case "roomHeartbeat":
       return roomHeartbeat(payload);
     case "getRoomConnectionStatuses":
