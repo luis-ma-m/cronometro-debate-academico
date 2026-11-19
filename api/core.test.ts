@@ -54,6 +54,13 @@ function makeTournament(): Tournament {
 
 describe("Vercel API core", () => {
 
+  it("does not infer the Tabulation chair from judge order", () => {
+    const tournament = makeTournament();
+    tournament.judges.push({ id: "j2", name: "Juez 2", institution: "LEDU", active: true, incompatibleJudgeIds: [] });
+    tournament.rooms[0].judgeIds = ["j2", "j1"];
+    expect(publicRoomPayload(tournament, "sala-a1")).toMatchObject({ chairJudge: "", judges: ["Juez 2", "Juez 1"] });
+  });
+
   it("only exposes a featured message to its selected physical rooms", () => {
     const tournament = makeTournament();
     const message: FeaturedMessage = {
