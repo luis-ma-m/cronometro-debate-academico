@@ -524,7 +524,17 @@ export default function App() {
         // direct request while keeping the optimistic local timer usable.
         void updateTimer(currentSnapshot.roomSlug, action, currentSnapshot.room.timer.revision, controllerToken, currentSnapshot.room.id, currentSnapshot.activationRevision)
           .then((updated) => { setSnapshot(updated); setConnected(true); setServerError(''); })
-          .catch((error) => { setConnected(false); setServerError(error instanceof Error ? error.message : 'Cronómetro local; sincronización pendiente.'); });
+          .catch(async (error) => {
+            const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code ?? '' : '';
+            if (errorCode === 'STALE_ASSIGNMENT' || errorCode === 'NO_ASSIGNMENT') {
+              try { localStorage.removeItem(pendingTimerKey(roomId)); } catch { /* best-effort stale queue cleanup */ }
+              console.warn('[ledu-timer-recovery] direct_action_rejected', { roomSlug: roomId, errorCode, assignmentId: currentSnapshot.room.id, activationRevision: currentSnapshot.activationRevision });
+              await reloadRoom();
+              return;
+            }
+            setConnected(false);
+            setServerError(error instanceof Error ? error.message : 'Cronómetro local; sincronización pendiente.');
+          });
       }
       return;
     }
