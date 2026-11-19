@@ -1882,11 +1882,11 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
         <p className="transition-round-name">{snapshot.roundName}</p>
         <p className="transition-room-name">{snapshot.physicalRoomName}</p>
         {snapshot.hasAssignment ? <>
-          <div className="transition-team-grid"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
+          <div className="transition-team-grid"><div><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
           <div className="transition-judges"><Gavel size={18} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
         </> : <div className="transition-no-assignment"><h2>Sala sin asignación en esta ronda</h2><p>Esta sala conserva su enlace permanente, pero aún no tiene un debate asignado.</p></div>}
         <div className="transition-countdown"><b>{transitionSeconds}</b><span>segundos para comenzar</span></div>
-        <p className="transition-help">El cronómetro está preparado y no descontará tiempo hasta que termine este aviso.</p>
+        <p className="transition-help">El cronómetro está preparado</p>
       </section>
     : !snapshot.hasAssignment ? <section className="timer-empty no-room-assignment">{snapshot.featuredMessage && <FeaturedMessageBanner key={snapshot.featuredMessage.id} message={snapshot.featuredMessage} now={now} serverOffsetMs={serverOffsetMs} />}<Monitor size={42} /><p className="eyebrow">{snapshot.tournamentName} · {snapshot.roundName}</p><h1>Sala sin asignación en esta ronda</h1><p>{snapshot.physicalRoomName} conserva su enlace permanente. El panel de organización aún no ha asignado un debate a esta sala para la ronda activa.</p><span className="permanent-room-slug">/sala/{snapshot.roomSlug}</span><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Actualizar estado</button></section>
     : <>
