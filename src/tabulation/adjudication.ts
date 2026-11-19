@@ -361,6 +361,12 @@ export function roundProblems(tournament: TabTournament, round: TabRound): Map<s
     if (!debate.judgeIds.length) add(debate.id, 'warning', 'Sin jueces.');
     else if (settings.oddPanels && debate.judgeIds.length % 2 === 0) add(debate.id, 'warning', 'Panel par: el reglamento exige un número impar de jueces.');
     if (debate.judgeIds.length && !debate.judgeIds.includes(debate.chairId)) add(debate.id, 'warning', 'Falta el juez principal.');
+    for (const judgeId of debate.judgeIds) {
+      const judge = judges.get(judgeId);
+      if (judge?.active && !availableJudges(tournament, round).some((available) => available.id === judgeId)) {
+        add(debate.id, 'warning', judge.name + ' no está disponible para ' + round.name + ' (tiene una incompatibilidad con esta ronda).');
+      }
+    }
     // With the hard policy the panel's own validation (below) already reports institution, team and judge–judge conflicts.
     const hardPolicy = settings.conflictPolicy === 'hard';
     if (!hardPolicy || listed.length) {
