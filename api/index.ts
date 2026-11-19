@@ -60,7 +60,7 @@ async function getPublicTabulationSnapshot(tournamentName: string): Promise<TabT
     ];
     for (const item of ordered) {
       const remote = await getTabulationSnapshot(item.tabTournamentId);
-      const snapshot = remote?.snapshot as TabTournament | undefined;
+      const snapshot = remote?.snapshot as unknown as TabTournament | undefined;
       if (snapshot?.panelLink?.tournamentName === tournamentName) {
         publicTabulationChairCache = { tournamentName, expiresAt: now + 15_000, snapshot };
         return snapshot;
