@@ -1038,15 +1038,41 @@ async function updateRoomTimer(payload: Record<string, unknown>): Promise<unknow
 
     const activeRoundId = tournament.activeRoundId || tournament.rounds.find((round) => round.active)?.id || "";
     const room = tournament.rooms.find((item) => item.physicalRoomId === physical.id && item.roundId === activeRoundId);
-    if (!room) throw new ApiError("NO_ASSIGNMENT", "Esta sala no tiene debate asignado en la ronda activa.", 409);
-    if (requestedAssignmentId !== room.id || num(payload.expectedActivationRevision) !== tournament.activationRevision) {
+    const expectedActivationRevision = num(payload.expectedActivationRevision);
+    const expectedTimerRevision = payload.expectedRevision === undefined ? null : num(payload.expectedRevision);
+    const logTimerGuard = (reason: string, extra: Record<string, unknown> = {}) => {
+      console.warn("[ledu-timer-guard] " + JSON.stringify({
+        reason,
+        roomSlug: physical.slug,
+        physicalRoomId: physical.id,
+        action,
+        requestedAssignmentId: requestedAssignmentId || null,
+        actualAssignmentId: room?.id ?? null,
+        activeRoundId,
+        actualRoomRoundId: room?.roundId ?? null,
+        expectedActivationRevision,
+        actualActivationRevision: tournament.activationRevision,
+        expectedTimerRevision,
+        actualTimerRevision: room?.timer.revision ?? null,
+        serverTime: Date.now(),
+        ...extra,
+      }));
+    };
+    if (!room) {
+      logTimerGuard("NO_ASSIGNMENT");
+      throw new ApiError("NO_ASSIGNMENT", "Esta sala no tiene debate asignado en la ronda activa.", 409);
+    }
+    if (requestedAssignmentId !== room.id || expectedActivationRevision !== tournament.activationRevision) {
+      logTimerGuard("STALE_ASSIGNMENT");
       throw new ApiError("STALE_ASSIGNMENT", "La ronda o asignación ha cambiado. Se han recargado los datos; vuelve a intentarlo.", 409);
     }
-    if (payload.expectedRevision === undefined || num(payload.expectedRevision) !== room.timer.revision) {
+    if (expectedTimerRevision === null || expectedTimerRevision !== room.timer.revision) {
+      logTimerGuard("REVISION_CONFLICT");
       throw new ApiError("REVISION_CONFLICT", "El cronómetro cambió en otro dispositivo. Actualiza el estado.", 409);
     }
     const now = Date.now();
     if (tournament.activatedAt > 0 && now < tournament.activatedAt + 45_000) {
+      logTimerGuard("ROUND_TRANSITION", { activatedAt: tournament.activatedAt, transitionEndsAt: tournament.activatedAt + 45_000 });
       throw new ApiError("ROUND_TRANSITION", "La nueva ronda se está anunciando en las pantallas. Los controles del cronómetro estarán disponibles al terminar la transición de 20 segundos.", 409);
     }
     if (action === "start") {

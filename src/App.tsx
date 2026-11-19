@@ -237,11 +237,42 @@ export default function App() {
           setServerError('');
         } catch (error) {
           const message = error instanceof Error ? error.message : 'No se ha podido sincronizar el cronómetro.';
-          setServerError(message);
           const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code ?? '' : '';
-          if (['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
-            // The server is reachable but has rejected this operation. Preserve
-            // the local timer and queue rather than silently replacing it.
+
+          if (errorCode === 'STALE_ASSIGNMENT' || errorCode === 'NO_ASSIGNMENT') {
+            // These actions belong to an assignment that the server no longer
+            // accepts. Never replay them against a new round or room assignment.
+            // Drop the stale outbox first so the polling reload cannot restore it.
+            try { localStorage.removeItem(pendingTimerKey(roomId)); } catch { /* best-effort stale queue cleanup */ }
+            console.warn('[ledu-timer-recovery] discarded_stale_queue', {
+              roomSlug: roomId,
+              errorCode,
+              queuedAssignmentId: queue.assignmentId,
+              queuedActivationRevision: queue.activationRevision,
+              queuedActionCount: queue.actions.length,
+            });
+            try {
+              const requestStartedAt = Date.now();
+              const fresh = await getPublicRoom(roomId);
+              const responseReceivedAt = Date.now();
+              setSnapshot(fresh);
+              setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
+              setConnected(true);
+              setLastSyncedAt(responseReceivedAt);
+              setServerError('');
+            } catch (refreshError) {
+              setConnected(false);
+              setServerError(refreshError instanceof Error
+                ? 'Se descartaron acciones de una asignación anterior, pero no se pudo recuperar la sala: ' + refreshError.message
+                : 'Se descartaron acciones de una asignación anterior, pero no se pudo recuperar la sala.');
+            }
+            return;
+          }
+
+          setServerError(message);
+          if (['REVISION_CONFLICT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
+            // The server is reachable, but this action needs an operator decision
+            // or a fresh revision; do not discard the queue automatically.
             setConnected(true);
           } else {
             setConnected(false);
@@ -493,7 +524,17 @@ export default function App() {
         // direct request while keeping the optimistic local timer usable.
         void updateTimer(currentSnapshot.roomSlug, action, currentSnapshot.room.timer.revision, controllerToken, currentSnapshot.room.id, currentSnapshot.activationRevision)
           .then((updated) => { setSnapshot(updated); setConnected(true); setServerError(''); })
-          .catch((error) => { setConnected(false); setServerError(error instanceof Error ? error.message : 'Cronómetro local; sincronización pendiente.'); });
+          .catch(async (error) => {
+            const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code ?? '' : '';
+            if (errorCode === 'STALE_ASSIGNMENT' || errorCode === 'NO_ASSIGNMENT') {
+              try { localStorage.removeItem(pendingTimerKey(roomId)); } catch { /* best-effort stale queue cleanup */ }
+              console.warn('[ledu-timer-recovery] direct_action_rejected', { roomSlug: roomId, errorCode, assignmentId: currentSnapshot.room.id, activationRevision: currentSnapshot.activationRevision });
+              await reloadRoom();
+              return;
+            }
+            setConnected(false);
+            setServerError(error instanceof Error ? error.message : 'Cronómetro local; sincronización pendiente.');
+          });
       }
       return;
     }
@@ -1841,11 +1882,11 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
         <p className="transition-round-name">{snapshot.roundName}</p>
         <p className="transition-room-name">{snapshot.physicalRoomName}</p>
         {snapshot.hasAssignment ? <>
-          <div className="transition-team-grid"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
+          <div className="transition-team-grid"><div><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
           <div className="transition-judges"><Gavel size={18} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
         </> : <div className="transition-no-assignment"><h2>Sala sin asignación en esta ronda</h2><p>Esta sala conserva su enlace permanente, pero aún no tiene un debate asignado.</p></div>}
         <div className="transition-countdown"><b>{transitionSeconds}</b><span>segundos para comenzar</span></div>
-        <p className="transition-help">El cronómetro está preparado y no descontará tiempo hasta que termine este aviso.</p>
+        <p className="transition-help">El cronómetro está preparado</p>
       </section>
     : !snapshot.hasAssignment ? <section className="timer-empty no-room-assignment">{snapshot.featuredMessage && <FeaturedMessageBanner key={snapshot.featuredMessage.id} message={snapshot.featuredMessage} now={now} serverOffsetMs={serverOffsetMs} />}<Monitor size={42} /><p className="eyebrow">{snapshot.tournamentName} · {snapshot.roundName}</p><h1>Sala sin asignación en esta ronda</h1><p>{snapshot.physicalRoomName} conserva su enlace permanente. El panel de organización aún no ha asignado un debate a esta sala para la ronda activa.</p><span className="permanent-room-slug">/sala/{snapshot.roomSlug}</span><button className="button secondary" onClick={onRetry}><RefreshCw size={16} /> Actualizar estado</button></section>
     : <>
