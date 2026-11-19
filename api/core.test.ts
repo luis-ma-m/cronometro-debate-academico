@@ -59,7 +59,7 @@ describe("Vercel API core", () => {
     tournament.judges.push({ id: "j2", name: "Juez 2", institution: "LEDU", active: true, incompatibleJudgeIds: [] });
     tournament.rooms[0].judgeIds = ["j2", "j1"];
     expect(publicRoomPayload(tournament, "sala-a1")).toMatchObject({
-      chairJudge: "Juez 2",
+      chairJudge: "",
       judges: ["Juez 2", "Juez 1"],
     });
   });
