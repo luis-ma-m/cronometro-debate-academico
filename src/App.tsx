@@ -237,11 +237,42 @@ export default function App() {
           setServerError('');
         } catch (error) {
           const message = error instanceof Error ? error.message : 'No se ha podido sincronizar el cronómetro.';
-          setServerError(message);
           const errorCode = error instanceof Error && 'code' in error ? (error as Error & { code?: string }).code ?? '' : '';
-          if (['REVISION_CONFLICT', 'STALE_ASSIGNMENT', 'NO_ASSIGNMENT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
-            // The server is reachable but has rejected this operation. Preserve
-            // the local timer and queue rather than silently replacing it.
+
+          if (errorCode === 'STALE_ASSIGNMENT' || errorCode === 'NO_ASSIGNMENT') {
+            // These actions belong to an assignment that the server no longer
+            // accepts. Never replay them against a new round or room assignment.
+            // Drop the stale outbox first so the polling reload cannot restore it.
+            try { localStorage.removeItem(pendingTimerKey(roomId)); } catch { /* best-effort stale queue cleanup */ }
+            console.warn('[ledu-timer-recovery] discarded_stale_queue', {
+              roomSlug: roomId,
+              errorCode,
+              queuedAssignmentId: queue.assignmentId,
+              queuedActivationRevision: queue.activationRevision,
+              queuedActionCount: queue.actions.length,
+            });
+            try {
+              const requestStartedAt = Date.now();
+              const fresh = await getPublicRoom(roomId);
+              const responseReceivedAt = Date.now();
+              setSnapshot(fresh);
+              setServerOffsetMs(fresh.serverTime - (requestStartedAt + responseReceivedAt) / 2);
+              setConnected(true);
+              setLastSyncedAt(responseReceivedAt);
+              setServerError('');
+            } catch (refreshError) {
+              setConnected(false);
+              setServerError(refreshError instanceof Error
+                ? 'Se descartaron acciones de una asignación anterior, pero no se pudo recuperar la sala: ' + refreshError.message
+                : 'Se descartaron acciones de una asignación anterior, pero no se pudo recuperar la sala.');
+            }
+            return;
+          }
+
+          setServerError(message);
+          if (['REVISION_CONFLICT', 'ROUND_TRANSITION', 'UNAUTHORIZED', 'INVALID_ASSIGNMENT', 'INSTITUTION_CONFLICT', 'TEAM_JUDGE_CONFLICT', 'JUDGE_JUDGE_CONFLICT'].includes(errorCode)) {
+            // The server is reachable, but this action needs an operator decision
+            // or a fresh revision; do not discard the queue automatically.
             setConnected(true);
           } else {
             setConnected(false);
