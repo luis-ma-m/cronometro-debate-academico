@@ -1,6 +1,6 @@
 import { useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 import { Check, ClipboardList, Copy, Dices, Download, FileText, Gavel, MessageCircle, MonitorPlay, MoreHorizontal, Projector, RotateCcw, Search, Send, Shuffle, Sparkles, Star, Trash2, Trophy, Undo2, X } from 'lucide-react';
-import { allocateJudgesForRound, judgesConflict, teamConflicts, type RoundProblem } from '../adjudication';
+import { allocateJudgesForRound, availableJudges, judgesConflict, teamConflicts, type RoundProblem } from '../adjudication';
 import { computeBreak, tournamentChampion } from '../bracket';
 import {
   applyDraftEdit, auditRound, checkRound, confirmDraft, createRoundDraft, diffRounds, draftProblems, editRound, reopenRound, undoDraftEdit, withoutDraft,
@@ -390,6 +390,20 @@ function DraftPanel({ tournament, draft, look, acknowledged, onAcknowledge, onEd
 }) {
   const problems = useMemo(() => draftProblems(tournament, draft), [tournament, draft]);
   const changes = useMemo(() => diffRounds(tournament, draft.generated, draft.round), [tournament, draft]);
+  const unusedAvailableJudges = useMemo(() => {
+    const assigned = new Set(draft.round.debates.flatMap((debate) => debate.judgeIds));
+    const debatesJudged = new Map<string, number>();
+    for (const round of tournament.rounds) {
+      if (round.number >= draft.round.number) continue;
+      for (const debate of round.debates) {
+        for (const judgeId of debate.judgeIds) debatesJudged.set(judgeId, (debatesJudged.get(judgeId) ?? 0) + 1);
+      }
+    }
+    return availableJudges(tournament, draft.round)
+      .filter((judge) => !assigned.has(judge.id))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+      .map((judge) => ({ ...judge, debatesJudged: debatesJudged.get(judge.id) ?? 0 }));
+  }, [tournament, draft.round]);
   const warningKey = problems.warnings.join('|');
   const accepted = !problems.warnings.length || acknowledged === warningKey;
   return <section className="panel tab-round tab-draft">
@@ -409,6 +423,12 @@ function DraftPanel({ tournament, draft, look, acknowledged, onAcknowledge, onEd
       {problems.errors.length > 0 && <><h4 className="tab-review-title error">Errores que impiden confirmar ({problems.errors.length})</h4><IssueList items={problems.errors} kind="error" /></>}
       {problems.warnings.length > 0 && <><h4 className="tab-review-title">Avisos para revisar ({problems.warnings.length})</h4><IssueList items={problems.warnings} /></>}
     </div>}
+    <div className="tab-review">
+      <h4 className="tab-review-title">Jueces disponibles sin asignar ({unusedAvailableJudges.length})</h4>
+      {unusedAvailableJudges.length
+        ? <p>{unusedAvailableJudges.map((judge) => judge.name + ' (' + judge.debatesJudged + ')').join(' · ')}</p>
+        : <p className="muted">No quedan jueces disponibles sin asignar.</p>}
+    </div>
     <p className="muted tab-confirm-hint">Al confirmar se guarda la ronda, se descarga el ZIP (CSV, TXT, PDF y copia privada) y se muestra en pantalla.</p>
     <div className="tab-confirm-bar">
       <div className="tab-confirm-status">
