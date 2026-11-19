@@ -1775,6 +1775,12 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
   syncPending: boolean;
 }) {
   const room = snapshot?.room;
+  const judgeDisplay = snapshot?.judges.length
+    ? (snapshot.chairJudge ? 'Juez principal: ' + snapshot.chairJudge : 'Juez principal pendiente') +
+      (snapshot.judges.filter((judge) => judge !== snapshot.chairJudge).length
+        ? ' · ' + snapshot.judges.filter((judge) => judge !== snapshot.chairJudge).join(' · ')
+        : '')
+    : 'Juez principal pendiente de asignación';
   const phase = room?.phases[room.timer.phaseIndex];
   const left = room ? secondsLeft(room.timer, now + serverOffsetMs) : 0;
   const pct = phase ? Math.max(0, Math.min(100, left / phase.durationSeconds * 100)) : 0;
@@ -1854,7 +1860,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
 
   return <main ref={timerShellRef} className={'timer-shell' + (isProjected ? ' timer-projected' : '')}>
     <header className="timer-top">
-      <a href="/gestion" className="brand"><span className="brand-mark">L</span><span>Debate <b>Control</b></span></a>
+      <a href="/gestion" className="brand"><span className="brand-mark">L</span><span>{snapshot?.tournamentName ? snapshot.tournamentName + ' · ' : ''}<b>Debate Control</b></span></a>
       <div className="timer-top-actions">
         <span className="public-pill"><i className={connected ? '' : 'disconnected'} />{!connected ? 'SIN CONEXIÓN' : syncPending ? 'PENDIENTE DE SINCRONIZAR' : 'SINCRONIZADO'}</span>
         <button className="button secondary sound-toggle" onClick={onToggleSound} aria-pressed={soundEnabled}><>{soundEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />}{soundEnabled ? 'Avisos sonoros activados' : 'Activar sonido'}</></button>
@@ -1870,8 +1876,8 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
         <p className="transition-round-name">{snapshot.roundName}</p>
         <p className="transition-room-name">{snapshot.physicalRoomName}</p>
         {snapshot.hasAssignment ? <>
-          <div className="transition-team-grid"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
-          <div className="transition-judges"><Gavel size={18} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
+          <div className="transition-team-grid"><div><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
+          <div className="transition-judges"><Gavel size={18} /><span>{judgeDisplay}</span></div>
         </> : <div className="transition-no-assignment"><h2>Sala sin asignación en esta ronda</h2><p>Esta sala conserva su enlace permanente, pero aún no tiene un debate asignado.</p></div>}
         <div className="transition-countdown"><b>{transitionSeconds}</b><span>segundos para comenzar</span></div>
         <p className="transition-help">El cronómetro está preparado y no descontará tiempo hasta que termine este aviso.</p>
@@ -1881,7 +1887,7 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
       {snapshot.featuredMessage && <FeaturedMessageBanner key={snapshot.featuredMessage.id} message={snapshot.featuredMessage} now={now} serverOffsetMs={serverOffsetMs} />}
       <section className="timer-card timer-primary-card">
         <div className="timer-status"><span className={'state-pill ' + (timedOut ? 'paused' : room?.timer.status || '')}>{ended ? 'Debate finalizado' : timedOut ? 'Tiempo agotado · exceso de tiempo' : room?.timer.status === 'running' ? 'Intervención en curso' : room?.timer.status === 'paused' ? 'Cronómetro pausado' : 'Preparado para comenzar'}</span><span>{snapshot.physicalRoomName} · {snapshot.roundName}</span></div>
-        <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{[phase?.speaker, phase?.side === 'favor' ? 'A favor · ' + snapshot.teamFavor : phase?.side === 'contra' ? 'En contra · ' + snapshot.teamContra : ''].filter(Boolean).join(' · ')}</b></div>
+        <div className="phase-heading"><span>{phase?.name ?? 'Debate completado'}</span><b>{phase?.speaker ?? ''}</b></div>
         <div className={'timer-digits ' + (timedOut ? 'overtime' : (room?.timer.status === 'running' && hasReachedWarning(phase, left) ? 'warning' : '')) + (room?.timer.status === 'running' && reachedWarningCount(phase, left) >= 2 ? ' blink' : '')}>{formatTime(phase?.allowOvertimeDisplay === false && left < 0 ? 0 : left)}</div>
         <div className="timer-track"><div style={{ width: pct + '%' }} /></div>
         {!fullyAssigned && <div className="notice warning-notice timer-assignment-warning"><CircleHelp size={16} /><span>Para iniciar el debate, asigna los dos equipos, al menos {snapshot.minimumJudgesPerRoom ?? 1} juez(es) y un formato válido desde el panel.</span></div>}
@@ -1899,13 +1905,13 @@ function RoomScreen({ snapshot, now, serverOffsetMs, error, onAction, onRetry, c
         <div className="timer-heading">
           <p>{snapshot.tournamentName}</p>
           <h1>{snapshot.physicalRoomName}</h1>
-          <div className="team-versus"><div><small>A FAVOR</small><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><small>EN CONTRA</small><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
-          <div className="judge-line"><Gavel size={16} /><span>{snapshot.judges.length ? snapshot.judges.join(' · ') : 'Jueces pendientes de asignación'}</span></div>
+          <div className="team-versus"><div><b>{snapshot.teamFavor || 'Pendiente'}</b></div><span>VS</span><div><b>{snapshot.teamContra || 'Pendiente'}</b></div></div>
+          <div className="judge-line"><Gavel size={16} /><span>{judgeDisplay}</span></div>
         </div>
       </section>
     </>}
     {error && <p className="error timer-error">{error}</p>}
-    <footer className="footer timer-footer"><span>Debate Control</span><button className="text-button" onClick={onRetry}><RefreshCw size={14} /> Actualizar estado</button></footer>
+    <footer className="footer timer-footer"><span>{snapshot?.tournamentName ? snapshot.tournamentName + ' · ' : ''}Debate Control</span><button className="text-button" onClick={onRetry}><RefreshCw size={14} /> Actualizar estado</button></footer>
   </main>;
 }
 let audioContext: AudioContext | null = null;
