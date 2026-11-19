@@ -206,14 +206,14 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
     if (!remoteToken) throw new Error('Inicia sesión para recuperar torneos desde Neon.');
     if (store.getState().status !== 'saved' && store.getState().tournament) throw new Error('Guarda o resuelve primero los cambios locales pendientes antes de cambiar de torneo.');
     const remote = await getTabulationSnapshot(remoteToken, id);
-    if (!remote || remote.tabTournamentId !== id || authoritativeRemote.snapshot.id !== id || remote.revision < 1 || !/^[a-f0-9]{64}$/.test(authoritativeRemote.snapshotSha256)) {
+    if (!remote || remote.tabTournamentId !== id || remote.snapshot.id !== id || remote.revision < 1 || !/^[a-f0-9]{64}$/.test(remote.snapshotSha256)) {
       throw new Error('El torneo no existe en Neon o no supera la validación de identidad e integridad.');
     }
     // Neon listing metadata is authoritative for the display name. The snapshot hash
     // has already been validated by getTabulationSnapshot before this normalization.
     const authoritativeRemote = {
       ...remote,
-      snapshot: { ...authoritativeRemote.snapshot, name: remote.tournamentName },
+      snapshot: { ...remote.snapshot, name: remote.tournamentName },
     };
     const syncLocalName = () => {
       const local = store.getState().tournament;
@@ -232,7 +232,7 @@ function TabulationShell({ embedded, onViewChange }: { embedded: boolean; onView
       const refreshed = store.getState().tournament;
       if (!refreshed) throw new Error('No se ha podido abrir el torneo local.');
       const differences = findSnapshotDifferences(refreshed, authoritativeRemote.snapshot);
-      remoteCursor.current = { id, revision: remote.revision, localRevision: differences.length ? -1 : current.tournament.revision, inFlight: false };
+      remoteCursor.current = { id, revision: remote.revision, localRevision: differences.length ? -1 : refreshed.revision, inFlight: false };
       if (!differences.length) {
         store.backup('Antes de recuperar «' + authoritativeRemote.snapshot.name + '» desde Neon');
         if (!store.update(() => authoritativeRemote.snapshot, { type: 'sync.remote', message: 'Versión de Neon recuperada desde la biblioteca', details: { revision: remote.revision } }) || !store.flush()) {
