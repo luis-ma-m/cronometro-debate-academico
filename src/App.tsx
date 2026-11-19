@@ -308,6 +308,7 @@ export default function App() {
         physicalRoomName: physical.name, activationRevision: fresh.activationRevision, activatedAt: fresh.activatedAt,
         teamFavor: fresh.teams.find((item) => item.id === emptyRoom.teamFavorId)?.name ?? '',
         teamContra: fresh.teams.find((item) => item.id === emptyRoom.teamContraId)?.name ?? '',
+        chairJudge: emptyRoom.judgeIds.length ? fresh.judges.find((item) => item.id === emptyRoom.judgeIds[0])?.name ?? '' : '',
         judges: emptyRoom.judgeIds.map((id) => fresh.judges.find((item) => item.id === id)?.name ?? '').filter(Boolean),
         serverTime: Date.now(), minimumJudgesPerRoom: fresh.minimumJudgesPerRoom,
       });
